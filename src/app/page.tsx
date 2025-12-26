@@ -1,3 +1,5 @@
+"use client";
+
 import ChatInput from "@/components/ChatInput";
 import Image from "next/image";
 import Link from "next/link";
@@ -8,7 +10,7 @@ export default function Home() {
       {/* Background */}
       <div className="background">
         <Image
-          src="/backgroundSymphny.jpg"
+          src="/app/backgroundSymphny.jpg"
           alt=""
           fill
           priority
@@ -22,7 +24,7 @@ export default function Home() {
       <header className="header">
         <div className="logo">
           <Image
-            src="/symphnyNavLogo.svg"
+            src="/app/symphnyNavLogo.svg"
             alt="Symphony"
             width={160}
             height={40}
@@ -37,18 +39,21 @@ export default function Home() {
       {/* Hero Content */}
       <section className="hero">
         <h1 className="headline">
-          Connecting <em>Data</em>,<br />
-          <em>Systems</em>, and <em>AI</em>.
+          Your Business, <em>Orchestrated</em>.
         </h1>
         
         <p className="subheadline">
-          Symphony helps businesses orchestrate AI so they can
-          operate as one seamless performance.
+          We design and operate coordinated systems that connect your tools,
+          automate workflows, and reduce operational friction.
         </p>
 
         <p className="chat-label">Ask Us Anything About Using AI for Your Business</p>
 
         <ChatInput />
+
+        <p className="chat-note">
+          This assistant uses live tool calls to query our data — no hallucinations.
+        </p>
       </section>
 
       <style jsx>{`
@@ -117,11 +122,11 @@ export default function Home() {
         }
 
         .headline {
-          font-size: clamp(2.5rem, 6vw, 4rem);
+          font-size: 63px;
           font-weight: 400;
           color: #fff;
           line-height: 1.15;
-          margin: 0 0 24px;
+          margin: 0 0 6px;
           letter-spacing: -0.02em;
         }
 
@@ -131,11 +136,11 @@ export default function Home() {
         }
 
         .subheadline {
-          font-size: clamp(1rem, 2vw, 1.25rem);
+          font-size: 22px;
           color: rgba(255, 255, 255, 0.85);
-          max-width: 550px;
+          max-width: 700px;
           line-height: 1.5;
-          margin: 0 0 48px;
+          margin: 0 0 47px;
         }
 
         .chat-label {
@@ -143,6 +148,13 @@ export default function Home() {
           color: rgba(255, 255, 255, 0.6);
           margin: 0 0 16px;
           letter-spacing: 0.02em;
+        }
+
+        .chat-note {
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.35);
+          margin: 12px 0 0;
+          letter-spacing: 0.01em;
         }
 
         @media (max-width: 768px) {

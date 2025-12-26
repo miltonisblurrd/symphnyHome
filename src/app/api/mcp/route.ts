@@ -308,7 +308,7 @@ function formatResponse(query: string, results: Record<string, unknown>): string
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await request.json() as { query?: string; tool?: string; params?: Record<string, unknown> };
     const { query, tool, params } = body;
 
     // Direct tool invocation (MCP-style)

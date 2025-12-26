@@ -134,8 +134,9 @@ function executeTool(name: string, input: Record<string, unknown>): string {
       return JSON.stringify(pricing);
 
     case "get_capabilities":
-      if (input.category && input.category in capabilities) {
-        return JSON.stringify(capabilities[input.category as keyof typeof capabilities]);
+      const category = input.category as string | undefined;
+      if (category && category in capabilities) {
+        return JSON.stringify(capabilities[category as keyof typeof capabilities]);
       }
       return JSON.stringify(capabilities);
 

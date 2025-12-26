@@ -313,7 +313,9 @@ export async function POST(request: NextRequest) {
 
     // Direct tool invocation (MCP-style)
     if (tool && tool in tools) {
-      const result = tools[tool as keyof typeof tools].handler(params);
+      const toolDef = tools[tool as keyof typeof tools];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = (toolDef.handler as (p?: any) => unknown)(params);
       return NextResponse.json({
         success: true,
         tool,

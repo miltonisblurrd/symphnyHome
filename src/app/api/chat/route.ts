@@ -218,7 +218,8 @@ When discussing pricing or services, ALWAYS use the tools to get current informa
 
 export async function POST(request: Request) {
   try {
-    const { messages } = await request.json();
+    const body = await request.json() as { messages?: { role: string; content: string }[] };
+    const { messages } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return new Response(

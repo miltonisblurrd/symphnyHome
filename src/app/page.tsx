@@ -39,15 +39,21 @@ export default function Home() {
       {/* Hero Content */}
       <section className="hero">
         <h1 className="headline">
-          Your Business, <em>Orchestrated</em>.
+          <span className="headline-line">
+            <span className="headline-inter">Orchestrating </span>
+            <span className="headline-mono">Data</span>
+          </span>
+          <span className="headline-line">
+            <span className="headline-inter">& </span>
+            <span className="headline-mono">Systems</span>
+            <span className="headline-inter">, with </span>
+            <span className="headline-mono">AI</span>
+          </span>
         </h1>
         
         <p className="subheadline">
-          We design and operate coordinated systems that connect your tools,
-          automate workflows, and reduce operational friction.
+          We conduct AI, tools, and workflows so your business performs as one.
         </p>
-
-        <p className="chat-label">Ask Us Anything About Using AI for Your Business</p>
 
         <ChatInput />
 
@@ -124,32 +130,37 @@ export default function Home() {
         }
 
         .headline {
-          font-size: 63px;
+          font-size: 68px;
           font-weight: 400;
           color: #fff;
-          line-height: 1.15;
+          line-height: 1.12;
           margin: 0 0 6px;
           letter-spacing: -0.02em;
         }
 
-        .headline em {
+        .headline-line {
+          display: block;
+        }
+
+        .headline-inter {
+          font-family: var(--font-inter), system-ui, sans-serif;
+          font-weight: 500;
+          font-style: normal;
+        }
+
+        .headline-mono {
+          font-family: var(--font-ibm-plex-mono), ui-monospace, monospace;
           font-style: italic;
           font-weight: 300;
         }
 
         .subheadline {
-          font-size: 22px;
+          font-size: 23px;
           color: rgba(255, 255, 255, 0.85);
-          max-width: 700px;
-          line-height: 1.5;
-          margin: 0 0 47px;
-        }
-
-        .chat-label {
-          font-size: 14px;
-          color: rgba(255, 255, 255, 0.6);
-          margin: 0 0 16px;
-          letter-spacing: 0.02em;
+          max-width: none;
+          width: 100%;
+          line-height: 1.45;
+          margin: 0 0 37px;
         }
 
         .chat-note {
@@ -179,7 +190,7 @@ export default function Home() {
           }
 
           .subheadline {
-            margin-bottom: 40px;
+            margin-bottom: 30px;
           }
         }
 
@@ -194,7 +205,7 @@ export default function Home() {
           }
 
           .headline {
-            font-size: 2rem;
+            font-size: 2.125rem;
           }
         }
       `}</style>

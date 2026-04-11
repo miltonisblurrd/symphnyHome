@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Inter } from "next/font/google";
+import { Geist, Geist_Mono, IBM_Plex_Mono, Inter } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({
@@ -17,10 +17,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: "300",
+  style: "italic",
+  variable: "--font-ibm-plex-mono",
+});
+
 export const metadata: Metadata = {
   title: "Symphony Studio",
   description:
-    "Design and operate coordinated systems that connect your tools, automate workflows, and reduce operational friction.",
+    "We conduct AI, tools, and workflows so your business performs as one.",
 };
 
 export default function RootLayout({
@@ -31,7 +38,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${ibmPlexMono.variable} ${inter.variable} antialiased`}
       >
         {children}
       </body>

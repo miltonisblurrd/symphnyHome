@@ -225,7 +225,7 @@ export default function ChatInput() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="How can I help you today?"
+          placeholder="Ask Us Anything About Using AI for Your Business"
           rows={1}
           disabled={isLoading}
         />

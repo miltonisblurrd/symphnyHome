@@ -7,9 +7,7 @@ import {
   contact,
   faq,
   philosophy,
-  buyingSignals,
   llmGuidance,
-  successMetrics,
 } from "@/data/studio-data";
 
 // MCP Tool Definitions

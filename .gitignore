@@ -42,6 +42,3 @@ next-env.d.ts
 # wrangler files
 .wrangler
 .dev.vars*
-
-# webflow cli build artifacts
-.tmp/

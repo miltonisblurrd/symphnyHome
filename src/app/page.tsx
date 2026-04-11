@@ -10,7 +10,7 @@ export default function Home() {
       {/* Background */}
       <div className="background">
         <Image
-          src="/app/backgroundSymphny.jpg"
+          src="/backgroundSymphny.jpg"
           alt=""
           fill
           priority
@@ -24,7 +24,7 @@ export default function Home() {
       <header className="header">
         <div className="logo">
           <Image
-            src="/app/symphnyNavLogo.svg"
+            src="/symphnyNavLogo.svg"
             alt="Symphony"
             width={160}
             height={40}

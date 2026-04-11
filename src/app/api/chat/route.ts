@@ -1,24 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { 
-  services, 
-  pricing, 
-  capabilities, 
-  caseStudies, 
-  contact, 
-  faq,
-  philosophy,
-  llmGuidance,
-} from "@/data/studio-data";
+import { executeClaudeToolCall } from "@/mcp/claude-tool-bridge";
+import { llmGuidance, philosophy } from "@/data/studio-data";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Define tools for Claude to call
+// Anthropic tools (snake_case args) — execution goes through runStudioTool via claude-tool-bridge
 const tools: Anthropic.Tool[] = [
   {
     name: "get_services",
-    description: "Get information about Symphony Studio's services including workflow automation, AI agents, and enterprise orchestration",
+    description:
+      "Get information about Symphony Studio's services including workflow automation, AI agents, and enterprise orchestration",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -46,7 +39,8 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: "get_capabilities",
-    description: "Get technical capabilities including system integrations, automation features, AI capabilities, and enterprise features",
+    description:
+      "Get technical capabilities including system integrations, automation features, AI capabilities, and enterprise features",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -96,6 +90,15 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_philosophy",
+    description: "Get Symphony Studio's design philosophy, principles, and automation criteria",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: "recommend_tier",
     description: "Get a tier recommendation based on the client's needs and complexity",
     input_schema: {
@@ -110,89 +113,16 @@ const tools: Anthropic.Tool[] = [
           type: "string",
           description: "Complexity level (low, medium, high)",
         },
+        team_size: {
+          type: "string",
+          description: "Optional team size hint",
+        },
       },
       required: [],
     },
   },
 ];
 
-// Execute tool calls
-function executeTool(name: string, input: Record<string, unknown>): string {
-  switch (name) {
-    case "get_services":
-      if (input.service_id) {
-        const service = services.find((s) => s.id === input.service_id);
-        return JSON.stringify(service || { error: "Service not found" });
-      }
-      return JSON.stringify(services);
-
-    case "get_pricing":
-      if (input.tier_id) {
-        const tier = pricing.find((p) => p.id === input.tier_id);
-        return JSON.stringify(tier || { error: "Tier not found" });
-      }
-      return JSON.stringify(pricing);
-
-    case "get_capabilities":
-      const category = input.category as string | undefined;
-      if (category && category in capabilities) {
-        return JSON.stringify(capabilities[category as keyof typeof capabilities]);
-      }
-      return JSON.stringify(capabilities);
-
-    case "get_case_studies":
-      if (input.case_id) {
-        const study = caseStudies.find((c) => c.id === input.case_id);
-        return JSON.stringify(study || { error: "Case study not found" });
-      }
-      return JSON.stringify(caseStudies);
-
-    case "get_contact":
-      return JSON.stringify(contact);
-
-    case "get_faq":
-      if (typeof input.question_index === "number") {
-        return JSON.stringify(faq[input.question_index] || { error: "FAQ not found" });
-      }
-      return JSON.stringify(faq);
-
-    case "recommend_tier":
-      const needs = (input.needs as string[]) || [];
-      const complexity = input.complexity as string;
-      
-      // Simple recommendation logic
-      if (needs.some(n => 
-        n.toLowerCase().includes("security") || 
-        n.toLowerCase().includes("compliance") ||
-        n.toLowerCase().includes("enterprise")
-      ) || complexity === "high") {
-        return JSON.stringify({
-          recommended: "symphony-enterprise",
-          reason: "Enterprise environments with security/compliance needs require custom discovery",
-          tier: pricing.find(p => p.id === "symphony-enterprise"),
-        });
-      }
-      
-      if (complexity === "medium" || needs.length > 2) {
-        return JSON.stringify({
-          recommended: "concerto",
-          reason: "Multiple workflows and growing complexity fits Concerto",
-          tier: pricing.find(p => p.id === "concerto"),
-        });
-      }
-      
-      return JSON.stringify({
-        recommended: "prelude",
-        reason: "Simple workflows and small teams fit Prelude",
-        tier: pricing.find(p => p.id === "prelude"),
-      });
-
-    default:
-      return JSON.stringify({ error: "Unknown tool" });
-  }
-}
-
-// Compact system prompt (tools provide the data now)
 const systemPrompt = `You are the AI assistant for Symphony Studio, an automation and AI orchestration studio.
 
 ## Your Role
@@ -229,11 +159,10 @@ export async function POST(request: Request) {
     }
 
     const encoder = new TextEncoder();
-    
+
     const readable = new ReadableStream({
       async start(controller) {
         try {
-          // Initial request to Claude with tools
           let response = await client.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 1024,
@@ -245,32 +174,34 @@ export async function POST(request: Request) {
             })),
           });
 
-          // Collect tool calls and results
-          const toolCalls: { name: string; result: string }[] = [];
+          let toolRoundCount = 0;
 
-          // Handle tool use loop
           while (response.stop_reason === "tool_use") {
             const toolUseBlocks = response.content.filter(
               (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
             );
 
-            // Send tool call indicators
+            const resultsByToolUseId: Record<string, string> = {};
+
             for (const toolUse of toolUseBlocks) {
               const toolName = toolUse.name.replace(/_/g, " ").replace("get ", "");
               controller.enqueue(encoder.encode(`[TOOL:${toolName}]`));
-              
-              const result = executeTool(toolUse.name, toolUse.input as Record<string, unknown>);
-              toolCalls.push({ name: toolUse.name, result });
+
+              const result = executeClaudeToolCall(
+                toolUse.name,
+                toolUse.input as Record<string, unknown>
+              );
+              resultsByToolUseId[toolUse.id] = result;
             }
 
-            // Build tool results
+            toolRoundCount += toolUseBlocks.length;
+
             const toolResults: Anthropic.ToolResultBlockParam[] = toolUseBlocks.map((toolUse) => ({
               type: "tool_result" as const,
               tool_use_id: toolUse.id,
-              content: executeTool(toolUse.name, toolUse.input as Record<string, unknown>),
+              content: resultsByToolUseId[toolUse.id],
             }));
 
-            // Continue conversation with tool results
             response = await client.messages.create({
               model: "claude-sonnet-4-20250514",
               max_tokens: 1024,
@@ -287,12 +218,10 @@ export async function POST(request: Request) {
             });
           }
 
-          // Send end of tool calls marker
-          if (toolCalls.length > 0) {
+          if (toolRoundCount > 0) {
             controller.enqueue(encoder.encode("[TOOL:done]"));
           }
 
-          // Extract and send the final text response
           const textBlocks = response.content.filter(
             (block): block is Anthropic.TextBlock => block.type === "text"
           );

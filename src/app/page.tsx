@@ -52,7 +52,9 @@ export default function Home() {
         <ChatInput />
 
         <p className="chat-note">
-          This assistant uses live tool calls to query our data — no hallucinations.
+          Tools read our live studio data — not guesses. Same implementation as our MCP server:{" "}
+          <code className="chat-note-code">/api/mcp/http</code> (Streamable HTTP) or{" "}
+          <code className="chat-note-code">npm run mcp:stdio</code>.
         </p>
       </section>
 
@@ -155,6 +157,16 @@ export default function Home() {
           color: rgba(255, 255, 255, 0.35);
           margin: 12px 0 0;
           letter-spacing: 0.01em;
+          max-width: 520px;
+          line-height: 1.45;
+        }
+
+        .chat-note-code {
+          font-size: 10px;
+          color: rgba(255, 255, 255, 0.55);
+          background: rgba(255, 255, 255, 0.08);
+          padding: 1px 5px;
+          border-radius: 4px;
         }
 
         @media (max-width: 768px) {

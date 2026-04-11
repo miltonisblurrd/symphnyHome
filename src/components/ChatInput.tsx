@@ -16,13 +16,14 @@ const agents = [
 
 // Map tool names to friendly display names
 const toolDisplayNames: Record<string, string> = {
-  "services": "Checking services",
-  "pricing": "Fetching pricing",
-  "capabilities": "Looking up capabilities",
-  "case_studies": "Finding case studies",
-  "contact": "Getting contact info",
-  "faq": "Searching FAQ",
-  "recommend_tier": "Analyzing your needs",
+  services: "Checking services",
+  pricing: "Fetching pricing",
+  capabilities: "Looking up capabilities",
+  case_studies: "Finding case studies",
+  contact: "Getting contact info",
+  faq: "Searching FAQ",
+  philosophy: "Loading philosophy",
+  recommend_tier: "Analyzing your needs",
 };
 
 export default function ChatInput() {

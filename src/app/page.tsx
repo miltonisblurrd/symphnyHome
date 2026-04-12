@@ -7,17 +7,29 @@ import Link from "next/link";
 export default function Home() {
   return (
     <main className="page">
-      {/* Background */}
+      {/* Metal → vignette → glass on top (glass must sit above overlay or it disappears) */}
       <div className="background">
-        <Image
-          src="/backgroundSymphny.jpg"
-          alt=""
-          fill
-          priority
-          quality={90}
-          style={{ objectFit: "cover" }}
-        />
+        <div className="background-metal background-metal-drift" aria-hidden>
+          <Image
+            src="/hero-liquid-metal.jpg"
+            alt=""
+            fill
+            priority
+            quality={92}
+            sizes="100vw"
+            style={{ objectFit: "cover" }}
+          />
+        </div>
         <div className="background-overlay" />
+        <div className="background-grid" aria-hidden>
+          {/* Native img: Next/Image can re-encode PNGs and crush faint glass/grid alpha */}
+          <img
+            src="/hero-glass-grid.png"
+            alt=""
+            decoding="async"
+            fetchPriority="high"
+          />
+        </div>
       </div>
 
       {/* Header */}
@@ -76,17 +88,74 @@ export default function Home() {
           position: fixed;
           inset: 0;
           z-index: -1;
+          isolation: isolate;
+        }
+
+        .background-metal {
+          position: absolute;
+          inset: 0;
+          z-index: 0;
+          overflow: hidden;
+          will-change: transform;
+        }
+
+        .background-metal-drift {
+          animation: metalDrift 34s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+        }
+
+        /* Organic loop: uneven pacing reads less “slider” than two-point alternate */
+        @keyframes metalDrift {
+          0%,
+          100% {
+            transform: scale(1.04) translate(-2.8%, -2.2%) rotate(-0.45deg);
+          }
+          22% {
+            transform: scale(1.09) translate(1.4%, -1.1%) rotate(0.2deg);
+          }
+          48% {
+            transform: scale(1.13) translate(2.8%, 1.9%) rotate(0.42deg);
+          }
+          72% {
+            transform: scale(1.1) translate(-1.2%, 2.4%) rotate(-0.18deg);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .background-metal-drift {
+            animation: none;
+          }
         }
 
         .background-overlay {
           position: absolute;
           inset: 0;
+          z-index: 1;
           background: linear-gradient(
             180deg,
-            rgba(0, 0, 0, 0.3) 0%,
-            rgba(0, 0, 0, 0.1) 50%,
-            rgba(0, 0, 0, 0.4) 100%
+            rgba(0, 0, 0, 0.24) 0%,
+            rgba(0, 0, 0, 0.07) 45%,
+            rgba(0, 0, 0, 0.34) 100%
           );
+        }
+
+        .background-grid {
+          position: absolute;
+          inset: 0;
+          z-index: 2;
+          pointer-events: none;
+        }
+
+        .background-grid :global(img) {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          object-position: center;
+          display: block;
+          opacity: 1;
+          /* Figma glass layers are often faint; lift until grid reads (tune down if harsh) */
+          filter: contrast(1.45) brightness(1.35);
         }
 
         .header {
@@ -104,19 +173,37 @@ export default function Home() {
         }
 
         .cta-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           padding: 12px 24px;
-          background: #1a1a1a;
-          color: #fff;
+          border: none;
+          background: linear-gradient(180deg, #f0d2a8 0%, #e4b87a 45%, #d9a86a 100%);
+          color: #141414;
           text-decoration: none;
           border-radius: 8px;
           font-size: 14px;
-          font-weight: 500;
-          transition: all 0.2s ease;
+          font-weight: 600;
+          letter-spacing: 0.01em;
+          cursor: pointer;
+          transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease,
+            transform 0.15s ease;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.45),
+            0 1px 2px rgba(0, 0, 0, 0.18);
         }
 
         .cta-button:hover {
-          background: #333;
+          background: linear-gradient(180deg, #f8e0bc 0%, #ecc88e 50%, #e2bc7c 100%);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.55),
+            0 2px 6px rgba(0, 0, 0, 0.15);
           transform: translateY(-1px);
+        }
+
+        .cta-button:focus-visible {
+          outline: 2px solid #141414;
+          outline-offset: 2px;
         }
 
         .hero {

@@ -225,7 +225,7 @@ export default function ChatInput() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Us Anything About Using AI for Your Business"
+          placeholder="Ask about coordination, operations, or whether Symphony is a fit"
           rows={1}
           disabled={isLoading}
         />

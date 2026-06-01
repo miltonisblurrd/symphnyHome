@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, IBM_Plex_Mono, Inter } from "next/font/google";
+import { brand } from "@/data/studio-data";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,8 +27,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Symphony Studio",
-  description:
-    "We conduct AI, tools, and workflows so your business performs as one.",
+  description: brand.tagline,
 };
 
 export default function RootLayout({

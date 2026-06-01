@@ -1,8 +1,10 @@
 "use client";
 
 import ChatInput from "@/components/ChatInput";
+import SiteFooter from "@/components/site/SiteFooter";
+import SiteHeader from "@/components/site/SiteHeader";
+import { brand } from "@/data/studio-data";
 import Image from "next/image";
-import Link from "next/link";
 
 export default function Home() {
   return (
@@ -32,21 +34,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Header */}
-      <header className="header">
-        <div className="logo">
-          <Image
-            src="/symphnyNavLogo.svg"
-            alt="Symphony"
-            width={160}
-            height={40}
-            priority
-          />
-        </div>
-        <Link href="https://symphonystudio.io/enterprise" className="cta-button">
-          Give Us a Call
-        </Link>
-      </header>
+      <SiteHeader variant="dark" />
 
       {/* Hero Content */}
       <section className="hero">
@@ -64,17 +52,20 @@ export default function Home() {
         </h1>
         
         <p className="subheadline">
-          We conduct AI, tools, and workflows so your business performs as one.
+          {brand.heroSubhead}
         </p>
 
         <ChatInput />
 
         <p className="chat-note">
-          Tools read our live studio data — not guesses. Same implementation as our MCP server:{" "}
+          Answers draw from live studio data—the same source as our orchestration layer. Technical
+          access:{" "}
           <code className="chat-note-code">/api/mcp/http</code> (Streamable HTTP) or{" "}
           <code className="chat-note-code">npm run mcp:stdio</code>.
         </p>
       </section>
+
+      <SiteFooter />
 
       <style jsx>{`
         .page {
@@ -158,54 +149,6 @@ export default function Home() {
           filter: contrast(1.45) brightness(1.35);
         }
 
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 24px 48px;
-          position: relative;
-          z-index: 10;
-        }
-
-        .logo {
-          display: flex;
-          align-items: center;
-        }
-
-        .cta-button {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          padding: 12px 24px;
-          border: none;
-          background: linear-gradient(180deg, #f0d2a8 0%, #e4b87a 45%, #d9a86a 100%);
-          color: #141414;
-          text-decoration: none;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 600;
-          letter-spacing: 0.01em;
-          cursor: pointer;
-          transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease,
-            transform 0.15s ease;
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.45),
-            0 1px 2px rgba(0, 0, 0, 0.18);
-        }
-
-        .cta-button:hover {
-          background: linear-gradient(180deg, #f8e0bc 0%, #ecc88e 50%, #e2bc7c 100%);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.55),
-            0 2px 6px rgba(0, 0, 0, 0.15);
-          transform: translateY(-1px);
-        }
-
-        .cta-button:focus-visible {
-          outline: 2px solid #141414;
-          outline-offset: 2px;
-        }
-
         .hero {
           flex: 1;
           display: flex;
@@ -242,12 +185,13 @@ export default function Home() {
         }
 
         .subheadline {
-          font-size: 23px;
+          font-size: 19px;
           color: rgba(255, 255, 255, 0.85);
-          max-width: none;
+          max-width: 720px;
           width: 100%;
-          line-height: 1.45;
-          margin: 0 0 37px;
+          margin: 0 auto 32px;
+          padding: 0;
+          line-height: 1.32;
         }
 
         .chat-note {
@@ -268,29 +212,18 @@ export default function Home() {
         }
 
         @media (max-width: 768px) {
-          .header {
-            padding: 20px 24px;
-          }
-
           .hero {
             padding: 32px 20px 60px;
           }
 
           .subheadline {
+            font-size: 17px;
+            max-width: 100%;
             margin-bottom: 30px;
           }
         }
 
         @media (max-width: 480px) {
-          .header {
-            padding: 16px 20px;
-          }
-
-          .cta-button {
-            padding: 10px 18px;
-            font-size: 13px;
-          }
-
           .headline {
             font-size: 2.125rem;
           }

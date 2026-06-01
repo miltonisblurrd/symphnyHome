@@ -6,6 +6,8 @@ import {
   contact,
   faq,
   philosophy,
+  brand,
+  symphonyModel,
   llmGuidance,
 } from "@/data/studio-data";
 
@@ -87,8 +89,8 @@ export const studioTools: Record<StudioToolName, StudioToolEntry> = {
     },
   },
   get_philosophy: {
-    description: "Get Symphony Studio's design philosophy and principles",
-    handler: () => philosophy,
+    description: "Get Symphony Studio's brand positioning, design philosophy, principles, and symphony model",
+    handler: () => ({ brand, philosophy, symphonyModel }),
   },
   recommend_tier: {
     description: "Get a tier recommendation based on needs",

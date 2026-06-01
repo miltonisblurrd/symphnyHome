@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { executeClaudeToolCall } from "@/mcp/claude-tool-bridge";
-import { llmGuidance, philosophy } from "@/data/studio-data";
+import { llmGuidance, philosophy, brand } from "@/data/studio-data";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -11,7 +11,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "get_services",
     description:
-      "Get information about Symphony Studio's services including workflow automation, AI agents, and enterprise orchestration",
+      "Get information about Symphony Studio's orchestration services: workflow coordination, AI performers, and enterprise orchestration layers",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -91,7 +91,7 @@ const tools: Anthropic.Tool[] = [
   },
   {
     name: "get_philosophy",
-    description: "Get Symphony Studio's design philosophy, principles, and automation criteria",
+    description: "Get Symphony Studio's brand positioning, philosophy, principles, and symphony orchestration model",
     input_schema: {
       type: "object" as const,
       properties: {},
@@ -123,13 +123,18 @@ const tools: Anthropic.Tool[] = [
   },
 ];
 
-const systemPrompt = `You are the AI assistant for Symphony Studio, an automation and AI orchestration studio.
+const systemPrompt = `You are the AI assistant for Symphony Studio—the conductor that helps businesses perform at their best through orchestration, not by selling software, AI, or automation.
+
+## Brand (always align with this)
+Tagline: ${brand.tagline}
+Pillars: ${brand.pillars.join(", ")}
 
 ## Your Role
-Help visitors understand Symphony Studio by querying the available tools for accurate information. Don't make up information - use the tools to get real data.
+Help visitors understand Symphony Studio by querying tools for accurate information. Symphony solves coordination problems—talented teams and capable tools that still feel chaotic because nothing plays together. Don't make up information—use the tools.
 
 ## Response Style
 - Professional but warm
+- Lead with coordination and clarity, not AI hype
 - Concise (2-3 sentence paragraphs max)
 - Use bullet points for lists
 - Don't repeat questions back

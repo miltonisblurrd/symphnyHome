@@ -9,6 +9,8 @@ import {
   contact,
   faq,
   philosophy,
+  brand,
+  symphonyModel,
   llmGuidance,
   buyingSignals,
   successMetrics,
@@ -74,7 +76,7 @@ const STATIC_DEFS = [
     name: "symphony-philosophy",
     uri: "symphony://studio/philosophy",
     description: "Design philosophy and principles (JSON)",
-    getData: () => philosophy,
+    getData: () => ({ brand, philosophy, symphonyModel }),
   },
   {
     name: "symphony-llm-guidance",

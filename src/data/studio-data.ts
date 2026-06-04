@@ -243,8 +243,9 @@ export const caseStudies = [
 
 export const contact = {
   email: "hello@symphonystudio.io",
-  booking: "https://symphonystudio.io/enterprise",
-  location: "Remote / US-based",
+  booking:
+    process.env.NEXT_PUBLIC_BOOKING_URL ?? "https://calendly.com/symphonystudio/discovery",
+  location: "Nevada, United States · Remote delivery",
   cta: "Book a discovery call",
 };
 

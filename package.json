@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "clean": "rm -rf .next",
+    "predev": "test -f .next/BUILD_ID && rm -rf .next || true",
     "dev": "next dev",
     "dev:clean": "npm run clean && next dev",
     "build": "next build",

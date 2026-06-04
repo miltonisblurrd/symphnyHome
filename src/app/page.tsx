@@ -1,6 +1,7 @@
 "use client";
 
 import ChatInput from "@/components/ChatInput";
+import DynamicGlassGrid from "@/components/DynamicGlassGrid";
 import SiteFooter from "@/components/site/SiteFooter";
 import SiteHeader from "@/components/site/SiteHeader";
 import { brand } from "@/data/studio-data";
@@ -9,7 +10,7 @@ import Image from "next/image";
 export default function Home() {
   return (
     <main className="page">
-      {/* Metal → vignette → glass on top (glass must sit above overlay or it disappears) */}
+      {/* Metal → frost (backdrop blur) → grid lines → vignette; hero UI sits above .background */}
       <div className="background">
         <div className="background-metal background-metal-drift" aria-hidden>
           <Image
@@ -22,16 +23,10 @@ export default function Home() {
             style={{ objectFit: "cover" }}
           />
         </div>
-        <div className="background-overlay" />
-        <div className="background-grid" aria-hidden>
-          {/* Native img: Next/Image can re-encode PNGs and crush faint glass/grid alpha */}
-          <img
-            src="/hero-glass-grid.png"
-            alt=""
-            decoding="async"
-            fetchPriority="high"
-          />
-        </div>
+        <div className="background-frost" aria-hidden />
+        <DynamicGlassGrid />
+        <div className="background-shimmer background-shimmer-drift" aria-hidden />
+        <div className="background-overlay" aria-hidden />
       </div>
 
       <SiteHeader variant="dark" />
@@ -115,38 +110,91 @@ export default function Home() {
           .background-metal-drift {
             animation: none;
           }
+
+          .background-shimmer-drift {
+            animation: none;
+          }
+        }
+
+        /* Frosted glass: light blur + subtle white tint */
+        .background-frost {
+          position: absolute;
+          inset: 0;
+          z-index: 1;
+          pointer-events: none;
+          background: rgba(255, 255, 255, 0.038);
+          backdrop-filter: blur(5px) saturate(1.1);
+          -webkit-backdrop-filter: blur(5px) saturate(1.1);
+        }
+
+        /* Diagonal glass streak + soft top-left glow (Figma shimmer) */
+        .background-shimmer {
+          position: absolute;
+          inset: -8%;
+          z-index: 3;
+          pointer-events: none;
+          mix-blend-mode: soft-light;
+          opacity: 0.72;
+          background:
+            linear-gradient(
+              118deg,
+              transparent 40%,
+              rgba(170, 195, 255, 0.12) 43.8%,
+              rgba(255, 255, 255, 0.55) 45.2%,
+              rgba(255, 252, 240, 0.75) 45.8%,
+              rgba(255, 255, 255, 0.35) 46.4%,
+              rgba(180, 210, 255, 0.1) 47.5%,
+              transparent 51%
+            ),
+            radial-gradient(
+              ellipse 70% 55% at 10% 6%,
+              rgba(255, 225, 185, 0.22) 0%,
+              transparent 58%
+            ),
+            linear-gradient(
+              180deg,
+              transparent 58%,
+              rgba(255, 255, 255, 0.07) 64%,
+              transparent 72%
+            );
+        }
+
+        .background-shimmer-drift {
+          animation: shimmerDrift 28s ease-in-out infinite;
+        }
+
+        @keyframes shimmerDrift {
+          0%,
+          100% {
+            transform: translate(-0.6%, 0.2%) rotate(-0.15deg);
+            opacity: 0.68;
+          }
+          50% {
+            transform: translate(0.8%, -0.4%) rotate(0.12deg);
+            opacity: 0.82;
+          }
         }
 
         .background-overlay {
           position: absolute;
           inset: 0;
-          z-index: 1;
-          background: linear-gradient(
-            180deg,
-            rgba(0, 0, 0, 0.24) 0%,
-            rgba(0, 0, 0, 0.07) 45%,
-            rgba(0, 0, 0, 0.34) 100%
-          );
-        }
-
-        .background-grid {
-          position: absolute;
-          inset: 0;
-          z-index: 2;
+          z-index: 4;
           pointer-events: none;
+          background:
+            linear-gradient(90deg, transparent 72%, rgba(0, 0, 0, 0.55) 100%),
+            linear-gradient(
+              180deg,
+              rgba(0, 0, 0, 0.52) 0%,
+              rgba(0, 0, 0, 0.24) 45%,
+              rgba(0, 0, 0, 0.62) 100%
+            );
         }
 
-        .background-grid :global(img) {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          object-position: center;
-          display: block;
-          opacity: 1;
-          /* Figma glass layers are often faint; lift until grid reads (tune down if harsh) */
-          filter: contrast(1.45) brightness(1.35);
+        @media (max-width: 768px) {
+          .background-frost {
+            backdrop-filter: blur(3.5px) saturate(1.08);
+            -webkit-backdrop-filter: blur(3.5px) saturate(1.08);
+          }
         }
 
         .hero {

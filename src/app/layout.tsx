@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, IBM_Plex_Mono, Inter } from "next/font/google";
 import { brand } from "@/data/studio-data";
+import { siteConfig } from "@/lib/site-config";
 import "./globals.css";
 
 const inter = Inter({
@@ -20,14 +21,28 @@ const geistMono = Geist_Mono({
 
 const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
-  weight: "300",
-  style: "italic",
+  weight: ["300", "500"],
+  style: ["italic", "normal"],
   variable: "--font-ibm-plex-mono",
 });
 
 export const metadata: Metadata = {
-  title: "Symphony Studio",
+  title: {
+    default: siteConfig.name,
+    template: `%s | ${siteConfig.name}`,
+  },
   description: brand.tagline,
+  metadataBase: new URL(siteConfig.url),
+  icons: { icon: "/favicon.svg" },
+  openGraph: {
+    title: siteConfig.name,
+    description: brand.tagline,
+    url: siteConfig.url,
+    siteName: siteConfig.name,
+    images: [{ url: siteConfig.ogImage, width: 1200, height: 630 }],
+    locale: "en_US",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { brand } from "@/data/studio-data";
+import { siteConfig } from "@/lib/site-config";
 
 type PageContent = {
   title: string;
@@ -11,9 +11,10 @@ type PageContent = {
 export const pageContent = {
   about: {
     title: "About Us",
-    description: brand.tagline,
+    description:
+      "Where technology meets harmony. Symphony Studio orchestrates systems, workflows, and intelligence so businesses perform at their best.",
     lead:
-      "Individual talent means nothing without coordination. Symphony Studio is the conductor—aligning your tools, workflows, and intelligence so the whole business performs as one.",
+      "Symphony Studio helps businesses perform at their best by orchestrating the systems, workflows, and intelligence that drive modern operations.",
   },
   howItWorks: {
     title: "How It Works",
@@ -106,10 +107,48 @@ export const pageContent = {
   },
 } as const satisfies Record<string, PageContent>;
 
+const pagePaths: Record<keyof typeof pageContent, string> = {
+  about: "/about",
+  howItWorks: "/how-it-works",
+  pricing: "/pricing",
+  enterprise: "/enterprise",
+  solutions: "/solutions",
+  caseStudies: "/case-studies",
+  contact: "/contact",
+  safety: "/safety",
+  security: "/security",
+  trust: "/trust",
+  faq: "/faq",
+  news: "/news",
+  careers: "/careers",
+  howToVideos: "/how-to-videos",
+  terms: "/terms",
+  privacy: "/privacy",
+};
+
 export function buildMetadata(key: keyof typeof pageContent): Metadata {
   const page = pageContent[key];
+  const title = `${page.title} | Symphony Studio`;
+  const url = `${siteConfig.url.replace(/\/$/, "")}${pagePaths[key]}`;
+
   return {
-    title: `${page.title} | Symphony Studio`,
+    title,
     description: page.description,
+    metadataBase: new URL(siteConfig.url),
+    openGraph: {
+      title,
+      description: page.description,
+      url,
+      siteName: siteConfig.name,
+      images: [{ url: siteConfig.ogImage, width: 1200, height: 630, alt: siteConfig.name }],
+      locale: "en_US",
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description: page.description,
+      images: [siteConfig.ogImage],
+    },
   };
 }

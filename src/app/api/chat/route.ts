@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { executeClaudeToolCall } from "@/mcp/claude-tool-bridge";
 import { llmGuidance, philosophy, brand } from "@/data/studio-data";
+import { getClientIp, rateLimit } from "@/lib/rate-limit";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -151,9 +152,29 @@ ${JSON.stringify(llmGuidance.boundaries)}
 
 When discussing pricing or services, ALWAYS use the tools to get current information. For getting started, direct people to book a discovery call.`;
 
+const CHAT_LIMIT = 40;
+const CHAT_WINDOW_MS = 60 * 60 * 1000;
+
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { messages?: { role: string; content: string }[] };
+    const ip = getClientIp(request);
+    const rl = rateLimit(`chat:${ip}`, CHAT_LIMIT, CHAT_WINDOW_MS);
+    if (!rl.ok) {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded. Try again later." }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+          },
+        }
+      );
+    }
+
+    const body = (await request.json()) as {
+      messages?: { role: string; content: string }[];
+    };
     const { messages } = body;
 
     if (!messages || !Array.isArray(messages)) {

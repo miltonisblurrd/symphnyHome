@@ -43,6 +43,20 @@ npm run deploy
 
 4. Attach your custom domain in the Cloudflare dashboard to the worker defined in [`wrangler.json`](wrangler.json).
 
+5. Set environment variables (see [`docs/LAUNCH.md`](docs/LAUNCH.md)):
+   - `NEXT_PUBLIC_SITE_URL`
+   - `NEXT_PUBLIC_BOOKING_URL`
+   - `ANTHROPIC_API_KEY`
+   - `CONTACT_WEBHOOK_URL` (optional)
+
+## Hero images
+
+Orchestra + dithered-code heroes are in `public/heroes/`. Per-page assignment is in [`src/data/marketing-heroes.ts`](src/data/marketing-heroes.ts).
+
+## Legal
+
+Full Terms and Privacy (Nevada) are at `/terms` and `/privacy`. Source: [`src/data/legal-content.ts`](src/data/legal-content.ts). Have an attorney review before production reliance.
+
 ## Scripts
 
 | Command | Purpose |

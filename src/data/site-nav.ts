@@ -53,6 +53,6 @@ export const footerColumns: FooterColumn[] = [
 ];
 
 export const headerCta = {
-  label: "Give Us a Call",
+  label: "Book a discovery call",
   href: "/contact",
 };

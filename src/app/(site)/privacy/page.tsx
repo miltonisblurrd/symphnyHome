@@ -1,18 +1,15 @@
-import MarketingPage from "@/components/site/MarketingPage";
-import styles from "@/components/site/site.module.css";
-import { buildMetadata, pageContent } from "@/data/site-content";
+import LegalDocument from "@/components/site/LegalDocument";
+import MarketingPageShell from "@/components/site/MarketingPageShell";
+import { privacySections } from "@/data/legal-content";
+import { marketingHeroes } from "@/data/marketing-heroes";
+import { buildMetadata } from "@/data/site-content";
 
 export const metadata = buildMetadata("privacy");
 
 export default function PrivacyPage() {
-  const content = pageContent.privacy;
-
   return (
-    <MarketingPage title={content.title}>
-      <p className={styles.draftNotice}>Draft — for attorney review.</p>
-      <section className={styles.marketingSection}>
-        <p>{content.stub}</p>
-      </section>
-    </MarketingPage>
+    <MarketingPageShell hero={marketingHeroes.privacy}>
+      <LegalDocument sections={privacySections} />
+    </MarketingPageShell>
   );
 }

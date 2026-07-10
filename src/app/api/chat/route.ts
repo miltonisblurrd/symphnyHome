@@ -7,6 +7,8 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+const CHAT_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
+
 // Anthropic tools (snake_case args) — execution goes through runStudioTool via claude-tool-bridge
 const tools: Anthropic.Tool[] = [
   {
@@ -190,7 +192,7 @@ export async function POST(request: Request) {
       async start(controller) {
         try {
           let response = await client.messages.create({
-            model: "claude-sonnet-4-20250514",
+            model: CHAT_MODEL,
             max_tokens: 1024,
             system: systemPrompt,
             tools: tools,
@@ -229,7 +231,7 @@ export async function POST(request: Request) {
             }));
 
             response = await client.messages.create({
-              model: "claude-sonnet-4-20250514",
+              model: CHAT_MODEL,
               max_tokens: 1024,
               system: systemPrompt,
               tools: tools,

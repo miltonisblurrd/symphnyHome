@@ -1,0 +1,45 @@
+{
+  "id": "business-has-a-brain",
+  "slug": "business-has-a-brain",
+  "title": "What Happens When a Business Has a Brain?",
+  "description": "A business brain is governed orchestration—not a chatbot. See how Symphony MCP grounds AI in live operations through behavior you can audit and trust.",
+  "primaryKeyword": "business brain MCP AI operations",
+  "secondaryKeywords": [
+    "governed AI business context",
+    "MCP enterprise operations",
+    "AI orchestra pit data access",
+    "business brain vs chatbot"
+  ],
+  "aeQueries": [
+    "What is a business brain vs a chatbot?",
+    "What does Symphony MCP do for operations?",
+    "How do I evaluate AI that knows our business?",
+    "Why do internal AI assistants hallucinate company facts?",
+    "What is governed access for AI in enterprise?",
+    "Do we need developers or operators to trust a business brain?",
+    "How is MCP different from RAG on documents?",
+    "What breaks without an orchestra pit for AI?"
+  ],
+  "theme": 3,
+  "themeLabel": "AI in Production",
+  "type": "video",
+  "day": 3,
+  "workflow": "reference-first",
+  "priority": 4,
+  "published": false,
+  "publishedAt": null,
+  "readingTimeMinutes": 9,
+  "canonicalPath": "/news/business-has-a-brain",
+  "schema": {
+    "articleType": "BlogPosting",
+    "faqCount": 19,
+    "howToSteps": 6
+  },
+  "cta": { "label": "Book a discovery call", "href": "/contact" },
+  "internalLinks": ["/how-it-works", "/contact", "/faq", "/enterprise", "/pricing"],
+  "youtubeChapters": [
+    { "time": "0:00", "title": "Brain vs chatbot" },
+    { "time": "3:00", "title": "Live behavior demo" },
+    { "time": "7:00", "title": "What to require + CTA" }
+  ]
+}

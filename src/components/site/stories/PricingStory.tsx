@@ -3,6 +3,7 @@ import SiteSection from "@/components/site/sections/SiteSection";
 import SiteReveal from "@/components/site/SiteReveal";
 import { brand } from "@/data/studio-data";
 import { pricing } from "@/data/studio-data";
+import { siteConfig } from "@/lib/site-config";
 import styles from "../site.module.css";
 
 export default function PricingStory() {
@@ -46,6 +47,15 @@ export default function PricingStory() {
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
+
+                <a
+                  href={siteConfig.bookingUrl}
+                  className={styles.siteCtaPrimary}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Book discovery call
+                </a>
               </article>
             </SiteReveal>
           ))}

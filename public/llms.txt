@@ -1,0 +1,29 @@
+# Symphony Studio
+
+> Symphony Studio orchestrates systems, workflows, and intelligence so businesses perform with clarity, coordination, and performance—not more disconnected tools.
+
+Symphony Studio is a business orchestration practice. We do not sell software, AI products, or one-off automation projects. We help leadership teams coordinate tools, data, workflows, and AI across the whole business.
+
+## Primary pages
+
+- Home: https://symphonystudio.io/
+- How it works: https://symphonystudio.io/how-it-works
+- FAQ: https://symphonystudio.io/faq
+- News & articles: https://symphonystudio.io/news
+- Enterprise: https://symphonystudio.io/enterprise
+- Contact: https://symphonystudio.io/contact
+
+## Published articles
+
+Articles, step-by-step guides, and FAQs live under /news/{slug}, /news/{slug}/guide, and /news/{slug}/faq. See https://symphonystudio.io/news for the current list.
+
+## Key concepts we define
+
+- Orchestration layer: coordination across tools, workflows, data, and AI with clear ownership, handoffs, and governance
+- Missing layer: the gap between capable stacks and business performance when no orchestration exists
+- Automation vs orchestration: automation completes a task; orchestration coordinates systems and teams for outcomes
+
+## Contact
+
+- Email: hello@symphonystudio.io
+- Discovery call: https://symphonystudio.io/contact

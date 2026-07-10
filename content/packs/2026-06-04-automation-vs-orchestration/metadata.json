@@ -1,0 +1,48 @@
+{
+  "id": "automation-vs-orchestration",
+  "slug": "automation-vs-orchestration",
+  "title": "The Difference Between Automation and Orchestration",
+  "description": "Automation vs orchestration: tasks vs coordinated journeys. Learn why green automations still leave ops chaotic—and what the orchestration layer fixes.",
+  "primaryKeyword": "automation vs orchestration",
+  "secondaryKeywords": [
+    "business process orchestration",
+    "workflow automation vs coordination",
+    "orchestration layer",
+    "cross-system operations"
+  ],
+  "aeQueries": [
+    "What is the difference between automation and orchestration?",
+    "Why do automations work but the business still feels chaotic?",
+    "Do I need more Zaps or better orchestration?",
+    "Is orchestration just fancy integration?",
+    "Where does AI fit—automation or orchestration?",
+    "What is the orchestration layer in business operations?",
+    "How do I know if we have an orchestration gap?",
+    "What does good orchestration look like in practice?"
+  ],
+  "theme": 2,
+  "themeLabel": "System Design",
+  "type": "video",
+  "day": 5,
+  "workflow": "reference-first",
+  "priority": 3,
+  "published": false,
+  "publishedAt": null,
+  "readingTimeMinutes": 9,
+  "canonicalPath": "/news/automation-vs-orchestration",
+  "schema": {
+    "articleType": "BlogPosting",
+    "faqCount": 19,
+    "howToSteps": 7
+  },
+  "cta": { "label": "Book a discovery call", "href": "/contact" },
+  "internalLinks": ["/how-it-works", "/contact", "/faq", "/solutions"],
+  "youtubeChapters": [
+    { "time": "0:00", "title": "Automations run green—business still breaks" },
+    { "time": "0:18", "title": "Tasks vs journeys" },
+    { "time": "3:15", "title": "Automation = task; orchestration = coordination" },
+    { "time": "5:00", "title": "Symphony model" },
+    { "time": "7:00", "title": "Composite examples" },
+    { "time": "10:00", "title": "Discovery call" }
+  ]
+}

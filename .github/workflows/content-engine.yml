@@ -1,0 +1,50 @@
+name: Content Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic_id:
+        description: "Calendar topic id (leave empty for next pending)"
+        required: false
+        type: string
+      mode:
+        description: "Run mode"
+        required: true
+        default: cloud
+        type: choice
+        options:
+          - cloud
+          - dry-run
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Dry run (preview prompt)
+        if: inputs.mode == 'dry-run'
+        run: |
+          if [ -n "${{ inputs.topic_id }}" ]; then
+            npm run content:dry-run -- --topic "${{ inputs.topic_id }}"
+          else
+            npm run content:dry-run
+          fi
+
+      - name: Generate pack (cloud + PR)
+        if: inputs.mode == 'cloud'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          if [ -n "${{ inputs.topic_id }}" ]; then
+            npm run content:next:cloud -- --topic "${{ inputs.topic_id }}"
+          else
+            npm run content:next:cloud
+          fi

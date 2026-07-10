@@ -1,6 +1,10 @@
 import styles from "./site.module.css";
 
-export default function SiteHeroLiquid() {
+type SiteHeroLiquidProps = {
+  imageSrc: string;
+};
+
+export default function SiteHeroLiquid({ imageSrc }: SiteHeroLiquidProps) {
   return (
     <>
       <svg className={styles.siteHeroFilterSvg} aria-hidden>
@@ -70,7 +74,7 @@ export default function SiteHeroLiquid() {
       <div className={styles.siteHeroLiquid}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/about-hero.png"
+          src={imageSrc}
           alt=""
           decoding="async"
           style={{ filter: "url(#site-liquid-filter)" }}

@@ -1,0 +1,55 @@
+{
+  "id": "missing-layer",
+  "slug": "missing-layer",
+  "title": "The Missing Layer Between AI and Business Operations",
+  "description": "Tools, data, workflows, and AI fail without orchestration. Learn the missing layer between AI and how your business actually runs—and what to fix first.",
+  "primaryKeyword": "orchestration layer business operations",
+  "secondaryKeywords": [
+    "missing layer AI business operations",
+    "coordination layer operations",
+    "AI orchestration business",
+    "tools workflows data AI coordination"
+  ],
+  "aeQueries": [
+    "What is the missing layer between AI and business operations?",
+    "Why do capable tools still feel chaotic?",
+    "What is the orchestration layer in business operations?",
+    "Do we need more software or better coordination?",
+    "What breaks when the orchestration layer is missing?",
+    "How is orchestration different from integration or iPaaS?",
+    "Where does AI fit if orchestration is missing?",
+    "How do I know if my business is missing the orchestration layer?"
+  ],
+  "theme": 1,
+  "themeLabel": "The Future of Business",
+  "type": "video",
+  "day": 1,
+  "workflow": "reference-first",
+  "priority": 1,
+  "published": true,
+  "publishedAt": "2026-06-04T00:00:00.000Z",
+  "readingTimeMinutes": 9,
+  "canonicalPath": "/news/missing-layer",
+  "heroImage": "/news/missing-layer/hero.jpg",
+  "schema": {
+    "articleType": "BlogPosting",
+    "faqCount": 18,
+    "howToSteps": 6
+  },
+  "cta": { "label": "Book a discovery call", "href": "/contact" },
+  "internalLinks": [
+    "/how-it-works",
+    "/contact",
+    "/faq",
+    "/about",
+    "/solutions",
+    "/enterprise",
+    "/pricing"
+  ],
+  "youtubeChapters": [
+    { "time": "0:00", "title": "Why the stack still feels chaotic" },
+    { "time": "0:18", "title": "Tools, data, workflows, AI" },
+    { "time": "3:00", "title": "What orchestration adds" },
+    { "time": "6:30", "title": "Example journey + next step" }
+  ]
+}

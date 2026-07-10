@@ -3,10 +3,11 @@ import { headerCta } from "@/data/site-nav";
 
 const defaultCta = { label: headerCta.label, href: headerCta.href };
 
-/** Orchestra + dithered-code heroes — public/heroes/ */
-const heroGold = "/heroes/hero-orchestra-dither-gold.png";
-const heroPit = "/heroes/hero-orchestra-dither-pit.png";
-const heroWide = "/heroes/hero-orchestra-dither-wide.png";
+/** Orchestra engraving heroes — public/heroes/ (updated uploads) */
+const heroWide = "/heroes/hero-orchestra-engraving-wide.jpg";
+const heroConductor = "/heroes/hero-orchestra-conductor.jpg";
+const heroAerial = "/heroes/hero-orchestra-aerial.jpg";
+const heroSpotlight = "/heroes/hero-orchestra-spotlight.jpg";
 
 export const marketingHeroes = {
   about: {
@@ -14,13 +15,13 @@ export const marketingHeroes = {
     eyebrow: "Symphony Studio",
     title: "Where Technology Meets Harmony",
     lead: "Symphony Studio helps businesses perform at their best by orchestrating the systems, workflows, and intelligence that drive modern operations.",
-    imageSrc: heroGold,
+    imageSrc: "/about-hero.png",
     primaryCta: defaultCta,
     secondaryCta: { label: "How it works", href: "/how-it-works" },
   },
   howItWorks: {
     id: "how-it-works",
-    imageSrc: heroPit,
+    imageSrc: heroConductor,
     eyebrow: "How it works",
     title: "Hire a conductor,",
     titleAccent: "not more instruments.",
@@ -30,7 +31,7 @@ export const marketingHeroes = {
   },
   pricing: {
     id: "pricing",
-    imageSrc: heroWide,
+    imageSrc: heroAerial,
     eyebrow: "Pricing",
     title: "Ongoing orchestration,",
     titleAccent: "not one-off projects.",
@@ -40,7 +41,7 @@ export const marketingHeroes = {
   },
   enterprise: {
     id: "enterprise",
-    imageSrc: heroGold,
+    imageSrc: heroWide,
     eyebrow: "Enterprise",
     title: "When coordination, security, and visibility",
     titleAccent: "are non-negotiable.",
@@ -50,7 +51,7 @@ export const marketingHeroes = {
   },
   solutions: {
     id: "solutions",
-    imageSrc: heroPit,
+    imageSrc: heroConductor,
     eyebrow: "Solutions",
     title: "We don't sell software or AI.",
     titleAccent: "We orchestrate.",
@@ -60,7 +61,7 @@ export const marketingHeroes = {
   },
   caseStudies: {
     id: "case-studies",
-    imageSrc: heroWide,
+    imageSrc: heroSpotlight,
     eyebrow: "Case studies",
     title: "When coordination—not talent—",
     titleAccent: "was the bottleneck.",
@@ -70,7 +71,7 @@ export const marketingHeroes = {
   },
   contact: {
     id: "contact",
-    imageSrc: heroGold,
+    imageSrc: heroSpotlight,
     eyebrow: "Contact",
     title: "Start with a",
     titleAccent: "discovery call.",
@@ -80,7 +81,7 @@ export const marketingHeroes = {
   },
   safety: {
     id: "safety",
-    imageSrc: heroWide,
+    imageSrc: heroAerial,
     eyebrow: "Safety",
     title: "Calmer operations,",
     titleAccent: "not more fragility.",
@@ -90,7 +91,7 @@ export const marketingHeroes = {
   },
   security: {
     id: "security",
-    imageSrc: heroPit,
+    imageSrc: heroWide,
     eyebrow: "Security & privacy",
     title: "The orchestra pit—",
     titleAccent: "governed access to real data.",
@@ -100,7 +101,7 @@ export const marketingHeroes = {
   },
   trust: {
     id: "trust",
-    imageSrc: heroGold,
+    imageSrc: heroConductor,
     eyebrow: "Trust",
     title: "If you can't see it fail,",
     titleAccent: "it will fail silently.",
@@ -110,7 +111,7 @@ export const marketingHeroes = {
   },
   faq: {
     id: "faq",
-    imageSrc: heroPit,
+    imageSrc: heroAerial,
     eyebrow: "FAQs",
     title: "Answers before",
     titleAccent: "you book.",
@@ -129,7 +130,7 @@ export const marketingHeroes = {
   },
   careers: {
     id: "careers",
-    imageSrc: heroGold,
+    imageSrc: heroConductor,
     eyebrow: "Careers",
     title: "Help businesses",
     titleAccent: "perform as one.",
@@ -138,6 +139,7 @@ export const marketingHeroes = {
   },
   howToVideos: {
     id: "how-to-videos",
+    imageSrc: heroSpotlight,
     eyebrow: "Resources",
     title: "Learn the",
     titleAccent: "symphony model.",
@@ -147,7 +149,7 @@ export const marketingHeroes = {
   },
   terms: {
     id: "terms",
-    imageSrc: heroWide,
+    imageSrc: heroAerial,
     eyebrow: "Legal",
     title: "Terms of",
     titleAccent: "service.",
@@ -156,7 +158,7 @@ export const marketingHeroes = {
   },
   privacy: {
     id: "privacy",
-    imageSrc: heroPit,
+    imageSrc: heroWide,
     eyebrow: "Legal",
     title: "Privacy",
     titleAccent: "policy.",

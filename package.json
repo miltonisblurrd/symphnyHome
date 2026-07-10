@@ -13,18 +13,27 @@
     "deploy": "opennextjs-cloudflare build && wrangler deploy",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "mcp:stdio": "tsx src/mcp/stdio-server.ts"
+    "mcp:stdio": "tsx src/mcp/stdio-server.ts",
+    "content:dry-run": "tsx scripts/content-engine-run.ts --dry-run",
+    "content:next": "tsx scripts/content-engine-run.ts",
+    "content:next:cloud": "tsx scripts/content-engine-run.ts --cloud",
+    "content:publish-check": "tsx scripts/content-publish-check.ts",
+    "content:sync-heroes": "tsx scripts/content-sync-heroes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "gray-matter": "^4.0.3",
     "next": "15.2.8",
     "react": "^19.0.1",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250415.0",
+    "@cursor/sdk": "^1.0.17",
     "@eslint/eslintrc": "^3",
     "@opennextjs/cloudflare": "^1.6.5",
     "@tailwindcss/postcss": "^4",

@@ -1,0 +1,46 @@
+{
+  "id": "fail-gracefully",
+  "slug": "fail-gracefully",
+  "title": "Designing Systems That Fail Gracefully",
+  "description": "Fail gracefully means visible, recoverable, non-silent failure on critical journeys—enterprise orchestration, not another green dashboard.",
+  "primaryKeyword": "fail gracefully enterprise orchestration",
+  "secondaryKeywords": [
+    "silent failure operations",
+    "visible errors workflow design",
+    "recoverable failure enterprise",
+    "orchestration error handling"
+  ],
+  "aeQueries": [
+    "What does fail gracefully mean in business operations?",
+    "Why do integrations break silently while dashboards stay green?",
+    "What is silent breakage in automated workflows?",
+    "How is graceful failure different from more monitoring tools?",
+    "What is a failure contract for critical journeys?",
+    "Should we automate before we can fail gracefully?",
+    "How do AI performers fail without guessing?",
+    "What does recoverable failure look like for leadership?"
+  ],
+  "theme": 4,
+  "themeLabel": "Enterprise Infrastructure",
+  "type": "video",
+  "day": 20,
+  "workflow": "reference-first",
+  "priority": 5,
+  "published": false,
+  "publishedAt": null,
+  "readingTimeMinutes": 9,
+  "canonicalPath": "/news/fail-gracefully",
+  "schema": {
+    "articleType": "BlogPosting",
+    "faqCount": 20,
+    "howToSteps": 7
+  },
+  "cta": { "label": "Book a discovery call", "href": "/contact" },
+  "internalLinks": ["/enterprise", "/security", "/contact", "/how-it-works"],
+  "youtubeChapters": [
+    { "time": "0:00", "title": "Green dashboards, silent failure" },
+    { "time": "0:18", "title": "Silent breakage and invisible errors" },
+    { "time": "3:30", "title": "Visible, recoverable, not silent" },
+    { "time": "7:30", "title": "Examples and discovery call" }
+  ]
+}

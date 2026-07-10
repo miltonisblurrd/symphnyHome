@@ -1,10 +1,10 @@
-/** Public site configuration — set NEXT_PUBLIC_SITE_URL in production (e.g. https://symphonystudio.io) */
+/** Public site configuration — set NEXT_PUBLIC_SITE_URL in production (e.g. https://symphny.xyz) */
 
 export const siteConfig = {
   name: "Symphony Studio",
   legalName: "Symphony Studio, LLC",
   tagline: "Orchestrating systems, workflows, and intelligence for coordinated performance.",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://symphonystudio.io",
+  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://symphny.xyz",
   email: "hello@symphonystudio.io",
   privacyEmail: "privacy@symphonystudio.io",
   legalEmail: "legal@symphonystudio.io",

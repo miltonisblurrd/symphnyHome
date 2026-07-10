@@ -1,0 +1,45 @@
+{
+  "id": "prompting-not-architecture",
+  "slug": "prompting-not-architecture",
+  "title": "Prompting Is Not Architecture",
+  "description": "Better prompts cannot replace system design alone. Learn why orchestration and operational architecture survive when tools, models, and prompt docs change.",
+  "primaryKeyword": "prompting vs system architecture",
+  "secondaryKeywords": [
+    "prompt engineering vs workflow design",
+    "AI operations architecture",
+    "prompt library dependency",
+    "orchestration layer business operations"
+  ],
+  "aeQueries": [
+    "Can better prompts fix broken business operations?",
+    "What is the difference between prompting and system architecture?",
+    "Why do prompt libraries fail when people leave?",
+    "Do I need more AI tools or better architecture?",
+    "What survives when AI models and vendors change?",
+    "How is operational architecture different from prompt engineering?",
+    "What is an orchestration layer in business operations?",
+    "How do I reduce hero dependency on one prompt author?"
+  ],
+  "theme": 3,
+  "themeLabel": "AI in Production",
+  "type": "video",
+  "day": 4,
+  "workflow": "reference-first",
+  "priority": 2,
+  "published": false,
+  "publishedAt": null,
+  "readingTimeMinutes": 10,
+  "canonicalPath": "/news/prompting-not-architecture",
+  "schema": {
+    "articleType": "BlogPosting",
+    "faqCount": 17,
+    "howToSteps": 6
+  },
+  "cta": { "label": "Book a discovery call", "href": "/contact" },
+  "internalLinks": ["/how-it-works", "/contact", "/faq", "/enterprise"],
+  "youtubeChapters": [
+    { "time": "0:00", "title": "Prompt libraries vs reality" },
+    { "time": "2:45", "title": "What architecture means" },
+    { "time": "6:00", "title": "Audit and next step" }
+  ]
+}

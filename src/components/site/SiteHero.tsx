@@ -43,7 +43,7 @@ export default function SiteHero({
           sizes="100vw"
           className={styles.siteHeroImageFallback}
         />
-        <SiteHeroLiquid />
+        <SiteHeroLiquid imageSrc={imageSrc} />
         <SiteHeroGlass />
         <div className={styles.siteHeroScrim} />
       </div>

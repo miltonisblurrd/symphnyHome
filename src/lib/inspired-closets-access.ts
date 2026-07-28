@@ -3,10 +3,21 @@ export const INSPIRED_CLOSETS_PROTECTED_PREFIX = "/inspired-closets";
 export const INSPIRED_CLOSETS_ACCESS_PATH = "/inspired-closets/access";
 
 export function isInspiredClosetsProtectedPath(pathname: string): boolean {
-  if (!pathname.startsWith(INSPIRED_CLOSETS_PROTECTED_PREFIX)) return false;
-  if (pathname === INSPIRED_CLOSETS_ACCESS_PATH) return false;
-  if (pathname.startsWith("/api/inspired-closets/access")) return false;
-  return true;
+  if (pathname.startsWith(INSPIRED_CLOSETS_PROTECTED_PREFIX)) {
+    if (pathname === INSPIRED_CLOSETS_ACCESS_PATH) return false;
+    return true;
+  }
+
+  if (pathname.startsWith("/api/inspired-closets/")) {
+    return !pathname.startsWith("/api/inspired-closets/access");
+  }
+
+  if (pathname.startsWith("/api/integrations/quickbooks/")) {
+    if (pathname === "/api/integrations/quickbooks/callback") return false;
+    return true;
+  }
+
+  return false;
 }
 
 export function getInspiredClosetsPassword(): string | undefined {

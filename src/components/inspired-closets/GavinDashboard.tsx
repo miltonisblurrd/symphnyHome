@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   activityFeed,
   attentionItems,
@@ -16,7 +16,7 @@ import {
   type AttentionSeverity,
   type JobStage,
 } from "@/data/inspired-closets-gavin-demo";
-import { buildSymphonyInsights, resolveSymphonyAnswer } from "@/lib/inspired-closets-symphony-insights";
+import { buildSymphonyInsights } from "@/lib/inspired-closets-symphony-insights";
 import styles from "./gavin-dashboard.module.css";
 
 type Period = (typeof gavinDemoMeta.periodOptions)[number];
@@ -37,11 +37,21 @@ function severityClass(severity: AttentionSeverity) {
   return styles.severityInfo;
 }
 
+type CubbySource = "demo" | "claude+demo" | "claude+quickbooks" | "demo-fallback";
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  source?: CubbySource;
 };
+
+function cubbySourceLabel(source: CubbySource) {
+  if (source === "claude+quickbooks") return "Live · Claude + QuickBooks";
+  if (source === "claude+demo") return "Live · Claude";
+  if (source === "demo-fallback") return "Demo fallback · Claude unavailable";
+  return "Demo · no API key";
+}
 
 export default function GavinDashboard() {
   const [period, setPeriod] = useState<Period>("This week");
@@ -49,6 +59,12 @@ export default function GavinDashboard() {
   const [expandedId, setExpandedId] = useState<string | null>("att-1");
   const [stageFilter, setStageFilter] = useState<StageFilter>("All");
   const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [qbConnected, setQbConnected] = useState(false);
+  const [qbCompany, setQbCompany] = useState<string | null>(null);
+  const [livePulse, setLivePulse] = useState<ReturnType<typeof getFinancialPulseForPeriod> | null>(
+    null,
+  );
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
@@ -58,10 +74,89 @@ export default function GavinDashboard() {
   ]);
   const chatThreadRef = useRef<HTMLDivElement>(null);
 
-  const periodFinancialPulse = useMemo(
-    () => getFinancialPulseForPeriod(period),
-    [period],
-  );
+  const periodFinancialPulse = useMemo(() => {
+    const demo = getFinancialPulseForPeriod(period);
+    if (!livePulse) return demo;
+
+    return {
+      ...demo,
+      ...livePulse,
+      metricNotes: {
+        ...demo.metricNotes,
+        sales: qbCompany
+          ? `QuickBooks sandbox · ${qbCompany}`
+          : "QuickBooks sandbox · live sync",
+        cashCollected: "QuickBooks payments",
+        outstanding: "QuickBooks open invoices",
+        unverifiedCosts: "QuickBooks open bills",
+      },
+    };
+  }, [period, livePulse, qbCompany]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadQuickBooks() {
+      try {
+        const statusRes = await fetch("/api/integrations/quickbooks/status");
+        const status = (await statusRes.json()) as {
+          connected?: boolean;
+        };
+        if (cancelled) return;
+        setQbConnected(Boolean(status.connected));
+
+        if (!status.connected) {
+          setLivePulse(null);
+          setQbCompany(null);
+          return;
+        }
+
+        const pulseRes = await fetch("/api/integrations/quickbooks/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ period }),
+        });
+        const payload = (await pulseRes.json()) as {
+          pulse?: {
+            sales: number;
+            cashCollected: number;
+            outstandingBalances: number;
+            avgMargin: number;
+            unverifiedCosts: number;
+            jobsBelowMarginGate: number;
+            bankBalance: number;
+            spiffsPending: number;
+            companyName?: string;
+          };
+        };
+
+        if (cancelled || !payload.pulse) return;
+
+        setLivePulse({
+          sales: payload.pulse.sales,
+          cashCollected: payload.pulse.cashCollected,
+          outstandingBalances: payload.pulse.outstandingBalances,
+          avgMargin: payload.pulse.avgMargin,
+          unverifiedCosts: payload.pulse.unverifiedCosts,
+          jobsBelowMarginGate: payload.pulse.jobsBelowMarginGate,
+          bankBalance: payload.pulse.bankBalance,
+          spiffsPending: payload.pulse.spiffsPending,
+          metricNotes: getFinancialPulseForPeriod(period).metricNotes,
+        });
+        setQbCompany(payload.pulse.companyName ?? null);
+      } catch {
+        if (!cancelled) {
+          setQbConnected(false);
+          setLivePulse(null);
+        }
+      }
+    }
+
+    void loadQuickBooks();
+    return () => {
+      cancelled = true;
+    };
+  }, [period]);
 
   const symphonyInsights = useMemo(
     () =>
@@ -78,20 +173,37 @@ export default function GavinDashboard() {
     [period, periodFinancialPulse],
   );
 
-  const askSymphony = (question: string) => {
+  const askSymphony = async (question: string) => {
     const trimmed = question.trim();
-    if (!trimmed) return;
+    if (!trimmed || chatLoading) return;
 
-    const answer = resolveSymphonyAnswer(trimmed, symphonyInsights);
     const userId = `user-${Date.now()}`;
-    const assistantId = `assistant-${Date.now()}`;
+    setChatMessages((prev) => [...prev, { id: userId, role: "user", text: trimmed }]);
+    setChatInput("");
+    setChatLoading(true);
 
+    let answer = "Cubby couldn't reach the server. Try again in a moment.";
+    let source: CubbySource | undefined;
+
+    try {
+      const response = await fetch("/api/inspired-closets/cubby", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: trimmed, period }),
+      });
+      const payload = (await response.json()) as { answer?: string; source?: CubbySource };
+      if (payload.answer) answer = payload.answer;
+      if (payload.source) source = payload.source;
+    } catch {
+      // keep fallback answer
+    }
+
+    const assistantId = `assistant-${Date.now()}`;
     setChatMessages((prev) => [
       ...prev,
-      { id: userId, role: "user", text: trimmed },
-      { id: assistantId, role: "assistant", text: answer },
+      { id: assistantId, role: "assistant", text: answer, source },
     ]);
-    setChatInput("");
+    setChatLoading(false);
 
     window.setTimeout(() => {
       chatThreadRef.current?.scrollTo({
@@ -107,6 +219,7 @@ export default function GavinDashboard() {
   );
   const [assignOpenId, setAssignOpenId] = useState<string | null>(null);
   const [notifiedAt, setNotifiedAt] = useState<Record<string, string>>({});
+  const [notifyLoadingId, setNotifyLoadingId] = useState<string | null>(null);
   const [actionFlash, setActionFlash] = useState<string | null>(null);
 
   const filteredJobs = useMemo(() => {
@@ -133,12 +246,52 @@ export default function GavinDashboard() {
     flash(`Assigned to ${person}. Notify them when you’re ready.`);
   };
 
-  const notifyAssignee = (item: (typeof attentionItems)[number]) => {
+  const notifyAssignee = async (item: (typeof attentionItems)[number]) => {
     const person = assignees[item.id] ?? item.defaultAssignee;
-    const stamp = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    setNotifiedAt((prev) => ({ ...prev, [item.id]: stamp }));
+    setNotifyLoadingId(item.id);
     setExpandedId(item.id);
-    flash(`Prototype: ${person} would be notified now — “${item.notifyMessage}”`);
+
+    try {
+      const response = await fetch("/api/inspired-closets/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          assignee: person,
+          title: item.title,
+          severity: item.severity,
+          todoLabel: item.todoLabel,
+          notifyMessage: item.notifyMessage,
+          requestedBy: gavinDemoMeta.viewer.split(" ")[0],
+        }),
+      });
+
+      const raw = await response.text();
+      let payload: { error?: string; mention?: string } = {};
+      try {
+        payload = JSON.parse(raw) as { error?: string; mention?: string };
+      } catch {
+        flash(
+          response.status === 307 || raw.includes("Inspired Closets")
+            ? "Notify blocked — refresh the page and log in again."
+            : "Notify failed — is `npm run dev` running with the latest code?",
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        flash(payload.error ?? `Could not notify ${person} on Slack (${response.status}).`);
+        return;
+      }
+
+      const stamp = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      setNotifiedAt((prev) => ({ ...prev, [item.id]: stamp }));
+      flash(`Slack sent to ${person} in #ops-alerts.`);
+    } catch {
+      flash(`Could not notify ${person} on Slack.`);
+    } finally {
+      setNotifyLoadingId(null);
+    }
   };
 
   const scrollTo = (id: (typeof SECTIONS)[number]["id"]) => {
@@ -282,9 +435,10 @@ export default function GavinDashboard() {
                           <button
                             type="button"
                             className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
+                            disabled={notifyLoadingId === item.id}
                             onClick={() => notifyAssignee(item)}
                           >
-                            Notify {assignee}
+                            {notifyLoadingId === item.id ? "Sending…" : `Notify ${assignee}`}
                           </button>
                         </div>
                         {assignOpen ? (
@@ -321,8 +475,17 @@ export default function GavinDashboard() {
             <div className={styles.panelHeader}>
               <h2 className={styles.panelTitle}>Financial pulse</h2>
               <p className={styles.panelHint}>
-                45% spiff gate · QuickBooks + Podium · {period} view
+                45% spiff gate · {qbConnected ? "QuickBooks sandbox connected" : "QuickBooks not connected"}{" "}
+                · {period} view
               </p>
+              {!qbConnected ? (
+                <p className={styles.panelHint}>
+                  <a className={styles.connectLink} href="/api/integrations/quickbooks/connect">
+                    Connect QuickBooks sandbox
+                  </a>{" "}
+                  to pull live test numbers and copy Realm ID + refresh token into `.env`.
+                </p>
+              ) : null}
             </div>
             <div className={styles.metricsGrid}>
               <div className={styles.metric}>
@@ -388,6 +551,9 @@ export default function GavinDashboard() {
                     }
                   >
                     {message.text}
+                    {message.role === "assistant" && message.source ? (
+                      <p className={styles.chatSourceMeta}>{cubbySourceLabel(message.source)}</p>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -420,8 +586,8 @@ export default function GavinDashboard() {
                   placeholder={gavinDemoMeta.chatBrand.placeholder}
                   aria-label={gavinDemoMeta.chatBrand.title}
                 />
-                <button type="submit" className={styles.chatSendBtn}>
-                  {gavinDemoMeta.chatBrand.sendLabel}
+                <button type="submit" className={styles.chatSendBtn} disabled={chatLoading || !chatInput.trim()}>
+                  {chatLoading ? "…" : gavinDemoMeta.chatBrand.sendLabel}
                 </button>
               </form>
             </div>

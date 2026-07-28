@@ -221,6 +221,16 @@
   font-size: 0.78rem;
 }
 
+.connectLink {
+  color: var(--accent);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.connectLink:hover {
+  text-decoration: underline;
+}
+
 .attentionList {
   display: grid;
   gap: 0.65rem;
@@ -904,6 +914,15 @@
   background: var(--accent);
   color: #fff;
   border-bottom-right-radius: 0.3rem;
+}
+
+.chatSourceMeta {
+  margin: 0.45rem 0 0;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .promptGrid {

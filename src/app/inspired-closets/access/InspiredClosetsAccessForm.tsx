@@ -45,31 +45,31 @@ export default function InspiredClosetsAccessForm() {
   return (
     <main className={styles.page}>
       <div className={styles.card}>
-        <div className={styles.brandBlock}>
-          <Image
-            src={LOGO_SRC}
-            alt="Inspired Closets"
-            width={120}
-            height={111}
-            className={styles.logo}
-            priority
-            unoptimized
-          />
-          <p className={styles.eyebrow}>Inspired Closets · private preview</p>
+        <div className={styles.header}>
+          <div className={styles.brandBlock}>
+            <Image
+              src={LOGO_SRC}
+              alt="Inspired Closets"
+              width={88}
+              height={81}
+              className={styles.logo}
+              priority
+              unoptimized
+            />
+            <p className={styles.eyebrow}>Inspired Closets · private preview</p>
+          </div>
+          <h1 className={styles.title}>Executive dashboard</h1>
+          <p className={styles.lead}>
+            This prototype is password-protected. Enter the access code Milton shared with you.
+          </p>
         </div>
-        <h1 className={styles.title}>Executive dashboard</h1>
-        <p className={styles.lead}>
-          This prototype is password-protected. Enter the access code Milton shared with you.
-        </p>
         <form className={styles.form} onSubmit={onSubmit}>
-          <label className={styles.label} htmlFor="access-password">
-            Access code
-          </label>
           <input
             id="access-password"
             className={styles.input}
             type="password"
             autoComplete="current-password"
+            aria-label="Access code"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Enter access code"

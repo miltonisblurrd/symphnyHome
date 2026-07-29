@@ -1,8 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import styles from "./access.module.css";
+
+const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 
 export default function InspiredClosetsAccessForm() {
   const router = useRouter();
@@ -42,7 +45,18 @@ export default function InspiredClosetsAccessForm() {
   return (
     <main className={styles.page}>
       <div className={styles.card}>
-        <p className={styles.eyebrow}>Inspired Closets · private preview</p>
+        <div className={styles.brandBlock}>
+          <Image
+            src={LOGO_SRC}
+            alt="Inspired Closets"
+            width={120}
+            height={111}
+            className={styles.logo}
+            priority
+            unoptimized
+          />
+          <p className={styles.eyebrow}>Inspired Closets · private preview</p>
+        </div>
         <h1 className={styles.title}>Executive dashboard</h1>
         <p className={styles.lead}>
           This prototype is password-protected. Enter the access code Milton shared with you.
@@ -66,7 +80,6 @@ export default function InspiredClosetsAccessForm() {
             {loading ? "Checking…" : "View dashboard"}
           </button>
         </form>
-        <p className={styles.footer}>Sample data only · not live QuickBooks or Podium</p>
       </div>
     </main>
   );

@@ -12,6 +12,10 @@ export const metadata: Metadata = {
   description:
     "Symphony prototype for Inspired Closets Las Vegas — executive visibility into jobs, money, and risk.",
   robots: { index: false, follow: false },
+  icons: {
+    icon: [{ url: "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png", type: "image/png" }],
+    apple: "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png",
+  },
 };
 
 export default function InspiredClosetsLayout({

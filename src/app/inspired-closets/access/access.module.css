@@ -27,6 +27,21 @@
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.08);
 }
 
+.brandBlock {
+  display: grid;
+  gap: 0.65rem;
+  justify-items: start;
+  text-align: left;
+  margin-bottom: 0.15rem;
+}
+
+.logo {
+  width: 7.5rem;
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
 .eyebrow {
   margin: 0;
   font-size: 0.72rem;
@@ -41,6 +56,7 @@
   font-family: var(--font-gavin-sans), "Lato", system-ui, sans-serif;
   font-size: 1.75rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .lead {
@@ -68,6 +84,7 @@
   font: inherit;
   font-size: 1rem;
   background: var(--ic-bone);
+  color: var(--ink);
 }
 
 .input:focus {
@@ -85,8 +102,8 @@
 .button {
   appearance: none;
   margin-top: 0.35rem;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--ic-black);
+  background: var(--ic-black);
   color: var(--ic-white);
   border-radius: 999px;
   padding: 0.8rem 1rem;
@@ -97,14 +114,11 @@
   min-height: 2.75rem;
 }
 
+.button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
 .button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
-}
-
-.footer {
-  margin: 1rem 0 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.4;
 }

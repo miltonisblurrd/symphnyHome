@@ -1,16 +1,10 @@
 import type { Metadata } from "next";
-import { Manrope, Newsreader } from "next/font/google";
+import { Lato } from "next/font/google";
 
-const manrope = Manrope({
+const lato = Lato({
   subsets: ["latin"],
   variable: "--font-gavin-sans",
-  weight: ["400", "500", "600", "700"],
-});
-
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  variable: "--font-gavin-display",
-  weight: ["500", "600"],
+  weight: ["300", "400", "700", "900"],
 });
 
 export const metadata: Metadata = {
@@ -25,7 +19,5 @@ export default function InspiredClosetsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className={`${manrope.variable} ${newsreader.variable}`}>{children}</div>
-  );
+  return <div className={lato.variable}>{children}</div>;
 }

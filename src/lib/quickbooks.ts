@@ -297,12 +297,12 @@ export function renderQuickBooksCallbackPage(input: {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${input.title}</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #f4f7f4; color: #1a1f1c; padding: 1.5rem; }
-    .card { max-width: 40rem; margin: 0 auto; background: #fff; border: 1px solid #d9e0da; border-radius: 1rem; padding: 1.5rem; }
+    body { font-family: Lato, system-ui, sans-serif; background: #efe9e5; color: #000000; padding: 1.5rem; }
+    .card { max-width: 40rem; margin: 0 auto; background: #ffffff; border: 1px solid rgba(0,0,0,0.1); border-radius: 1rem; padding: 1.5rem; }
     h1 { margin: 0 0 0.5rem; font-size: 1.4rem; }
-    p { color: #66766d; line-height: 1.5; }
-    pre { background: #f8fbf9; border: 1px solid #d9e0da; border-radius: 0.75rem; padding: 1rem; overflow: auto; font-size: 0.82rem; white-space: pre-wrap; }
-    a { color: #1f6b4f; font-weight: 600; }
+    p { color: rgba(0,0,0,0.55); line-height: 1.5; }
+    pre { background: #fdeae6; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.75rem; padding: 1rem; overflow: auto; font-size: 0.82rem; white-space: pre-wrap; }
+    a { color: #821f2d; font-weight: 700; }
   </style>
 </head>
 <body>

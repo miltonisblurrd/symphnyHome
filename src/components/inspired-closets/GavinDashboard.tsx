@@ -17,19 +17,12 @@ import {
   type JobStage,
 } from "@/data/inspired-closets-gavin-demo";
 import { buildSymphonyInsights } from "@/lib/inspired-closets-symphony-insights";
+import GavinSidebar, { type NavSectionId } from "./GavinSidebar";
+import GavinTopBar from "./GavinTopBar";
 import styles from "./gavin-dashboard.module.css";
 
 type Period = (typeof gavinDemoMeta.periodOptions)[number];
 type StageFilter = "All" | JobStage;
-
-const SECTIONS = [
-  { id: "attention", label: "Attention" },
-  { id: "finance", label: "Finance" },
-  { id: "pipeline", label: "Pipeline" },
-  { id: "exceptions", label: "Exceptions" },
-  { id: "leads", label: "Leads" },
-  { id: "ask", label: "Cubby" },
-] as const;
 
 function severityClass(severity: AttentionSeverity) {
   if (severity === "critical") return styles.severityCritical;
@@ -55,7 +48,7 @@ function cubbySourceLabel(source: CubbySource) {
 
 export default function GavinDashboard() {
   const [period, setPeriod] = useState<Period>("This week");
-  const [activeSection, setActiveSection] = useState<(typeof SECTIONS)[number]["id"]>("attention");
+  const [activeSection, setActiveSection] = useState<NavSectionId>("attention");
   const [expandedId, setExpandedId] = useState<string | null>("att-1");
   const [stageFilter, setStageFilter] = useState<StageFilter>("All");
   const [chatInput, setChatInput] = useState("");
@@ -72,6 +65,8 @@ export default function GavinDashboard() {
       text: gavinDemoMeta.chatBrand.intro,
     },
   ]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const chatThreadRef = useRef<HTMLDivElement>(null);
 
   const periodFinancialPulse = useMemo(() => {
@@ -81,6 +76,7 @@ export default function GavinDashboard() {
     return {
       ...demo,
       ...livePulse,
+      deltas: undefined,
       metricNotes: {
         ...demo.metricNotes,
         sales: qbCompany
@@ -229,6 +225,17 @@ export default function GavinDashboard() {
 
   const todosRemaining = attentionItems.filter((item) => !doneTodos[item.id]).length;
 
+  const searchLower = search.trim().toLowerCase();
+  const visibleAttention = useMemo(() => {
+    if (!searchLower) return attentionItems;
+    return attentionItems.filter(
+      (item) =>
+        item.title.toLowerCase().includes(searchLower) ||
+        item.detail.toLowerCase().includes(searchLower) ||
+        item.todoLabel.toLowerCase().includes(searchLower),
+    );
+  }, [searchLower]);
+
   const flash = (message: string) => {
     setActionFlash(message);
     window.setTimeout(() => setActionFlash(null), 2800);
@@ -294,7 +301,7 @@ export default function GavinDashboard() {
     }
   };
 
-  const scrollTo = (id: (typeof SECTIONS)[number]["id"]) => {
+  const scrollTo = (id: NavSectionId) => {
     setActiveSection(id);
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -302,543 +309,564 @@ export default function GavinDashboard() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.shell}>
-        <header className={styles.topBar}>
-          <div className={styles.brandBlock}>
-            <div className={styles.brandRow}>
-              <div className={styles.logoMark} aria-hidden>
-                IC
+      <div className={styles.appShell}>
+        <GavinSidebar
+          activeSection={activeSection}
+          onNavigate={scrollTo}
+          qbConnected={qbConnected}
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+
+        <div className={styles.main}>
+          <div className={styles.mainInner}>
+          <GavinTopBar
+            search={search}
+            onSearchChange={setSearch}
+            onMenuToggle={() => setSidebarOpen((open) => !open)}
+            viewer={gavinDemoMeta.viewer}
+          />
+
+          <div className={styles.content}>
+            <div className={styles.pageHead}>
+              <div className={styles.pageTitleRow}>
+                <div>
+                  <h1 className={styles.pageTitle}>Here&apos;s what&apos;s happening</h1>
+                  <p className={styles.pageLead}>
+                    {gavinDemoMeta.viewer} · {gavinDemoMeta.role} · Updated{" "}
+                    {gavinDemoMeta.updatedAt}
+                  </p>
+                </div>
+                <div className={styles.headMeta}>
+                  <span className={`${styles.pill} ${styles.pillAccent}`}>
+                    {gavinDemoMeta.prototypeLabel}
+                  </span>
+                </div>
               </div>
-              <h1 className={styles.brandTitle}>Inspired Closets · Executive</h1>
-              <span className={`${styles.pill} ${styles.pillAccent}`}>
-                {gavinDemoMeta.prototypeLabel}
-              </span>
-            </div>
-            <p className={styles.brandSub}>
-              Built for Gavin — instant visibility into jobs, money, and risk.
-            </p>
-          </div>
-          <div className={styles.metaSide}>
-            <span className={styles.pill}>Symphony Ops Hub</span>
-            <p>
-              {gavinDemoMeta.viewer} · {gavinDemoMeta.role}
-            </p>
-            <p>Updated {gavinDemoMeta.updatedAt}</p>
-          </div>
-        </header>
 
-        <div className={styles.controls}>
-          <div className={styles.periodRow}>
-            {gavinDemoMeta.periodOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`${styles.periodBtn} ${period === option ? styles.periodBtnActive : ""}`}
-                onClick={() => setPeriod(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          <nav className={styles.sectionNav} aria-label="Dashboard sections">
-            {SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                className={`${styles.navBtn} ${activeSection === section.id ? styles.navBtnActive : ""}`}
-                onClick={() => scrollTo(section.id)}
-              >
-                {section.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className={styles.heroGrid}>
-          <section id="attention" className={`${styles.panel} ${styles.scrollTarget}`}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Today&apos;s attention</h2>
-              <p className={styles.panelHint}>
-                {todosRemaining} open · {period} · do it, assign, or notify
-              </p>
-            </div>
-            {actionFlash ? <p className={styles.todoFlash}>{actionFlash}</p> : null}
-            <div className={styles.attentionList}>
-              {attentionItems.map((item) => {
-                const open = expandedId === item.id;
-                const checked = Boolean(doneTodos[item.id]);
-                const assignee = assignees[item.id] ?? item.defaultAssignee;
-                const notified = notifiedAt[item.id];
-                const assignOpen = assignOpenId === item.id;
-                return (
-                  <article
-                    key={item.id}
-                    className={`${styles.attentionCard} ${checked ? styles.attentionCardDone : ""}`}
-                  >
+              <div className={styles.filterRows}>
+                <div className={`${styles.filterRow} ${styles.filterRowToolbar}`}>
+                  {gavinDemoMeta.periodOptions.map((option) => (
                     <button
+                      key={option}
                       type="button"
-                      className={styles.attentionToggle}
-                      onClick={() => setExpandedId(open ? null : item.id)}
-                      aria-expanded={open}
-                      aria-label={`${open ? "Hide" : "View"} action for ${item.title}`}
+                      className={`${styles.periodBtn} ${period === option ? styles.periodBtnActive : ""}`}
+                      onClick={() => setPeriod(option)}
                     >
-                      <input
-                        type="checkbox"
-                        className={styles.todoCheck}
-                        checked={checked}
-                        aria-label={`Mark ${item.title} complete`}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => toggleTodo(item.id)}
-                      />
-                      <span className={styles.attentionToggleBody}>
-                        <span className={styles.attentionTop}>
-                          <span>
-                            <span className={`${styles.severity} ${severityClass(item.severity)}`}>
-                              {item.severity}
-                            </span>
-                            <h3 className={styles.attentionTitle}>{item.title}</h3>
-                          </span>
-                          {item.amount != null ? (
-                            <strong>{formatCurrency(item.amount)}</strong>
-                          ) : null}
-                        </span>
-                        <p className={styles.attentionDetail}>{item.detail}</p>
-                        <div className={styles.attentionMeta}>
-                          <span>
-                            Assigned: <strong>{assignee}</strong>
-                            {notified ? ` · Notified ${notified}` : ""}
-                          </span>
-                          <span
-                            className={`${styles.expandHint} ${open ? styles.expandHintOpen : ""}`}
-                            aria-hidden
-                          >
-                            {open ? "Hide action" : "View action"}
-                            <span className={styles.expandChevron} />
-                          </span>
-                        </div>
-                      </span>
+                      {option}
                     </button>
-                    {open ? (
-                      <div className={styles.expanded}>
-                        <p className={styles.actionHeader}>Your action</p>
-                        <p className={styles.actionLabel}>{item.todoLabel}</p>
-                        <p className={styles.actionWhy}>{item.todoWhy}</p>
-                        <p className={styles.actionContext}>{item.context}</p>
-                        <div className={styles.todoActions}>
-                          <button
-                            type="button"
-                            className={styles.todoActionBtn}
-                            onClick={() => setAssignOpenId(assignOpen ? null : item.id)}
-                          >
-                            Assign
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
-                            disabled={notifyLoadingId === item.id}
-                            onClick={() => notifyAssignee(item)}
-                          >
-                            {notifyLoadingId === item.id ? "Sending…" : `Notify ${assignee}`}
-                          </button>
-                        </div>
-                        {assignOpen ? (
-                          <div className={styles.assignPicker}>
-                            <p className={styles.assignHint}>Assign to:</p>
-                            <div className={styles.assignChoices}>
-                              {assignablePeople.map((person) => (
-                                <button
-                                  key={person}
-                                  type="button"
-                                  className={`${styles.assignChip} ${
-                                    assignee === person ? styles.assignChipActive : ""
-                                  }`}
-                                  onClick={() => assignTodo(item.id, person)}
+                  ))}
+                  <button type="button" className={styles.exportBtn}>
+                    <span className={styles.exportIcon} aria-hidden>
+                      ↗
+                    </span>
+                    Export
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.heroGrid}>
+              <section
+                id="attention"
+                className={`${styles.panel} ${styles.attentionPanel} ${styles.scrollTarget}`}
+              >
+                <div className={styles.panelHeader}>
+                  <div>
+                    <h2 className={styles.panelTitle}>Today&apos;s attention</h2>
+                    <p className={styles.panelHint}>
+                      {todosRemaining} open · {period} · do it, assign, or notify
+                    </p>
+                  </div>
+                </div>
+                {actionFlash ? <p className={styles.todoFlash}>{actionFlash}</p> : null}
+                <div className={styles.attentionList}>
+                  {visibleAttention.map((item) => {
+                    const open = expandedId === item.id;
+                    const checked = Boolean(doneTodos[item.id]);
+                    const assignee = assignees[item.id] ?? item.defaultAssignee;
+                    const notified = notifiedAt[item.id];
+                    const assignOpen = assignOpenId === item.id;
+                    return (
+                      <article
+                        key={item.id}
+                        className={`${styles.attentionCard} ${checked ? styles.attentionCardDone : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className={styles.attentionToggle}
+                          onClick={() => setExpandedId(open ? null : item.id)}
+                          aria-expanded={open}
+                          aria-label={`${open ? "Hide" : "View"} action for ${item.title}`}
+                        >
+                          <input
+                            type="checkbox"
+                            className={styles.todoCheck}
+                            checked={checked}
+                            aria-label={`Mark ${item.title} complete`}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => toggleTodo(item.id)}
+                          />
+                          <span className={styles.attentionToggleBody}>
+                            <span className={styles.attentionTop}>
+                              <span>
+                                <span
+                                  className={`${styles.severity} ${severityClass(item.severity)}`}
                                 >
-                                  {person}
-                                </button>
-                              ))}
+                                  {item.severity}
+                                </span>
+                                <h3 className={styles.attentionTitle}>{item.title}</h3>
+                              </span>
+                              {item.amount != null ? (
+                                <strong>{formatCurrency(item.amount)}</strong>
+                              ) : null}
+                            </span>
+                            <p className={styles.attentionDetail}>{item.detail}</p>
+                            <div className={styles.attentionMeta}>
+                              <span>
+                                Assigned: <strong>{assignee}</strong>
+                                {notified ? ` · Notified ${notified}` : ""}
+                              </span>
+                              <span
+                                className={`${styles.expandHint} ${open ? styles.expandHintOpen : ""}`}
+                                aria-hidden
+                              >
+                                {open ? "Hide action" : "View action"}
+                                <span className={styles.expandChevron} />
+                              </span>
                             </div>
+                          </span>
+                        </button>
+                        {open ? (
+                          <div className={styles.expanded}>
+                            <p className={styles.actionHeader}>Your action</p>
+                            <p className={styles.actionLabel}>{item.todoLabel}</p>
+                            <p className={styles.actionWhy}>{item.todoWhy}</p>
+                            <p className={styles.actionContext}>{item.context}</p>
+                            <div className={styles.todoActions}>
+                              <button
+                                type="button"
+                                className={styles.todoActionBtn}
+                                onClick={() => setAssignOpenId(assignOpen ? null : item.id)}
+                              >
+                                Assign
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
+                                disabled={notifyLoadingId === item.id}
+                                onClick={() => notifyAssignee(item)}
+                              >
+                                {notifyLoadingId === item.id
+                                  ? "Sending…"
+                                  : `Notify ${assignee}`}
+                              </button>
+                            </div>
+                            {assignOpen ? (
+                              <div className={styles.assignPicker}>
+                                <p className={styles.assignHint}>Assign to:</p>
+                                <div className={styles.assignChoices}>
+                                  {assignablePeople.map((person) => (
+                                    <button
+                                      key={person}
+                                      type="button"
+                                      className={`${styles.assignChip} ${
+                                        assignee === person ? styles.assignChipActive : ""
+                                      }`}
+                                      onClick={() => assignTodo(item.id, person)}
+                                    >
+                                      {person}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-
-          <section
-            id="finance"
-            className={`${styles.panel} ${styles.financePanel} ${styles.scrollTarget}`}
-          >
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Financial pulse</h2>
-              <p className={styles.panelHint}>
-                45% spiff gate · {qbConnected ? "QuickBooks sandbox connected" : "QuickBooks not connected"}{" "}
-                · {period} view
-              </p>
-              {!qbConnected ? (
-                <p className={styles.panelHint}>
-                  <a className={styles.connectLink} href="/api/integrations/quickbooks/connect">
-                    Connect QuickBooks sandbox
-                  </a>{" "}
-                  to pull live test numbers and copy Realm ID + refresh token into `.env`.
-                </p>
-              ) : null}
-            </div>
-            <div className={styles.metricsGrid}>
-              <div className={styles.metric}>
-                <p className={styles.metricLabel}>Sales</p>
-                <p className={styles.metricValue}>{formatCurrency(periodFinancialPulse.sales)}</p>
-                <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.sales}</p>
-              </div>
-              <div className={`${styles.metric} ${styles.metricGood}`}>
-                <p className={styles.metricLabel}>Cash collected</p>
-                <p className={styles.metricValue}>
-                  {formatCurrency(periodFinancialPulse.cashCollected)}
-                </p>
-                <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.cashCollected}</p>
-              </div>
-              <div className={`${styles.metric} ${styles.metricWarn}`}>
-                <p className={styles.metricLabel}>Outstanding</p>
-                <p className={styles.metricValue}>
-                  {formatCurrency(periodFinancialPulse.outstandingBalances)}
-                </p>
-                <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.outstanding}</p>
-              </div>
-              <div className={`${styles.metric} ${styles.metricGood}`}>
-                <p className={styles.metricLabel}>Avg margin</p>
-                <p className={styles.metricValue}>{periodFinancialPulse.avgMargin}%</p>
-                <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.avgMargin}</p>
-              </div>
-              <div className={`${styles.metric} ${styles.metricAlert}`}>
-                <p className={styles.metricLabel}>Unverified costs</p>
-                <p className={styles.metricValue}>
-                  {formatCurrency(periodFinancialPulse.unverifiedCosts)}
-                </p>
-                <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.unverifiedCosts}</p>
-              </div>
-              <div className={`${styles.metric} ${styles.metricAlert}`}>
-                <p className={styles.metricLabel}>Below 45% gate</p>
-                <p className={styles.metricValue}>{periodFinancialPulse.jobsBelowMarginGate}</p>
-                <p className={styles.metricNote}>
-                  {period === "YoY"
-                    ? periodFinancialPulse.metricNotes.belowGate
-                    : `Spiffs pending ${formatCurrency(periodFinancialPulse.spiffsPending)} · ${periodFinancialPulse.metricNotes.belowGate}`}
-                </p>
-              </div>
-            </div>
-
-            <div id="ask" className={`${styles.chatBox} ${styles.financeChat} ${styles.scrollTarget}`}>
-              <div className={styles.chatHeader}>
-                <div>
-                  <h3 className={styles.chatTitle}>{gavinDemoMeta.chatBrand.title}</h3>
-                  <p className={styles.chatLead}>
-                    {gavinDemoMeta.chatBrand.name} keeps an eye on {period.toLowerCase()} numbers +
-                    open attention items
-                  </p>
+                      </article>
+                    );
+                  })}
                 </div>
-                <span className={styles.chatBadge}>{gavinDemoMeta.chatBrand.badge}</span>
-              </div>
+              </section>
 
-              <div className={styles.chatThread} ref={chatThreadRef}>
-                {chatMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={
-                      message.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant
-                    }
-                  >
-                    {message.text}
-                    {message.role === "assistant" && message.source ? (
-                      <p className={styles.chatSourceMeta}>{cubbySourceLabel(message.source)}</p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-
-              <div className={styles.promptGrid}>
-                {symphonyInsights.map((insight) => (
-                  <button
-                    key={insight.id}
-                    type="button"
-                    className={styles.promptBtn}
-                    onClick={() => askSymphony(insight.prompt)}
-                  >
-                    {insight.prompt}
-                  </button>
-                ))}
-              </div>
-
-              <form
-                className={styles.chatComposer}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  askSymphony(chatInput);
-                }}
-              >
-                <input
-                  className={styles.chatInput}
-                  type="text"
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                  placeholder={gavinDemoMeta.chatBrand.placeholder}
-                  aria-label={gavinDemoMeta.chatBrand.title}
-                />
-                <button type="submit" className={styles.chatSendBtn} disabled={chatLoading || !chatInput.trim()}>
-                  {chatLoading ? "…" : gavinDemoMeta.chatBrand.sendLabel}
-                </button>
-              </form>
-            </div>
-          </section>
-        </div>
-
-        <section id="pipeline" className={`${styles.section} ${styles.scrollTarget}`}>
-          <div className={styles.sectionHead}>
-            <div>
-              <h2 className={styles.sectionTitle}>Job pipeline</h2>
-              <p className={styles.panelHint}>
-                Sold → deposit → job check → ordering → install → final payment
-              </p>
-            </div>
-            <div className={styles.filters}>
-              <button
-                type="button"
-                className={`${styles.filterChip} ${stageFilter === "All" ? styles.filterChipActive : ""}`}
-                onClick={() => setStageFilter("All")}
-              >
-                All
-              </button>
-              {(
-                [
-                  "Deposit Pending",
-                  "Job Check",
-                  "Ordering",
-                  "Install Scheduled",
-                  "Final Payment",
-                ] as JobStage[]
-              ).map((stage) => (
-                <button
-                  key={stage}
-                  type="button"
-                  className={`${styles.filterChip} ${stageFilter === stage ? styles.filterChipActive : ""}`}
-                  onClick={() => setStageFilter(stage)}
+              <div className={styles.financeRightCol}>
+                <section
+                  id="finance"
+                  className={`${styles.panel} ${styles.financePanel} ${styles.scrollTarget}`}
                 >
-                  {stage}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={styles.pipelineStrip}>
-            {(Object.keys(pipelineCounts) as JobStage[]).map((stage) => (
-              <div key={stage} className={styles.stagePill}>
-                <span className={styles.stageCount}>{pipelineCounts[stage]}</span>
-                <span className={styles.stageLabel}>{stage}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Job</th>
-                  <th>Stage</th>
-                  <th>Money</th>
-                  <th>Margin</th>
-                  <th>Risk</th>
-                  <th>Next</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredJobs.map((job) => (
-                  <tr key={job.id}>
-                    <td>
-                      <strong>
-                        {job.customer} · {job.id}
-                      </strong>
-                      <div className={styles.panelHint}>
-                        {job.designer} / {job.installer}
-                      </div>
-                    </td>
-                    <td>{job.stage}</td>
-                    <td>
-                      {formatCurrency(job.price)}
-                      <div className={styles.panelHint}>
-                        Owed {formatCurrency(job.balanceOwed)} · {job.depositStatus}
-                      </div>
-                    </td>
-                    <td>{job.margin == null ? "—" : `${job.margin}%`}</td>
-                    <td className={job.risk === "None" ? styles.riskOk : styles.risk}>
-                      {job.risk}
-                    </td>
-                    <td>
-                      {job.nextAction}
-                      <div className={styles.panelHint}>Owner: {job.owner}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className={styles.mobileCards}>
-            {filteredJobs.map((job) => (
-              <article key={job.id} className={styles.jobCard}>
-                <h3>
-                  {job.customer} · {job.stage}
-                </h3>
-                <div className={styles.cardMeta}>
-                  <div>
-                    <span>Price </span>
-                    {formatCurrency(job.price)} · owed {formatCurrency(job.balanceOwed)}
-                  </div>
-                  <div>
-                    <span>Margin </span>
-                    {job.margin == null ? "—" : `${job.margin}%`}
-                  </div>
-                  <div className={job.risk === "None" ? styles.riskOk : styles.risk}>
-                    {job.risk}
-                  </div>
-                  <div>
-                    <span>Next </span>
-                    {job.nextAction} ({job.owner})
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <div className={styles.split}>
-          <section id="exceptions" className={`${styles.panel} ${styles.scrollTarget}`}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Finance exceptions</h2>
-              <p className={styles.panelHint}>Where money visibility breaks</p>
-            </div>
-            <div className={styles.list}>
-              {financeExceptions.map((item) => (
-                <div key={item.id} className={styles.listItem}>
-                  <strong>
-                    {item.type} · {item.customer}
-                  </strong>
-                  <p>
-                    {formatCurrency(item.amount)} — {item.detail}
-                  </p>
-                  <p>Status: {item.status}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section id="leads" className={`${styles.panel} ${styles.scrollTarget}`}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Lead visibility</h2>
-              <p className={styles.panelHint}>Including Craig inbox alerts</p>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Lead</th>
-                    <th>Source</th>
-                    <th>Stage</th>
-                    <th>Age</th>
-                    <th>Risk</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leads.map((lead) => (
-                    <tr key={lead.id}>
-                      <td>
-                        <strong>{lead.name}</strong>
-                        <div className={styles.panelHint}>
-                          {lead.owner} · {lead.designer}
-                        </div>
-                      </td>
-                      <td>{lead.source}</td>
-                      <td>{lead.stage}</td>
-                      <td>{lead.age}</td>
-                      <td className={styles.risk}>{lead.risk}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className={styles.mobileCards}>
-              {leads.map((lead) => (
-                <article key={lead.id} className={styles.leadCard}>
-                  <h3>{lead.name}</h3>
-                  <div className={styles.cardMeta}>
+                  <div className={styles.panelHeader}>
                     <div>
-                      {lead.source} · {lead.stage}
+                      <h2 className={styles.panelTitle}>Financial pulse</h2>
+                      <p className={styles.panelHint}>
+                        45% spiff gate ·{" "}
+                        {qbConnected ? "QuickBooks sandbox connected" : "QuickBooks not connected"}{" "}
+                        · {period} view
+                      </p>
+                      {!qbConnected ? (
+                        <p className={styles.panelHint}>
+                          <a
+                            className={styles.connectLink}
+                            href="/api/integrations/quickbooks/connect"
+                          >
+                            Connect QuickBooks sandbox
+                          </a>{" "}
+                          to pull live test numbers.
+                        </p>
+                      ) : null}
                     </div>
-                    <div>Age {lead.age}</div>
-                    <div className={styles.risk}>{lead.risk}</div>
                   </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
+                  <div className={styles.metricsGrid}>
+                    <div className={styles.metric}>
+                      <p className={styles.metricLabel}>Sales</p>
+                      <p className={styles.metricValue}>
+                        {formatCurrency(periodFinancialPulse.sales)}
+                      </p>
+                      <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.sales}</p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricGood}`}>
+                      <p className={styles.metricLabel}>Cash collected</p>
+                      <p className={styles.metricValue}>
+                        {formatCurrency(periodFinancialPulse.cashCollected)}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {periodFinancialPulse.metricNotes.cashCollected}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWarn}`}>
+                      <p className={styles.metricLabel}>Outstanding</p>
+                      <p className={styles.metricValue}>
+                        {formatCurrency(periodFinancialPulse.outstandingBalances)}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {periodFinancialPulse.metricNotes.outstanding}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricGood}`}>
+                      <p className={styles.metricLabel}>Avg margin</p>
+                      <p className={styles.metricValue}>{periodFinancialPulse.avgMargin}%</p>
+                      <p className={styles.metricNote}>
+                        {periodFinancialPulse.metricNotes.avgMargin}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricAlert}`}>
+                      <p className={styles.metricLabel}>Unverified costs</p>
+                      <p className={styles.metricValue}>
+                        {formatCurrency(periodFinancialPulse.unverifiedCosts)}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {periodFinancialPulse.metricNotes.unverifiedCosts}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricAlert}`}>
+                      <p className={styles.metricLabel}>Below 45% gate</p>
+                      <p className={styles.metricValue}>
+                        {periodFinancialPulse.jobsBelowMarginGate}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {period === "YoY"
+                          ? periodFinancialPulse.metricNotes.belowGate
+                          : `Spiffs pending ${formatCurrency(periodFinancialPulse.spiffsPending)} · ${periodFinancialPulse.metricNotes.belowGate}`}
+                      </p>
+                    </div>
+                  </div>
+                </section>
 
-        <div className={styles.split}>
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Schedule snapshot</h2>
+                <section
+                  id="ask"
+                  className={`${styles.panel} ${styles.chatBox} ${styles.scrollTarget}`}
+                >
+                <div className={styles.chatHeader}>
+                  <div>
+                    <h2 className={styles.chatTitle}>{gavinDemoMeta.chatBrand.title}</h2>
+                    <p className={styles.chatLead}>
+                      {gavinDemoMeta.chatBrand.name} keeps an eye on {period.toLowerCase()} numbers
+                      + open attention items
+                    </p>
+                  </div>
+                  <span className={styles.chatBadge}>{gavinDemoMeta.chatBrand.badge}</span>
+                </div>
+
+                <div className={styles.chatThread} ref={chatThreadRef}>
+                  {chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={
+                        message.role === "user"
+                          ? styles.chatBubbleUser
+                          : styles.chatBubbleAssistant
+                      }
+                    >
+                      {message.text}
+                      {message.role === "assistant" && message.source ? (
+                        <p className={styles.chatSourceMeta}>
+                          {cubbySourceLabel(message.source)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                <div className={styles.promptGrid}>
+                  {symphonyInsights.map((insight) => (
+                    <button
+                      key={insight.id}
+                      type="button"
+                      className={styles.promptBtn}
+                      onClick={() => askSymphony(insight.prompt)}
+                    >
+                      {insight.prompt}
+                    </button>
+                  ))}
+                </div>
+
+                <form
+                  className={styles.chatComposer}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    askSymphony(chatInput);
+                  }}
+                >
+                  <input
+                    className={styles.chatInput}
+                    type="text"
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    placeholder={gavinDemoMeta.chatBrand.placeholder}
+                    aria-label={gavinDemoMeta.chatBrand.title}
+                  />
+                  <button
+                    type="submit"
+                    className={styles.chatSendBtn}
+                    disabled={chatLoading || !chatInput.trim()}
+                  >
+                    {chatLoading ? "…" : gavinDemoMeta.chatBrand.sendLabel}
+                  </button>
+                </form>
+              </section>
+              </div>
             </div>
-            <div className={styles.list}>
-              {schedule.consultations.map((item) => (
-                <div key={item.customer} className={styles.listItem}>
-                  <strong>Consult · {item.customer}</strong>
-                  <p>
-                    {item.when} · {item.designer} · {item.location}
+
+            <section id="pipeline" className={`${styles.section} ${styles.scrollTarget}`}>
+              <div className={styles.sectionHead}>
+                <div>
+                  <h2 className={styles.sectionTitle}>Job pipeline</h2>
+                  <p className={styles.panelHint}>
+                    Sold → deposit → job check → ordering → install → final payment
                   </p>
                 </div>
-              ))}
-              {schedule.installs.map((item) => (
-                <div key={item.customer} className={styles.listItem}>
-                  <strong>Install · {item.customer}</strong>
-                  <p>
-                    {item.when} · {item.installer} · {item.note}
-                  </p>
+                <div className={styles.filters}>
+                  <button
+                    type="button"
+                    className={`${styles.filterChip} ${stageFilter === "All" ? styles.filterChipActive : ""}`}
+                    onClick={() => setStageFilter("All")}
+                  >
+                    All
+                  </button>
+                  {(
+                    [
+                      "Deposit Pending",
+                      "Job Check",
+                      "Ordering",
+                      "Install Scheduled",
+                      "Final Payment",
+                    ] as JobStage[]
+                  ).map((stage) => (
+                    <button
+                      key={stage}
+                      type="button"
+                      className={`${styles.filterChip} ${stageFilter === stage ? styles.filterChipActive : ""}`}
+                      onClick={() => setStageFilter(stage)}
+                    >
+                      {stage}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+              </div>
 
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle}>Activity</h2>
-            </div>
-            <div className={styles.list}>
-              {activityFeed.map((item) => (
-                <div key={item.id} className={styles.listItem}>
-                  <strong>{item.time}</strong>
-                  <p>{item.text}</p>
+              <div className={styles.pipelineStrip}>
+                {(Object.keys(pipelineCounts) as JobStage[]).map((stage) => (
+                  <div key={stage} className={styles.stagePill}>
+                    <span className={styles.stageCount}>{pipelineCounts[stage]}</span>
+                    <span className={styles.stageLabel}>{stage}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Job</th>
+                      <th>Stage</th>
+                      <th>Money</th>
+                      <th>Margin</th>
+                      <th>Risk</th>
+                      <th>Next</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredJobs.map((job) => (
+                      <tr key={job.id}>
+                        <td>
+                          <strong>
+                            {job.customer} · {job.id}
+                          </strong>
+                          <div className={styles.panelHint}>
+                            {job.designer} / {job.installer}
+                          </div>
+                        </td>
+                        <td>{job.stage}</td>
+                        <td>
+                          {formatCurrency(job.price)}
+                          <div className={styles.panelHint}>
+                            Owed {formatCurrency(job.balanceOwed)} · {job.depositStatus}
+                          </div>
+                        </td>
+                        <td>{job.margin == null ? "—" : `${job.margin}%`}</td>
+                        <td className={job.risk === "None" ? styles.riskOk : styles.risk}>
+                          {job.risk}
+                        </td>
+                        <td>
+                          {job.nextAction}
+                          <div className={styles.panelHint}>Owner: {job.owner}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className={styles.mobileCards}>
+                {filteredJobs.map((job) => (
+                  <article key={job.id} className={styles.jobCard}>
+                    <h3>
+                      {job.customer} · {job.stage}
+                    </h3>
+                    <div className={styles.cardMeta}>
+                      <div>
+                        <span>Price </span>
+                        {formatCurrency(job.price)} · owed {formatCurrency(job.balanceOwed)}
+                      </div>
+                      <div>
+                        <span>Margin </span>
+                        {job.margin == null ? "—" : `${job.margin}%`}
+                      </div>
+                      <div className={job.risk === "None" ? styles.riskOk : styles.risk}>
+                        {job.risk}
+                      </div>
+                      <div>
+                        <span>Next </span>
+                        {job.nextAction} ({job.owner})
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <div className={styles.split}>
+              <section id="leads" className={`${styles.panel} ${styles.scrollTarget}`}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <h2 className={styles.panelTitle}>Lead visibility</h2>
+                    <p className={styles.panelHint}>Including Craig inbox alerts</p>
+                  </div>
                 </div>
-              ))}
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Lead</th>
+                        <th>Source</th>
+                        <th>Stage</th>
+                        <th>Age</th>
+                        <th>Risk</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leads.map((lead) => (
+                        <tr key={lead.id}>
+                          <td>
+                            <strong>{lead.name}</strong>
+                            <div className={styles.panelHint}>
+                              {lead.owner} · {lead.designer}
+                            </div>
+                          </td>
+                          <td>{lead.source}</td>
+                          <td>{lead.stage}</td>
+                          <td>{lead.age}</td>
+                          <td className={styles.risk}>{lead.risk}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={styles.mobileCards}>
+                  {leads.map((lead) => (
+                    <article key={lead.id} className={styles.leadCard}>
+                      <h3>{lead.name}</h3>
+                      <div className={styles.cardMeta}>
+                        <div>
+                          {lead.source} · {lead.stage}
+                        </div>
+                        <div>Age {lead.age}</div>
+                        <div className={styles.risk}>{lead.risk}</div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section id="activity" className={`${styles.panel} ${styles.scrollTarget}`}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <h2 className={styles.panelTitle}>Activity</h2>
+                  </div>
+                </div>
+                <div className={styles.list}>
+                  {activityFeed.map((item) => (
+                    <div key={item.id} className={styles.listItem}>
+                      <strong>{item.time}</strong>
+                      <p>{item.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
             </div>
-          </section>
+
+            <section id="schedule" className={`${styles.panel} ${styles.scrollTarget}`}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <h2 className={styles.panelTitle}>Schedule snapshot</h2>
+                </div>
+              </div>
+              <div className={styles.list}>
+                {schedule.consultations.map((item) => (
+                  <div key={item.customer} className={styles.listItem}>
+                    <strong>Consult · {item.customer}</strong>
+                    <p>
+                      {item.when} · {item.designer} · {item.location}
+                    </p>
+                  </div>
+                ))}
+                {schedule.installs.map((item) => (
+                  <div key={item.customer} className={styles.listItem}>
+                    <strong>Install · {item.customer}</strong>
+                    <p>
+                      {item.when} · {item.installer} · {item.note}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <p className={styles.footerNote}>
+              QuickBooks sample data · live Slack connection · live Claude. Not connected: Community,
+              Studio, or Podium — waiting.
+            </p>
+          </div>
+          </div>
         </div>
-
-        <section className={styles.feedback}>
-          <h2>Feedback for Gavin</h2>
-          <ul>
-            <li>What do you want to see first when you open this on your phone?</li>
-            <li>Which cards can move lower or come off the home screen?</li>
-            <li>Do you want more graphs, or keep this exception-first layout?</li>
-            <li>Should margin alerts be louder than schedule items?</li>
-            <li>{gavinDemoMeta.feedbackPrompt}</li>
-          </ul>
-        </section>
-
-        <p className={styles.footerNote}>
-          Sample data for Inspired Closets Las Vegas · Symphony prototype · not live QuickBooks,
-          Podium, or Community figures
-        </p>
       </div>
     </div>
   );

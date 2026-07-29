@@ -44,6 +44,11 @@ export const gavinDemoMeta = {
 
 export type GavinPeriod = (typeof gavinDemoMeta.periodOptions)[number];
 
+export type MetricDelta = {
+  value: string;
+  direction: "up" | "down" | "flat";
+};
+
 export type FinancialPulseSnapshot = {
   sales: number;
   cashCollected: number;
@@ -61,6 +66,22 @@ export type FinancialPulseSnapshot = {
     unverifiedCosts: string;
     belowGate: string;
   };
+  deltas?: {
+    sales?: MetricDelta;
+    cashCollected?: MetricDelta;
+    outstanding?: MetricDelta;
+    avgMargin?: MetricDelta;
+    unverifiedCosts?: MetricDelta;
+    belowGate?: MetricDelta;
+  };
+};
+
+export type SalesVsLaborPoint = {
+  date: string;
+  label: string;
+  actualSales: number;
+  actualLabor: number;
+  projectedSales: number;
 };
 
 const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
@@ -81,6 +102,14 @@ const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
       unverifiedCosts: "Needs itemized invoices",
       belowGate: "3 active jobs blocked",
     },
+    deltas: {
+      sales: { value: "+8.2%", direction: "up" },
+      cashCollected: { value: "+4.1%", direction: "up" },
+      outstanding: { value: "+2.4%", direction: "up" },
+      avgMargin: { value: "+0.6%", direction: "up" },
+      unverifiedCosts: { value: "−12%", direction: "down" },
+      belowGate: { value: "−1", direction: "down" },
+    },
   },
   "This month": {
     sales: 748200,
@@ -98,6 +127,14 @@ const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
       avgMargin: "Gate: 45% · −0.4 pts vs week",
       unverifiedCosts: "6 vendor invoices open",
       belowGate: "5 active jobs blocked",
+    },
+    deltas: {
+      sales: { value: "+11%", direction: "up" },
+      cashCollected: { value: "+6.2%", direction: "up" },
+      outstanding: { value: "+3.1%", direction: "up" },
+      avgMargin: { value: "−0.4%", direction: "down" },
+      unverifiedCosts: { value: "+5%", direction: "up" },
+      belowGate: { value: "+2", direction: "up" },
     },
   },
   "This quarter": {
@@ -117,6 +154,14 @@ const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
       unverifiedCosts: "Stow lump sums still recurring",
       belowGate: "7 active jobs blocked",
     },
+    deltas: {
+      sales: { value: "+12%", direction: "up" },
+      cashCollected: { value: "+9%", direction: "up" },
+      outstanding: { value: "−18%", direction: "down" },
+      avgMargin: { value: "0%", direction: "flat" },
+      unverifiedCosts: { value: "+3%", direction: "up" },
+      belowGate: { value: "+1", direction: "up" },
+    },
   },
   YtD: {
     sales: 4920000,
@@ -135,6 +180,14 @@ const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
       unverifiedCosts: "14 invoices held for review",
       belowGate: "11 jobs blocked YtD",
     },
+    deltas: {
+      sales: { value: "+18%", direction: "up" },
+      cashCollected: { value: "+15%", direction: "up" },
+      outstanding: { value: "−22%", direction: "down" },
+      avgMargin: { value: "+1.1%", direction: "up" },
+      unverifiedCosts: { value: "−8%", direction: "down" },
+      belowGate: { value: "−2", direction: "down" },
+    },
   },
   YoY: {
     sales: 4920000,
@@ -152,6 +205,14 @@ const periodSnapshots: Record<GavinPeriod, FinancialPulseSnapshot> = {
       avgMargin: "+1.3 pts vs LY · spiff gate holding",
       unverifiedCosts: "−8% vs LY · fewer lump sums",
       belowGate: "−2 jobs vs LY below gate",
+    },
+    deltas: {
+      sales: { value: "+18.4%", direction: "up" },
+      cashCollected: { value: "+15.2%", direction: "up" },
+      outstanding: { value: "−22%", direction: "down" },
+      avgMargin: { value: "+1.3%", direction: "up" },
+      unverifiedCosts: { value: "−8%", direction: "down" },
+      belowGate: { value: "−2", direction: "down" },
     },
   },
 };
@@ -522,6 +583,22 @@ export const chatPrompts = [
   "What Stow costs are unverified?",
   "Which installs are at risk this week?",
   "Any duplicate payment risks?",
+];
+
+/** Synthetic daily series for the Sales vs Labor chart — not live business data. */
+export const salesVsLabor: SalesVsLaborPoint[] = [
+  { date: "2026-07-13", label: "Mon", actualSales: 18200, actualLabor: 6400, projectedSales: 17000 },
+  { date: "2026-07-14", label: "Tue", actualSales: 24600, actualLabor: 8200, projectedSales: 22000 },
+  { date: "2026-07-15", label: "Wed", actualSales: 21400, actualLabor: 7800, projectedSales: 23000 },
+  { date: "2026-07-16", label: "Thu", actualSales: 29800, actualLabor: 9100, projectedSales: 26000 },
+  { date: "2026-07-17", label: "Fri", actualSales: 32100, actualLabor: 9800, projectedSales: 28000 },
+  { date: "2026-07-18", label: "Sat", actualSales: 18400, actualLabor: 5200, projectedSales: 16000 },
+  { date: "2026-07-19", label: "Sun", actualSales: 9200, actualLabor: 2100, projectedSales: 8000 },
+  { date: "2026-07-20", label: "Mon", actualSales: 20500, actualLabor: 7100, projectedSales: 19000 },
+  { date: "2026-07-21", label: "Tue", actualSales: 26700, actualLabor: 8600, projectedSales: 24000 },
+  { date: "2026-07-22", label: "Wed", actualSales: 0, actualLabor: 0, projectedSales: 25000 },
+  { date: "2026-07-23", label: "Thu", actualSales: 0, actualLabor: 0, projectedSales: 27000 },
+  { date: "2026-07-24", label: "Fri", actualSales: 0, actualLabor: 0, projectedSales: 29000 },
 ];
 
 export const pipelineCounts = {

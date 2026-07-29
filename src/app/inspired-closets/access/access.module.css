@@ -1,15 +1,20 @@
 .page {
-  --ink: #1a1f1c;
-  --muted: #66766d;
-  --line: #d9e0da;
-  --accent: #1f6b4f;
-  --surface: #ffffff;
+  --ic-black: #000000;
+  --ic-white: #ffffff;
+  --ic-red: #821f2d;
+  --ic-blush: #fdeae6;
+  --ic-bone: #efe9e5;
+  --ink: var(--ic-black);
+  --muted: rgba(0, 0, 0, 0.55);
+  --line: rgba(0, 0, 0, 0.1);
+  --accent: var(--ic-red);
+  --surface: var(--ic-white);
   min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 1.25rem;
-  background: linear-gradient(180deg, #f4f7f4 0%, #eef3ef 100%);
-  font-family: var(--font-gavin-sans), system-ui, sans-serif;
+  background: var(--ic-bone);
+  font-family: var(--font-gavin-sans), "Lato", system-ui, sans-serif;
   color: var(--ink);
 }
 
@@ -19,7 +24,7 @@
   border: 1px solid var(--line);
   border-radius: 1.25rem;
   padding: 1.5rem;
-  box-shadow: 0 18px 40px rgba(26, 31, 28, 0.08);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.08);
 }
 
 .eyebrow {
@@ -33,9 +38,9 @@
 
 .title {
   margin: 0.45rem 0 0;
-  font-family: var(--font-gavin-display), Georgia, serif;
+  font-family: var(--font-gavin-sans), "Lato", system-ui, sans-serif;
   font-size: 1.75rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .lead {
@@ -53,7 +58,7 @@
 
 .label {
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .input {
@@ -62,18 +67,18 @@
   padding: 0.8rem 0.9rem;
   font: inherit;
   font-size: 1rem;
-  background: #fafcfb;
+  background: var(--ic-bone);
 }
 
 .input:focus {
   outline: none;
-  border-color: #9fc4b3;
-  box-shadow: 0 0 0 3px rgba(31, 107, 79, 0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(130, 31, 45, 0.12);
 }
 
 .error {
   margin: 0;
-  color: #b42318;
+  color: var(--accent);
   font-size: 0.82rem;
 }
 
@@ -82,12 +87,12 @@
   margin-top: 0.35rem;
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--ic-white);
   border-radius: 999px;
   padding: 0.8rem 1rem;
   font: inherit;
   font-size: 0.92rem;
-  font-weight: 650;
+  font-weight: 700;
   cursor: pointer;
   min-height: 2.75rem;
 }

@@ -29,43 +29,49 @@ export default function Home() {
         <div className="background-overlay" aria-hidden />
       </div>
 
-      <SiteHeader variant="dark" />
+      <div className="heroScreen">
+        <SiteHeader variant="dark" />
 
-      {/* Hero Content */}
-      <section className="hero">
-        <h1 className="headline">
-          <span className="headline-line">
-            <span className="headline-inter">Orchestrating </span>
-            <span className="headline-mono">Data</span>
-          </span>
-          <span className="headline-line">
-            <span className="headline-inter">& </span>
-            <span className="headline-mono">Systems</span>
-            <span className="headline-inter">, with </span>
-            <span className="headline-mono">AI</span>
-          </span>
-        </h1>
-        
-        <p className="subheadline">
-          {brand.heroSubhead}
-        </p>
+        <section className="hero">
+          <div className="heroIntro">
+            <h1 className="headline">
+              <span className="headline-line">
+                <span className="headline-inter">Orchestrating </span>
+                <span className="headline-mono">Data</span>
+              </span>
+              <span className="headline-line">
+                <span className="headline-inter">& </span>
+                <span className="headline-mono">Systems</span>
+                <span className="headline-inter">, with </span>
+                <span className="headline-mono">AI</span>
+              </span>
+            </h1>
 
-        <ChatInput />
+            <p className="subheadline">{brand.heroSubhead}</p>
+          </div>
 
-        <p className="chat-note">
-          Answers draw from live studio data—the same source as our orchestration layer. Technical
-          access:{" "}
-          <code className="chat-note-code">/api/mcp/http</code> (Streamable HTTP) or{" "}
-          <code className="chat-note-code">npm run mcp:stdio</code>.
-        </p>
-      </section>
+          <div className="heroFocus">
+            <ChatInput />
+
+            <p className="chat-note">
+              Answers draw from live studio data—the same source as our orchestration layer. Technical
+              access:{" "}
+              <code className="chat-note-code">/api/mcp/http</code> (Streamable HTTP) or{" "}
+              <code className="chat-note-code">npm run mcp:stdio</code>.
+            </p>
+          </div>
+        </section>
+      </div>
 
       <SiteFooter />
 
       <style jsx>{`
         .page {
-          min-height: 100vh;
           position: relative;
+        }
+
+        .heroScreen {
+          min-height: 100dvh;
           display: flex;
           flex-direction: column;
         }
@@ -203,16 +209,30 @@ export default function Home() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 40px 24px 80px;
+          gap: clamp(20px, 4vh, 36px);
+          padding: 16px 24px clamp(28px, 5vh, 48px);
           text-align: center;
         }
 
+        .heroIntro {
+          width: 100%;
+          max-width: 820px;
+        }
+
+        .heroFocus {
+          width: 100%;
+          max-width: 630px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+
         .headline {
-          font-size: 68px;
+          font-size: clamp(2.25rem, 5.2vw, 4rem);
           font-weight: 400;
           color: #fff;
-          line-height: 1.12;
-          margin: 0 0 6px;
+          line-height: 1.1;
+          margin: 0 0 12px;
           letter-spacing: -0.02em;
         }
 
@@ -233,19 +253,19 @@ export default function Home() {
         }
 
         .subheadline {
-          font-size: 19px;
+          font-size: clamp(1rem, 2.1vw, 1.1875rem);
           color: rgba(255, 255, 255, 0.85);
-          max-width: 720px;
+          max-width: 640px;
           width: 100%;
-          margin: 0 auto 32px;
+          margin: 0 auto;
           padding: 0;
-          line-height: 1.32;
+          line-height: 1.35;
         }
 
         .chat-note {
           font-size: 11px;
-          color: rgba(255, 255, 255, 0.35);
-          margin: 12px 0 0;
+          color: rgba(255, 255, 255, 0.32);
+          margin: 10px 0 0;
           letter-spacing: 0.01em;
           max-width: 520px;
           line-height: 1.45;
@@ -261,19 +281,12 @@ export default function Home() {
 
         @media (max-width: 768px) {
           .hero {
-            padding: 32px 20px 60px;
+            gap: 20px;
+            padding: 12px 20px 32px;
           }
 
           .subheadline {
-            font-size: 17px;
             max-width: 100%;
-            margin-bottom: 30px;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .headline {
-            font-size: 2.125rem;
           }
         }
       `}</style>

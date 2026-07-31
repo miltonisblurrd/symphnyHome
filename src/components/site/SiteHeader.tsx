@@ -14,10 +14,10 @@ export default function SiteHeader({ variant = "light" }: SiteHeaderProps) {
     >
       <Link href="/" className={styles.siteLogo}>
         <Image
-          src="/symphnyNavLogo.svg"
-          alt="Symphony"
-          width={160}
-          height={40}
+          src="/logoSymph.png"
+          alt="Symphny"
+          width={180}
+          height={51}
           priority
         />
       </Link>

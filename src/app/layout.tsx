@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   },
   description: brand.tagline,
   metadataBase: new URL(siteConfig.url),
-  icons: { icon: "/favicon.svg" },
+  icons: { icon: "/favicooon.png" },
   openGraph: {
     title: siteConfig.name,
     description: brand.tagline,

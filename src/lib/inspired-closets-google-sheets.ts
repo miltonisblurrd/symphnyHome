@@ -77,6 +77,7 @@ export type OperationsSnapshotProbe = {
   configured: boolean;
   spreadsheetId: string | null;
   serviceAccountEmail: string | null;
+  availableTabs: string[];
   ok: boolean;
   syncedAt: string | null;
   tabCount: number;
@@ -175,10 +176,34 @@ function parseSheetValues(values: string[][]): { headers: string[]; rows: Operat
   return { headers, rows };
 }
 
-function quoteSheetRange(tabName: string): string {
-  if (tabName.startsWith("'") && tabName.endsWith("'")) return tabName;
-  const escaped = tabName.replace(/'/g, "''");
-  return `'${escaped}'`;
+function sheetDataRange(tabName: string): string {
+  const trimmed = tabName.trim();
+  const needsQuotes = /[^A-Za-z0-9_]/.test(trimmed);
+  const escaped = trimmed.replace(/'/g, "''");
+  const sheetRef = needsQuotes ? `'${escaped}'` : escaped;
+  return `${sheetRef}!A1:ZZ${MAX_ROWS_PER_TAB}`;
+}
+
+async function fetchTabValuesSingle(
+  spreadsheetId: string,
+  tabName: string,
+  accessToken: string,
+): Promise<string[][]> {
+  const range = encodeURIComponent(sheetDataRange(tabName));
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  );
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Google Sheets read failed for tab "${tabName}": ${detail}`);
+  }
+
+  const payload = (await response.json()) as { values?: string[][] };
+  return payload.values ?? [];
 }
 
 async function fetchTabValuesBatch(
@@ -190,7 +215,7 @@ async function fetchTabValuesBatch(
 
   const params = new URLSearchParams();
   for (const tabName of tabNames) {
-    params.append("ranges", quoteSheetRange(tabName));
+    params.append("ranges", sheetDataRange(tabName));
   }
   params.set("majorDimension", "ROWS");
 
@@ -202,8 +227,28 @@ async function fetchTabValuesBatch(
   );
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Google Sheets batch read failed: ${detail}`);
+    const batchError = await response.text();
+    const results: Array<{ name: string; values: string[][] }> = [];
+    const errors: string[] = [];
+
+    for (const tabName of tabNames) {
+      try {
+        const values = await fetchTabValuesSingle(spreadsheetId, tabName, accessToken);
+        results.push({ name: tabName, values });
+      } catch (error) {
+        errors.push(
+          error instanceof Error ? error.message : `Failed to read tab "${tabName}".`,
+        );
+      }
+    }
+
+    if (results.length === 0) {
+      throw new Error(
+        errors[0] ?? `Google Sheets batch read failed: ${batchError}`,
+      );
+    }
+
+    return results;
   }
 
   const payload = (await response.json()) as {
@@ -267,12 +312,21 @@ export async function probeOperationsSnapshot(): Promise<OperationsSnapshotProbe
       configured: false,
       spreadsheetId: null,
       serviceAccountEmail: null,
+      availableTabs: [],
       ok: false,
       syncedAt: null,
       tabCount: 0,
       rowCount: 0,
       error: "Missing Google Sheets env vars.",
     };
+  }
+
+  let availableTabs: string[] = [];
+  try {
+    const accessToken = await getGoogleAccessToken(config);
+    availableTabs = await listSheetTabNames(config.spreadsheetId, accessToken);
+  } catch {
+    availableTabs = config.tabNames;
   }
 
   try {
@@ -282,6 +336,7 @@ export async function probeOperationsSnapshot(): Promise<OperationsSnapshotProbe
         configured: true,
         spreadsheetId: config.spreadsheetId,
         serviceAccountEmail: config.serviceAccountEmail,
+        availableTabs,
         ok: false,
         syncedAt: null,
         tabCount: 0,
@@ -294,6 +349,7 @@ export async function probeOperationsSnapshot(): Promise<OperationsSnapshotProbe
       configured: true,
       spreadsheetId: config.spreadsheetId,
       serviceAccountEmail: config.serviceAccountEmail,
+      availableTabs,
       ok: true,
       syncedAt: snapshot.syncedAt,
       tabCount: snapshot.tabs.length,
@@ -305,6 +361,7 @@ export async function probeOperationsSnapshot(): Promise<OperationsSnapshotProbe
       configured: true,
       spreadsheetId: config.spreadsheetId,
       serviceAccountEmail: config.serviceAccountEmail,
+      availableTabs,
       ok: false,
       syncedAt: null,
       tabCount: 0,

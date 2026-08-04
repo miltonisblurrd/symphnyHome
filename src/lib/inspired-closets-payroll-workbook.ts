@@ -29,7 +29,7 @@ export const DEFAULT_RED_2026_TABS = [
 ] as const;
 
 const MARGIN_GATE = gavinDemoMeta.marginGate;
-const MAX_ATTENTION = 24;
+const MAX_ATTENTION = 48;
 const MAX_CUBBY_JOBS = 80;
 const MAX_CELL = 140;
 
@@ -126,7 +126,16 @@ export type WorkbookHub = {
 };
 
 function normalizeKey(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9%]+/g, " ").trim();
+  return value
+    .toLowerCase()
+    .replace(/[\n\r]+/g, " ")
+    .replace(/[^a-z0-9%]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactKey(value: string): string {
+  return normalizeKey(value).replace(/[^a-z0-9]/g, "");
 }
 
 function parseMoney(value: string | undefined): number {
@@ -137,13 +146,17 @@ function parseMoney(value: string | undefined): number {
 }
 
 function parsePercent(value: string | undefined): number | null {
-  if (!value) return null;
-  const cleaned = value.replace(/%/g, "").replace(/,/g, "").trim();
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw || raw === "-" || raw === "—") return null;
+  const cleaned = raw.replace(/%/g, "").replace(/,/g, "").trim();
   if (!cleaned) return null;
   const num = Number(cleaned);
-  if (!Number.isFinite(num)) return null;
-  // Sheet sometimes stores 50 vs 0.50 — treat values <= 1.5 as fractions
-  return num <= 1.5 ? Number((num * 100).toFixed(2)) : Number(num.toFixed(2));
+  if (!Number.isFinite(num) || num < 0) return null;
+  // Sheets may return 0.50 (fraction) or 50 / 50.00 (percent points)
+  if (num > 0 && num <= 1.5) return Number((num * 100).toFixed(2));
+  if (num > 100) return null;
+  return Number(num.toFixed(2));
 }
 
 function parseDate(value: string | undefined): { label: string | null; ms: number | null } {
@@ -179,9 +192,14 @@ function findHeaderIndex(values: string[][]): number {
   return 0;
 }
 
-function pickColumn(headers: string[], predicates: Array<(key: string) => boolean>): number {
+function pickColumn(
+  headers: string[],
+  predicates: Array<(key: string, compact: string) => boolean>,
+): number {
   for (const predicate of predicates) {
-    const index = headers.findIndex((header) => predicate(normalizeKey(header)));
+    const index = headers.findIndex((header) =>
+      predicate(normalizeKey(header), compactKey(header)),
+    );
     if (index >= 0) return index;
   }
   return -1;
@@ -237,8 +255,8 @@ function inPeriod(job: PayrollJob, startMs: number, endMs: number): boolean {
   return job.dateMs >= startMs && job.dateMs <= endMs;
 }
 
-function average(values: number[]): number {
-  if (values.length === 0) return 0;
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
 }
 
@@ -278,37 +296,55 @@ export function parsePayrollJobsFromSnapshot(snapshot: OperationsSnapshot): Payr
     if (headers.length === 0) continue;
 
     const idx = {
-      client: pickColumn(headers, [(k) => k === "client"]),
-      date: pickColumn(headers, [(k) => k === "date"]),
+      client: pickColumn(headers, [(k, c) => k === "client" || c === "client"]),
+      date: pickColumn(headers, [(k, c) => k === "date" || c === "date"]),
       contract: pickColumn(headers, [
+        (k, c) => c.includes("totalcontract"),
+        (k, c) => c === "contractamount",
         (k) => k.includes("total contract"),
-        (k) => k === "contract amount",
-        (k) => k === "total contract amount",
       ]),
-      deposit: pickColumn(headers, [(k) => k === "deposit"]),
+      deposit: pickColumn(headers, [
+        (k, c) => c === "deposit",
+        (k) => k === "deposit",
+      ]),
       marginStart: pickColumn(headers, [
+        (k, c) => c.includes("marginstart"),
+        (k, c) => c === "marginstarting" || c === "marginpctstarting",
         (k) => k.includes("margin") && k.includes("start"),
-        (k) => k === "margin % starting",
       ]),
       contractAfterSpiff: pickColumn(headers, [
+        (k, c) => c.includes("contract") && c.includes("spiff"),
         (k) => k.includes("contract") && k.includes("spiff"),
       ]),
       marginAfterSpiff: pickColumn(headers, [
-        (k) => k.includes("margin") && k.includes("after spiff"),
+        (k, c) => c.includes("marginafterspiff") || c.includes("marginafter"),
+        (k) => k.includes("margin") && k.includes("after") && k.includes("spiff"),
       ]),
       depositAfterSpiff: pickColumn(headers, [
+        (k, c) => c.includes("depositafterspiff") || c.includes("depositspiff"),
+        (k, c) => c === "finalafterspiff",
         (k) => k.includes("deposit") && k.includes("spiff"),
-        (k) => k === "final after spiff",
-        (k) => k === "final",
       ]),
       marginFinal: pickColumn(headers, [
-        (k) => k.includes("margin") && k.includes("final"),
-        (k) => k.includes("final margin"),
+        // Prefer exact final margin, not "final margin after spiff"
+        (k, c) => c === "marginfinal" || c === "marginpctfinal" || c === "finalmargin",
+        (k, c) => c.includes("marginfinal") && !c.includes("spiff"),
+        (k) => k.includes("margin") && k.includes("final") && !k.includes("spiff"),
+        (k, c) => c.includes("finalmargin"),
       ]),
-      comm: pickColumn(headers, [(k) => k.startsWith("comm")]),
-      check: pickColumn(headers, [(k) => k === "check"]),
-      payDate: pickColumn(headers, [(k) => k.includes("pay date")]),
-      notes: pickColumn(headers, [(k) => k === "notes" || k.includes("note")]),
+      comm: pickColumn(headers, [
+        (k, c) => c.startsWith("comm") || c === "commpct",
+        (k) => k.startsWith("comm"),
+      ]),
+      check: pickColumn(headers, [(k, c) => c === "check" || k === "check"]),
+      payDate: pickColumn(headers, [
+        (k, c) => c.includes("paydate"),
+        (k) => k.includes("pay date"),
+      ]),
+      notes: pickColumn(headers, [
+        (k, c) => c === "notes" || c === "note",
+        (k) => k === "notes" || k.includes("note"),
+      ]),
     };
 
     if (idx.client < 0) continue;
@@ -443,13 +479,16 @@ export function buildWorkbookPulse(
     minute: "2-digit",
   });
 
+  const avgMarginStarting = average(startingMargins);
+  const avgMarginFinal = average(finalMargins);
+
   return {
     sales,
     cashCollected,
     outstandingBalances,
     collectionRate,
-    avgMarginStarting: average(startingMargins),
-    avgMarginFinal: average(finalMargins),
+    avgMarginStarting: avgMarginStarting ?? 0,
+    avgMarginFinal: avgMarginFinal ?? 0,
     jobsBelowMarginGate: scoped.filter((job) => job.belowGate).length,
     jobsWithSpiff: scoped.filter((job) => job.hasSpiffAdjustment).length,
     commissionsOpen,
@@ -461,8 +500,12 @@ export function buildWorkbookPulse(
       cashCollected: "Sum of deposits",
       outstanding: "Contract − collected",
       collectionRate: "Cash ÷ sales",
-      avgMarginStarting: "At first deposit",
-      avgMarginFinal: "Final / after spiff",
+      avgMarginStarting: avgMarginStarting == null
+        ? "No starting margin values found"
+        : `At first deposit · n=${startingMargins.length}`,
+      avgMarginFinal: avgMarginFinal == null
+        ? "No final margin values found"
+        : `Final / after spiff · n=${finalMargins.length}`,
       belowGate: `Gate ${MARGIN_GATE}% · synced ${syncLabel}`,
       spiffJobs: "Rows with after-spiff fields",
       commissionsOpen: "CHECK with no pay date",
@@ -507,7 +550,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Review margin / spiff",
         todoLabel: `Review ${job.client} margin on ${job.tab}`,
         todoWhy: `Enforces the ${MARGIN_GATE}% gate before commissions/spiffs.`,
-        defaultAssignee: "Gavin",
+        defaultAssignee: "",
         notifyMessage: `${job.client} on ${job.tab} is at ${margin}% margin (gate ${MARGIN_GATE}%). Please review.`,
         context: job.notes || "Flagged from Payroll Workbook margin columns.",
       });
@@ -524,7 +567,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Follow up collection",
         todoLabel: `Follow up ${job.client} balance note`,
         todoWhy: "NOTES flagged money still owed or retention.",
-        defaultAssignee: "Des",
+        defaultAssignee: "",
         notifyMessage: `${job.client} (${job.designer}): ${truncate(job.notes, 200)}`,
         context: `Tab ${job.tab}. Outstanding math: ${job.outstanding}.`,
       });
@@ -541,7 +584,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Collect remaining deposit",
         todoLabel: `Chase remaining deposit for ${job.client}`,
         todoWhy: "Contract largely uncollected on the workbook.",
-        defaultAssignee: "Des",
+        defaultAssignee: "",
         notifyMessage: `${job.client}: $${job.outstanding.toLocaleString()} still outstanding on a $${job.contract.toLocaleString()} contract.`,
         context: job.notes || `From ${job.tab}.`,
       });
@@ -558,7 +601,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Confirm payroll timing",
         todoLabel: `Confirm commission pay date for ${job.client}`,
         todoWhy: "CHECK logged without PAY DATE.",
-        defaultAssignee: "Lulu",
+        defaultAssignee: "",
         notifyMessage: `${job.designer} has open commission $${job.checkAmount.toLocaleString()} on ${job.client} (no pay date).`,
         context: job.notes || `Tab ${job.tab}.`,
       });
@@ -575,7 +618,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Confirm margin still healthy",
         todoLabel: `Confirm ${job.client} discount still clears gate`,
         todoWhy: "Discount noted as approved — verify final margin.",
-        defaultAssignee: "Gavin",
+        defaultAssignee: "",
         notifyMessage: `${job.client} has a Gavin-approved discount note: ${truncate(job.notes, 160)}`,
         context: `Tab ${job.tab}.`,
       });
@@ -592,7 +635,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
         action: "Review new sale",
         todoLabel: `Review new ${job.client} entry on ${job.tab}`,
         todoWhy: "Recently dated sold job on the workbook.",
-        defaultAssignee: job.designer,
+        defaultAssignee: "",
         notifyMessage: `New workbook sale: ${job.client} · $${job.contract.toLocaleString()} · ${job.designer}.`,
         context: job.notes || `Logged ${job.date}.`,
       });
@@ -645,8 +688,8 @@ export function buildDesignerSummaries(jobs: PayrollJob[]): DesignerSummary[] {
         sales: list.reduce((sum, job) => sum + job.contract, 0),
         deposits: list.reduce((sum, job) => sum + job.collected, 0),
         outstanding: list.reduce((sum, job) => sum + job.outstanding, 0),
-        avgMarginStarting: starting.length ? average(starting) : null,
-        avgMarginFinal: finals.length ? average(finals) : null,
+        avgMarginStarting: average(starting),
+        avgMarginFinal: average(finals),
         belowGateCount: list.filter((job) => job.belowGate).length,
         commissionsOpen: list
           .filter((job) => job.commissionOpen)

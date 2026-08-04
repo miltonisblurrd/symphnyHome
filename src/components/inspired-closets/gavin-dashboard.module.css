@@ -697,30 +697,47 @@
   display: grid;
   grid-template-columns: 1.35fr 0.95fr;
   gap: 0.85rem;
-  align-items: stretch;
+  align-items: start;
 }
 
-.attentionPanel,
+.attentionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-self: start;
+}
+
 .chatBox {
-  height: 100%;
-  min-height: 0;
+  min-height: 22rem;
   display: flex;
   flex-direction: column;
 }
 
 .attentionList {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: grid;
   gap: 0.55rem;
 }
 
+.attentionPager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding-top: 0.15rem;
+}
+
+.pendingDoneBar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.85rem 0.75rem;
+}
+
 .financeRightCol {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 0.85rem;
-  height: 100%;
+  align-content: start;
   min-height: 0;
 }
 

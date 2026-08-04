@@ -23,6 +23,9 @@ import styles from "./gavin-dashboard.module.css";
 
 type Period = (typeof gavinDemoMeta.periodOptions)[number];
 type StageFilter = "All" | JobStage;
+type AttentionFilter = "critical" | "warning" | "done";
+
+const ATTENTION_PAGE_SIZE = 8;
 
 function severityClass(severity: AttentionSeverity) {
   if (severity === "critical") return styles.severityCritical;
@@ -98,13 +101,14 @@ export default function GavinDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [doneTodos, setDoneTodos] = useState<Record<string, boolean>>({});
-  const [assignees, setAssignees] = useState<Record<string, string>>(() =>
-    Object.fromEntries(attentionItems.map((item) => [item.id, item.defaultAssignee])),
-  );
+  const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({});
+  const [assignees, setAssignees] = useState<Record<string, string>>({});
   const [assignOpenId, setAssignOpenId] = useState<string | null>(null);
   const [notifiedAt, setNotifiedAt] = useState<Record<string, string>>({});
   const [notifyLoadingId, setNotifyLoadingId] = useState<string | null>(null);
   const [actionFlash, setActionFlash] = useState<string | null>(null);
+  const [attentionFilter, setAttentionFilter] = useState<AttentionFilter>("critical");
+  const [attentionPage, setAttentionPage] = useState(0);
   const chatThreadRef = useRef<HTMLDivElement>(null);
 
   const activeAttention = liveAttention ?? attentionItems;
@@ -159,13 +163,7 @@ export default function GavinDashboard() {
           setLiveAttention(payload.hub.attentionItems);
           setWorkbookSyncedAt(payload.hub.syncedAt);
           setWorkbookReady(true);
-          setAssignees((prev) => {
-            const next = { ...prev };
-            for (const item of payload.hub!.attentionItems) {
-              if (!next[item.id]) next[item.id] = item.defaultAssignee;
-            }
-            return next;
-          });
+          setAttentionPage(0);
           return;
         }
 
@@ -258,38 +256,97 @@ export default function GavinDashboard() {
     return jobs.filter((job) => job.stage === stageFilter);
   }, [stageFilter]);
 
-  const todosRemaining = activeAttention.filter((item) => !doneTodos[item.id]).length;
+  const criticalCount = activeAttention.filter(
+    (item) => item.severity === "critical" && !doneTodos[item.id],
+  ).length;
+  const warningCount = activeAttention.filter(
+    (item) =>
+      (item.severity === "warning" || item.severity === "info") && !doneTodos[item.id],
+  ).length;
+  const doneCount = activeAttention.filter((item) => doneTodos[item.id]).length;
+  const todosRemaining = criticalCount + warningCount;
 
   const searchLower = search.trim().toLowerCase();
-  const visibleAttention = useMemo(() => {
-    if (!searchLower) return activeAttention;
-    return activeAttention.filter(
-      (item) =>
-        item.title.toLowerCase().includes(searchLower) ||
-        item.detail.toLowerCase().includes(searchLower) ||
-        item.todoLabel.toLowerCase().includes(searchLower),
-    );
-  }, [searchLower, activeAttention]);
+  const filteredAttention = useMemo(() => {
+    const searched = !searchLower
+      ? activeAttention
+      : activeAttention.filter(
+          (item) =>
+            item.title.toLowerCase().includes(searchLower) ||
+            item.detail.toLowerCase().includes(searchLower) ||
+            item.todoLabel.toLowerCase().includes(searchLower),
+        );
+
+    return searched.filter((item) => {
+      const isDone = Boolean(doneTodos[item.id]);
+      if (attentionFilter === "done") return isDone;
+      if (isDone) return false;
+      if (attentionFilter === "critical") return item.severity === "critical";
+      return item.severity === "warning" || item.severity === "info";
+    });
+  }, [searchLower, activeAttention, attentionFilter, doneTodos]);
+
+  const attentionPageCount = Math.max(1, Math.ceil(filteredAttention.length / ATTENTION_PAGE_SIZE));
+  const safeAttentionPage = Math.min(attentionPage, attentionPageCount - 1);
+  const visibleAttention = filteredAttention.slice(
+    safeAttentionPage * ATTENTION_PAGE_SIZE,
+    safeAttentionPage * ATTENTION_PAGE_SIZE + ATTENTION_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setAttentionPage(0);
+  }, [attentionFilter, searchLower, period]);
 
   const flash = (message: string) => {
     setActionFlash(message);
     window.setTimeout(() => setActionFlash(null), 2800);
   };
 
-  const toggleTodo = (id: string) => {
-    setDoneTodos((prev) => ({ ...prev, [id]: !prev[id] }));
+  const togglePendingDone = (id: string) => {
+    setPendingDone((prev) => ({ ...prev, [id]: !prev[id] }));
     setExpandedId(id);
+  };
+
+  const confirmMarkDone = (id: string) => {
+    setDoneTodos((prev) => ({ ...prev, [id]: true }));
+    setPendingDone((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setExpandedId(null);
+    flash("Marked as done. Find it under the Done tab.");
+  };
+
+  const reopenTodo = (id: string) => {
+    setDoneTodos((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setPendingDone((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    flash("Moved back to open attention.");
   };
 
   const assignTodo = (itemId: string, person: string) => {
     setAssignees((prev) => ({ ...prev, [itemId]: person }));
     setAssignOpenId(null);
     setExpandedId(itemId);
-    flash(`Assigned to ${person}. Notify them when you’re ready.`);
+    flash(`Assigned to ${person}. You can notify them on Slack now.`);
   };
 
   const notifyAssignee = async (item: LiveAttentionItem) => {
-    const person = assignees[item.id] ?? item.defaultAssignee;
+    const person = assignees[item.id]?.trim();
+    if (!person) {
+      flash("Select who to assign before notifying on Slack.");
+      setAssignOpenId(item.id);
+      setExpandedId(item.id);
+      return;
+    }
     setNotifyLoadingId(item.id);
     setExpandedId(item.id);
 
@@ -386,26 +443,6 @@ export default function GavinDashboard() {
                 </div>
               </div>
 
-              <div className={styles.filterRows}>
-                <div className={`${styles.filterRow} ${styles.filterRowToolbar}`}>
-                  {gavinDemoMeta.periodOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={`${styles.periodBtn} ${period === option ? styles.periodBtnActive : ""}`}
-                      onClick={() => setPeriod(option)}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                  <button type="button" className={styles.exportBtn}>
-                    <span className={styles.exportIcon} aria-hidden>
-                      ↗
-                    </span>
-                    Export
-                  </button>
-                </div>
-              </div>
             </div>
 
             <div className={styles.heroGrid}>
@@ -417,25 +454,56 @@ export default function GavinDashboard() {
                   <div>
                     <h2 className={styles.panelTitle}>Today&apos;s attention</h2>
                     <p className={styles.panelHint}>
-                      {todosRemaining} open · {period} ·{" "}
+                      {todosRemaining} open · {criticalCount} critical · {warningCount} warning ·{" "}
+                      {doneCount} done ·{" "}
                       {workbookReady
-                        ? "from red 2026 tabs · assign or Slack notify"
+                        ? "from red 2026 tabs"
                         : "demo data · connect workbook for live items"}
                     </p>
                   </div>
                 </div>
+
+                <div className={styles.filterRow}>
+                  {(
+                    [
+                      { id: "critical" as const, label: "Critical", count: criticalCount },
+                      { id: "warning" as const, label: "Warning", count: warningCount },
+                      { id: "done" as const, label: "Done", count: doneCount },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`${styles.periodBtn} ${
+                        attentionFilter === tab.id ? styles.periodBtnActive : ""
+                      }`}
+                      onClick={() => setAttentionFilter(tab.id)}
+                    >
+                      {tab.label} ({tab.count})
+                    </button>
+                  ))}
+                </div>
+
                 {actionFlash ? <p className={styles.todoFlash}>{actionFlash}</p> : null}
                 <div className={styles.attentionList}>
+                  {visibleAttention.length === 0 ? (
+                    <p className={styles.panelHint}>
+                      {attentionFilter === "done"
+                        ? "No completed items yet."
+                        : `No ${attentionFilter} items right now.`}
+                    </p>
+                  ) : null}
                   {visibleAttention.map((item) => {
                     const open = expandedId === item.id;
-                    const checked = Boolean(doneTodos[item.id]);
-                    const assignee = assignees[item.id] ?? item.defaultAssignee;
+                    const isDone = Boolean(doneTodos[item.id]);
+                    const isPendingDone = Boolean(pendingDone[item.id]);
+                    const assignee = assignees[item.id] ?? "";
                     const notified = notifiedAt[item.id];
                     const assignOpen = assignOpenId === item.id;
                     return (
                       <article
                         key={item.id}
-                        className={`${styles.attentionCard} ${checked ? styles.attentionCardDone : ""}`}
+                        className={`${styles.attentionCard} ${isDone ? styles.attentionCardDone : ""}`}
                       >
                         <button
                           type="button"
@@ -447,10 +515,13 @@ export default function GavinDashboard() {
                           <input
                             type="checkbox"
                             className={styles.todoCheck}
-                            checked={checked}
-                            aria-label={`Mark ${item.title} complete`}
+                            checked={isDone || isPendingDone}
+                            disabled={isDone}
+                            aria-label={`Select ${item.title} to mark done`}
                             onClick={(event) => event.stopPropagation()}
-                            onChange={() => toggleTodo(item.id)}
+                            onChange={() => {
+                              if (!isDone) togglePendingDone(item.id);
+                            }}
                           />
                           <span className={styles.attentionToggleBody}>
                             <span className={styles.attentionTop}>
@@ -469,7 +540,13 @@ export default function GavinDashboard() {
                             <p className={styles.attentionDetail}>{item.detail}</p>
                             <div className={styles.attentionMeta}>
                               <span>
-                                Assigned: <strong>{assignee}</strong>
+                                {assignee ? (
+                                  <>
+                                    Assigned: <strong>{assignee}</strong>
+                                  </>
+                                ) : (
+                                  <strong>Unassigned</strong>
+                                )}
                                 {notified ? ` · Notified ${notified}` : ""}
                               </span>
                               <span
@@ -489,27 +566,50 @@ export default function GavinDashboard() {
                             <p className={styles.actionWhy}>{item.todoWhy}</p>
                             <p className={styles.actionContext}>{item.context}</p>
                             <div className={styles.todoActions}>
-                              <button
-                                type="button"
-                                className={styles.todoActionBtn}
-                                onClick={() => setAssignOpenId(assignOpen ? null : item.id)}
-                              >
-                                Assign
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
-                                disabled={notifyLoadingId === item.id}
-                                onClick={() => notifyAssignee(item)}
-                              >
-                                {notifyLoadingId === item.id
-                                  ? "Sending…"
-                                  : `Notify ${assignee}`}
-                              </button>
+                              {isDone ? (
+                                <button
+                                  type="button"
+                                  className={styles.todoActionBtn}
+                                  onClick={() => reopenTodo(item.id)}
+                                >
+                                  Reopen
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className={styles.todoActionBtn}
+                                    onClick={() => setAssignOpenId(assignOpen ? null : item.id)}
+                                  >
+                                    {assignee ? `Assigned: ${assignee}` : "Select assignee"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
+                                    disabled={notifyLoadingId === item.id || !assignee}
+                                    onClick={() => notifyAssignee(item)}
+                                  >
+                                    {notifyLoadingId === item.id
+                                      ? "Sending…"
+                                      : assignee
+                                        ? `Notify ${assignee}`
+                                        : "Notify (assign first)"}
+                                  </button>
+                                  {isPendingDone ? (
+                                    <button
+                                      type="button"
+                                      className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
+                                      onClick={() => confirmMarkDone(item.id)}
+                                    >
+                                      Mark as done
+                                    </button>
+                                  ) : null}
+                                </>
+                              )}
                             </div>
-                            {assignOpen ? (
+                            {assignOpen && !isDone ? (
                               <div className={styles.assignPicker}>
-                                <p className={styles.assignHint}>Assign to:</p>
+                                <p className={styles.assignHint}>Select who to assign this to:</p>
                                 <div className={styles.assignChoices}>
                                   {assignablePeople.map((person) => (
                                     <button
@@ -528,13 +628,70 @@ export default function GavinDashboard() {
                             ) : null}
                           </div>
                         ) : null}
+                        {!open && isPendingDone && !isDone ? (
+                          <div className={styles.pendingDoneBar}>
+                            <button
+                              type="button"
+                              className={`${styles.todoActionBtn} ${styles.todoActionPrimary}`}
+                              onClick={() => confirmMarkDone(item.id)}
+                            >
+                              Mark as done
+                            </button>
+                          </div>
+                        ) : null}
                       </article>
                     );
                   })}
                 </div>
+
+                {filteredAttention.length > ATTENTION_PAGE_SIZE ? (
+                  <div className={styles.attentionPager}>
+                    <button
+                      type="button"
+                      className={styles.todoActionBtn}
+                      disabled={safeAttentionPage <= 0}
+                      onClick={() => setAttentionPage((page) => Math.max(0, page - 1))}
+                    >
+                      Previous
+                    </button>
+                    <span className={styles.panelHint}>
+                      Page {safeAttentionPage + 1} of {attentionPageCount} · showing{" "}
+                      {visibleAttention.length} of {filteredAttention.length}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.todoActionBtn}
+                      disabled={safeAttentionPage >= attentionPageCount - 1}
+                      onClick={() =>
+                        setAttentionPage((page) => Math.min(attentionPageCount - 1, page + 1))
+                      }
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
               </section>
 
               <div className={styles.financeRightCol}>
+                <div className={`${styles.filterRow} ${styles.filterRowToolbar}`}>
+                  {gavinDemoMeta.periodOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`${styles.periodBtn} ${period === option ? styles.periodBtnActive : ""}`}
+                      onClick={() => setPeriod(option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                  <button type="button" className={styles.exportBtn}>
+                    <span className={styles.exportIcon} aria-hidden>
+                      ↗
+                    </span>
+                    Export
+                  </button>
+                </div>
+
                 <section
                   id="finance"
                   className={`${styles.panel} ${styles.financePanel} ${styles.scrollTarget}`}
@@ -592,7 +749,11 @@ export default function GavinDashboard() {
                     <div className={`${styles.metric} ${styles.metricGood}`}>
                       <p className={styles.metricLabel}>Avg margin starting</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? `${workbookPulse.avgMarginStarting}%` : `${periodFinancialPulse.avgMargin}%`}
+                        {workbookPulse
+                          ? workbookPulse.metricNotes.avgMarginStarting.startsWith("No ")
+                            ? "—"
+                            : `${workbookPulse.avgMarginStarting}%`
+                          : `${periodFinancialPulse.avgMargin}%`}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.avgMarginStarting ?? "At first deposit"}
@@ -601,7 +762,11 @@ export default function GavinDashboard() {
                     <div className={`${styles.metric} ${styles.metricGood}`}>
                       <p className={styles.metricLabel}>Avg margin final</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? `${workbookPulse.avgMarginFinal}%` : `${periodFinancialPulse.avgMargin}%`}
+                        {workbookPulse
+                          ? workbookPulse.metricNotes.avgMarginFinal.startsWith("No ")
+                            ? "—"
+                            : `${workbookPulse.avgMarginFinal}%`
+                          : `${periodFinancialPulse.avgMargin}%`}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.avgMarginFinal ?? "Final / after spiff"}

@@ -169,7 +169,7 @@ async function fetchTabValuesSingle(
 ): Promise<string[][]> {
   const range = encodeURIComponent(sheetDataRange(tabName));
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueRenderOption=FORMATTED_VALUE`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
@@ -196,6 +196,7 @@ async function fetchTabValuesBatch(
     params.append("ranges", sheetDataRange(tabName));
   }
   params.set("majorDimension", "ROWS");
+  params.set("valueRenderOption", "FORMATTED_VALUE");
 
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${params.toString()}`,

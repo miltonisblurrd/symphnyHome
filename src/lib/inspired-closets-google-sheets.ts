@@ -175,6 +175,12 @@ function parseSheetValues(values: string[][]): { headers: string[]; rows: Operat
   return { headers, rows };
 }
 
+function quoteSheetRange(tabName: string): string {
+  if (tabName.startsWith("'") && tabName.endsWith("'")) return tabName;
+  const escaped = tabName.replace(/'/g, "''");
+  return `'${escaped}'`;
+}
+
 async function fetchTabValuesBatch(
   spreadsheetId: string,
   tabNames: string[],
@@ -184,7 +190,7 @@ async function fetchTabValuesBatch(
 
   const params = new URLSearchParams();
   for (const tabName of tabNames) {
-    params.append("ranges", tabName);
+    params.append("ranges", quoteSheetRange(tabName));
   }
   params.set("majorDimension", "ROWS");
 

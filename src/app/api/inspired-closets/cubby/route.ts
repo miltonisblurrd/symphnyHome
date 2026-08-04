@@ -58,7 +58,15 @@ export async function POST(request: Request) {
   const model = process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
 
   const livePulse = await fetchQuickBooksFinancialPulse(period).catch(() => null);
-  const operationsSnapshot = await fetchOperationsSnapshot().catch(() => null);
+  let operationsSnapshot = null;
+  try {
+    operationsSnapshot = await fetchOperationsSnapshot();
+  } catch (error) {
+    console.error(
+      "[cubby] Google Sheets sync failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
   const demoPulse = getFinancialPulseForPeriod(period);
   const pulseForInsights = livePulse
     ? {

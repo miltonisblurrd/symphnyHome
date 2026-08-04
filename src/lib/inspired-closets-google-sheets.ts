@@ -36,12 +36,29 @@ function base64Url(value: string | Buffer): string {
   return buffer.toString("base64url");
 }
 
+function normalizeSpreadsheetId(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match?.[1] ?? trimmed;
+}
+
+function normalizePrivateKey(value: string): string {
+  let key = value.trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+  return key.replace(/\\n/g, "\n");
+}
+
 export function getGoogleSheetsConfig(): GoogleSheetsConfig | null {
-  const spreadsheetId = process.env.INSPIRED_CLOSETS_GOOGLE_SHEETS_ID?.trim();
+  const spreadsheetIdRaw = process.env.INSPIRED_CLOSETS_GOOGLE_SHEETS_ID?.trim();
   const serviceAccountEmail = process.env.INSPIRED_CLOSETS_GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
   const privateKeyRaw = process.env.INSPIRED_CLOSETS_GOOGLE_PRIVATE_KEY?.trim();
 
-  if (!spreadsheetId || !serviceAccountEmail || !privateKeyRaw) return null;
+  if (!spreadsheetIdRaw || !serviceAccountEmail || !privateKeyRaw) return null;
 
   const tabNames =
     process.env.INSPIRED_CLOSETS_GOOGLE_SHEET_TABS?.split(",")
@@ -49,12 +66,23 @@ export function getGoogleSheetsConfig(): GoogleSheetsConfig | null {
       .filter(Boolean) ?? [];
 
   return {
-    spreadsheetId,
+    spreadsheetId: normalizeSpreadsheetId(spreadsheetIdRaw),
     serviceAccountEmail,
-    privateKey: privateKeyRaw.replace(/\\n/g, "\n"),
+    privateKey: normalizePrivateKey(privateKeyRaw),
     tabNames,
   };
 }
+
+export type OperationsSnapshotProbe = {
+  configured: boolean;
+  spreadsheetId: string | null;
+  serviceAccountEmail: string | null;
+  ok: boolean;
+  syncedAt: string | null;
+  tabCount: number;
+  rowCount: number;
+  error: string | null;
+};
 
 async function getGoogleAccessToken(config: GoogleSheetsConfig): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -147,14 +175,21 @@ function parseSheetValues(values: string[][]): { headers: string[]; rows: Operat
   return { headers, rows };
 }
 
-async function fetchTabValues(
+async function fetchTabValuesBatch(
   spreadsheetId: string,
-  tabName: string,
+  tabNames: string[],
   accessToken: string,
-): Promise<string[][]> {
-  const range = encodeURIComponent(tabName);
+): Promise<Array<{ name: string; values: string[][] }>> {
+  if (tabNames.length === 0) return [];
+
+  const params = new URLSearchParams();
+  for (const tabName of tabNames) {
+    params.append("ranges", tabName);
+  }
+  params.set("majorDimension", "ROWS");
+
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${params.toString()}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
@@ -162,11 +197,17 @@ async function fetchTabValues(
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`Google Sheets read failed for tab "${tabName}": ${detail}`);
+    throw new Error(`Google Sheets batch read failed: ${detail}`);
   }
 
-  const payload = (await response.json()) as { values?: string[][] };
-  return payload.values ?? [];
+  const payload = (await response.json()) as {
+    valueRanges?: Array<{ range?: string; values?: string[][] }>;
+  };
+
+  return (payload.valueRanges ?? []).map((entry, index) => ({
+    name: tabNames[index] ?? entry.range ?? `tab_${index + 1}`,
+    values: entry.values ?? [],
+  }));
 }
 
 export async function fetchOperationsSnapshot(
@@ -191,18 +232,16 @@ export async function fetchOperationsSnapshot(
     throw new Error("No Google Sheet tabs found to sync.");
   }
 
-  const tabs = await Promise.all(
-    tabNames.map(async (name) => {
-      const values = await fetchTabValues(config.spreadsheetId, name, accessToken);
-      const parsed = parseSheetValues(values);
-      return {
-        name,
-        headers: parsed.headers,
-        rowCount: parsed.rows.length,
-        rows: parsed.rows,
-      };
-    }),
-  );
+  const batchedTabs = await fetchTabValuesBatch(config.spreadsheetId, tabNames, accessToken);
+  const tabs = batchedTabs.map(({ name, values }) => {
+    const parsed = parseSheetValues(values);
+    return {
+      name,
+      headers: parsed.headers,
+      rowCount: parsed.rows.length,
+      rows: parsed.rows,
+    };
+  });
 
   const snapshot: OperationsSnapshot = {
     source: "google_sheets",
@@ -213,4 +252,58 @@ export async function fetchOperationsSnapshot(
 
   snapshotCache = { snapshot, fetchedAt: Date.now() };
   return snapshot;
+}
+
+export async function probeOperationsSnapshot(): Promise<OperationsSnapshotProbe> {
+  const config = getGoogleSheetsConfig();
+  if (!config) {
+    return {
+      configured: false,
+      spreadsheetId: null,
+      serviceAccountEmail: null,
+      ok: false,
+      syncedAt: null,
+      tabCount: 0,
+      rowCount: 0,
+      error: "Missing Google Sheets env vars.",
+    };
+  }
+
+  try {
+    const snapshot = await fetchOperationsSnapshot({ forceRefresh: true });
+    if (!snapshot) {
+      return {
+        configured: true,
+        spreadsheetId: config.spreadsheetId,
+        serviceAccountEmail: config.serviceAccountEmail,
+        ok: false,
+        syncedAt: null,
+        tabCount: 0,
+        rowCount: 0,
+        error: "Snapshot returned empty.",
+      };
+    }
+
+    return {
+      configured: true,
+      spreadsheetId: config.spreadsheetId,
+      serviceAccountEmail: config.serviceAccountEmail,
+      ok: true,
+      syncedAt: snapshot.syncedAt,
+      tabCount: snapshot.tabs.length,
+      rowCount: snapshot.tabs.reduce((sum, tab) => sum + tab.rowCount, 0),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      spreadsheetId: config.spreadsheetId,
+      serviceAccountEmail: config.serviceAccountEmail,
+      ok: false,
+      syncedAt: null,
+      tabCount: 0,
+      rowCount: 0,
+      error: error instanceof Error ? error.message : "Google Sheets sync failed.",
+    };
+  }
 }

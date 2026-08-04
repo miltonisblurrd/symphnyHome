@@ -1,4 +1,5 @@
 import { createSign } from "crypto";
+import { filterDefaultSyncTabs } from "@/lib/inspired-closets-ops-context";
 
 export type GoogleSheetsConfig = {
   spreadsheetId: string;
@@ -277,7 +278,9 @@ export async function fetchOperationsSnapshot(
 
   const accessToken = await getGoogleAccessToken(config);
   const tabNames =
-    config.tabNames.length > 0 ? config.tabNames : await listSheetTabNames(config.spreadsheetId, accessToken);
+    config.tabNames.length > 0
+      ? config.tabNames
+      : filterDefaultSyncTabs(await listSheetTabNames(config.spreadsheetId, accessToken));
 
   if (tabNames.length === 0) {
     throw new Error("No Google Sheet tabs found to sync.");

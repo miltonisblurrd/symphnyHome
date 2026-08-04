@@ -11,6 +11,7 @@ import {
   type GavinPeriod,
 } from "@/data/inspired-closets-gavin-demo";
 import { buildSymphonyInsights, resolveSymphonyAnswer } from "@/lib/inspired-closets-symphony-insights";
+import { buildCubbyOperationsContext } from "@/lib/inspired-closets-ops-context";
 import { fetchOperationsSnapshot } from "@/lib/inspired-closets-google-sheets";
 import { fetchQuickBooksFinancialPulse } from "@/lib/quickbooks";
 
@@ -105,16 +106,7 @@ export async function POST(request: Request) {
     financialPulseSource: livePulse ? "quickbooks_sandbox" : "demo",
     quickBooksCompany: livePulse?.companyName ?? null,
     operationsSnapshot: operationsSnapshot
-      ? {
-          source: operationsSnapshot.source,
-          syncedAt: operationsSnapshot.syncedAt,
-          tabs: operationsSnapshot.tabs.map((tab) => ({
-            name: tab.name,
-            headers: tab.headers,
-            rowCount: tab.rowCount,
-            rows: tab.rows,
-          })),
-        }
+      ? buildCubbyOperationsContext(operationsSnapshot, question)
       : null,
     attentionItems: attentionItems.map((item) => ({
       severity: item.severity,
@@ -139,7 +131,8 @@ export async function POST(request: Request) {
       system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant inside Gavin's dashboard.
 Answer in plain, confident language for a busy executive.
 Use ONLY the provided Ops Hub context. If QuickBooks sandbox data is present, prefer it for money questions.
-If operationsSnapshot (Craig's Google Sheet) is present, prefer it for jobs, installs, scheduling, pipeline, and ops status questions.
+If operationsSnapshot is present, it is the REB 26 master client list from Craig's Google Sheet.
+Prefer it for current clients, pipeline, job status, installs, and scheduling questions.
 When using sheet data, mention it reflects the last syncedAt timestamp when timing matters.
 If something is not in context, say what is missing instead of inventing numbers.
 Keep answers concise — usually 2-4 sentences unless listing urgent items.`,

@@ -30,7 +30,13 @@ function severityClass(severity: AttentionSeverity) {
   return styles.severityInfo;
 }
 
-type CubbySource = "demo" | "claude+demo" | "claude+quickbooks" | "demo-fallback";
+type CubbySource =
+  | "demo"
+  | "claude+demo"
+  | "claude+quickbooks"
+  | "claude+sheets"
+  | "claude+quickbooks+sheets"
+  | "demo-fallback";
 
 type ChatMessage = {
   id: string;
@@ -40,7 +46,9 @@ type ChatMessage = {
 };
 
 function cubbySourceLabel(source: CubbySource) {
+  if (source === "claude+quickbooks+sheets") return "Live · Claude + QuickBooks + Craig sheet";
   if (source === "claude+quickbooks") return "Live · Claude + QuickBooks";
+  if (source === "claude+sheets") return "Live · Claude + Craig sheet";
   if (source === "claude+demo") return "Live · Claude";
   if (source === "demo-fallback") return "Demo fallback · Claude unavailable";
   return "Demo · no API key";

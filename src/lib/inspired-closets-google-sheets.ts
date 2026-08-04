@@ -1,5 +1,8 @@
 import { createSign } from "crypto";
-import { filterDefaultSyncTabs } from "@/lib/inspired-closets-ops-context";
+import {
+  filterDefaultSyncTabs,
+  reparseTabWithDetectedHeaders,
+} from "@/lib/inspired-closets-payroll-workbook";
 
 export type GoogleSheetsConfig = {
   spreadsheetId: string;
@@ -28,7 +31,7 @@ type CachedSnapshot = {
 };
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
-const MAX_ROWS_PER_TAB = 500;
+const MAX_ROWS_PER_TAB = 1000;
 
 let snapshotCache: CachedSnapshot | null = null;
 
@@ -151,32 +154,6 @@ async function listSheetTabNames(
     .filter((title): title is string => Boolean(title));
 }
 
-function normalizeHeader(value: string, index: number): string {
-  const trimmed = value.trim();
-  return trimmed || `column_${index + 1}`;
-}
-
-function parseSheetValues(values: string[][]): { headers: string[]; rows: OperationsSheetRow[] } {
-  if (values.length === 0) {
-    return { headers: [], rows: [] };
-  }
-
-  const headers = values[0].map(normalizeHeader);
-  const rows: OperationsSheetRow[] = [];
-
-  for (const rawRow of values.slice(1, MAX_ROWS_PER_TAB + 1)) {
-    if (!rawRow.some((cell) => cell.trim())) continue;
-
-    const row: OperationsSheetRow = {};
-    headers.forEach((header, index) => {
-      row[header] = rawRow[index]?.trim() ?? "";
-    });
-    rows.push(row);
-  }
-
-  return { headers, rows };
-}
-
 function sheetDataRange(tabName: string): string {
   const trimmed = tabName.trim();
   const needsQuotes = /[^A-Za-z0-9_]/.test(trimmed);
@@ -286,9 +263,17 @@ export async function fetchOperationsSnapshot(
     throw new Error("No Google Sheet tabs found to sync.");
   }
 
-  const batchedTabs = await fetchTabValuesBatch(config.spreadsheetId, tabNames, accessToken);
+  // Batch in chunks to stay under Sheets API URL/range limits
+  const chunkSize = 8;
+  const batchedTabs: Array<{ name: string; values: string[][] }> = [];
+  for (let i = 0; i < tabNames.length; i += chunkSize) {
+    const chunk = tabNames.slice(i, i + chunkSize);
+    const part = await fetchTabValuesBatch(config.spreadsheetId, chunk, accessToken);
+    batchedTabs.push(...part);
+  }
+
   const tabs = batchedTabs.map(({ name, values }) => {
-    const parsed = parseSheetValues(values);
+    const parsed = reparseTabWithDetectedHeaders(name, values);
     return {
       name,
       headers: parsed.headers,

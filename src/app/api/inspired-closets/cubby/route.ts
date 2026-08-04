@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import {
-  attentionItems,
   financeExceptions,
   formatCurrency,
   gavinDemoMeta,
@@ -11,9 +10,11 @@ import {
   type GavinPeriod,
 } from "@/data/inspired-closets-gavin-demo";
 import { buildSymphonyInsights, resolveSymphonyAnswer } from "@/lib/inspired-closets-symphony-insights";
-import { buildCubbyOperationsContext } from "@/lib/inspired-closets-ops-context";
 import { fetchOperationsSnapshot } from "@/lib/inspired-closets-google-sheets";
-import { fetchQuickBooksFinancialPulse } from "@/lib/quickbooks";
+import {
+  buildCubbyWorkbookContext,
+  buildWorkbookHub,
+} from "@/lib/inspired-closets-payroll-workbook";
 
 export const runtime = "nodejs";
 
@@ -22,19 +23,14 @@ const DEFAULT_MODEL = "claude-sonnet-5";
 export type CubbyResponseSource =
   | "demo"
   | "claude+demo"
-  | "claude+quickbooks"
   | "claude+sheets"
-  | "claude+quickbooks+sheets"
   | "demo-fallback";
 
 function resolveCubbySource(input: {
-  hasQuickBooks: boolean;
   hasSheets: boolean;
   fallback?: boolean;
 }): CubbyResponseSource {
   if (input.fallback) return "demo-fallback";
-  if (input.hasQuickBooks && input.hasSheets) return "claude+quickbooks+sheets";
-  if (input.hasQuickBooks) return "claude+quickbooks";
   if (input.hasSheets) return "claude+sheets";
   return "claude+demo";
 }
@@ -58,31 +54,59 @@ export async function POST(request: Request) {
   const apiKey = process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim();
   const model = process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
 
-  const livePulse = await fetchQuickBooksFinancialPulse(period).catch(() => null);
-  let operationsSnapshot = null;
+  let workbookContext = null;
+  let hubAttention = null;
+  let workbookPulse = null;
+
   try {
-    operationsSnapshot = await fetchOperationsSnapshot();
+    const snapshot = await fetchOperationsSnapshot();
+    if (snapshot) {
+      const hub = buildWorkbookHub(snapshot, period);
+      workbookPulse = hub.pulse;
+      hubAttention = hub.attentionItems;
+      workbookContext = buildCubbyWorkbookContext(snapshot, period, question);
+    }
   } catch (error) {
     console.error(
-      "[cubby] Google Sheets sync failed:",
+      "[cubby] Payroll workbook sync failed:",
       error instanceof Error ? error.message : error,
     );
   }
+
   const demoPulse = getFinancialPulseForPeriod(period);
-  const pulseForInsights = livePulse
+  const pulseForInsights = workbookPulse
     ? {
-        sales: livePulse.sales,
-        cashCollected: livePulse.cashCollected,
-        outstandingBalances: livePulse.outstandingBalances,
-        avgMargin: livePulse.avgMargin || demoPulse.avgMargin,
-        unverifiedCosts: livePulse.unverifiedCosts,
-        jobsBelowMarginGate: livePulse.jobsBelowMarginGate || demoPulse.jobsBelowMarginGate,
-        spiffsPending: livePulse.spiffsPending || demoPulse.spiffsPending,
+        sales: workbookPulse.sales,
+        cashCollected: workbookPulse.cashCollected,
+        outstandingBalances: workbookPulse.outstandingBalances,
+        avgMargin: workbookPulse.avgMarginFinal || workbookPulse.avgMarginStarting,
+        unverifiedCosts: 0,
+        jobsBelowMarginGate: workbookPulse.jobsBelowMarginGate,
+        spiffsPending: workbookPulse.commissionsOpen,
       }
     : demoPulse;
 
+  const attentionForInsights = hubAttention ?? [];
+
   const insights = buildSymphonyInsights({
-    attentionItems,
+    attentionItems: attentionForInsights.length
+      ? attentionForInsights
+      : [
+          {
+            id: "demo",
+            severity: "info" as const,
+            title: "Workbook not connected",
+            detail: "Connect Google Sheets to load live attention.",
+            owner: "Gavin",
+            amount: null,
+            action: "Connect sheet",
+            todoLabel: "Connect payroll workbook",
+            todoWhy: "Live numbers require the shared Google Sheet.",
+            defaultAssignee: "Gavin",
+            notifyMessage: "Payroll workbook is not connected.",
+            context: "Demo fallback.",
+          },
+        ],
     financialPulse: pulseForInsights,
     financeExceptions,
     jobs,
@@ -102,19 +126,8 @@ export async function POST(request: Request) {
   const context = {
     period,
     company: gavinDemoMeta.company,
-    financialPulse: pulseForInsights,
-    financialPulseSource: livePulse ? "quickbooks_sandbox" : "demo",
-    quickBooksCompany: livePulse?.companyName ?? null,
-    operationsSnapshot: operationsSnapshot
-      ? buildCubbyOperationsContext(operationsSnapshot, question)
-      : null,
-    attentionItems: attentionItems.map((item) => ({
-      severity: item.severity,
-      title: item.title,
-      detail: item.detail,
-      amount: item.amount,
-      todoLabel: item.todoLabel,
-    })),
+    financialPulseSource: workbookPulse ? "payroll_workbook" : "demo",
+    workbook: workbookContext,
     suggestedInsights: insights.map((item) => ({
       prompt: item.prompt,
       answer: item.answer,
@@ -127,15 +140,15 @@ export async function POST(request: Request) {
   try {
     const response = await client.messages.create({
       model,
-      max_tokens: 500,
+      max_tokens: 700,
       system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant inside Gavin's dashboard.
 Answer in plain, confident language for a busy executive.
-Use ONLY the provided Ops Hub context. If QuickBooks sandbox data is present, prefer it for money questions.
-If operationsSnapshot is present, it is the REB 26 master client list from Craig's Google Sheet.
-Prefer it for current clients, pipeline, job status, installs, and scheduling questions.
+Use ONLY the provided Ops Hub context.
+The Payroll Workbook (red 2026 designer tabs) is the source of truth for sales, deposits, outstanding balances, margins (starting / after spiff / final), commissions, and notes.
+Prefer workbook.pulse for company totals and workbook.jobs / workbook.designers / workbook.attentionItems for specifics.
 When using sheet data, mention it reflects the last syncedAt timestamp when timing matters.
 If something is not in context, say what is missing instead of inventing numbers.
-Keep answers concise — usually 2-4 sentences unless listing urgent items.`,
+Keep answers concise — usually 2-5 sentences unless listing urgent items.`,
       messages: [
         {
           role: "user",
@@ -153,8 +166,7 @@ Keep answers concise — usually 2-4 sentences unless listing urgent items.`,
     return NextResponse.json({
       answer,
       source: resolveCubbySource({
-        hasQuickBooks: Boolean(livePulse),
-        hasSheets: Boolean(operationsSnapshot),
+        hasSheets: Boolean(workbookContext),
       }),
       model,
     });
@@ -163,8 +175,7 @@ Keep answers concise — usually 2-4 sentences unless listing urgent items.`,
     return NextResponse.json({
       answer: resolveSymphonyAnswer(question, insights),
       source: resolveCubbySource({
-        hasQuickBooks: Boolean(livePulse),
-        hasSheets: Boolean(operationsSnapshot),
+        hasSheets: Boolean(workbookContext),
         fallback: true,
       }),
       model,

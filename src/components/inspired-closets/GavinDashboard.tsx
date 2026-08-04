@@ -30,13 +30,7 @@ function severityClass(severity: AttentionSeverity) {
   return styles.severityInfo;
 }
 
-type CubbySource =
-  | "demo"
-  | "claude+demo"
-  | "claude+quickbooks"
-  | "claude+sheets"
-  | "claude+quickbooks+sheets"
-  | "demo-fallback";
+type CubbySource = "demo" | "claude+demo" | "claude+sheets" | "demo-fallback";
 
 type ChatMessage = {
   id: string;
@@ -45,10 +39,38 @@ type ChatMessage = {
   source?: CubbySource;
 };
 
+type LiveAttentionItem = (typeof attentionItems)[number];
+
+type WorkbookPulse = {
+  sales: number;
+  cashCollected: number;
+  outstandingBalances: number;
+  collectionRate: number;
+  avgMarginStarting: number;
+  avgMarginFinal: number;
+  jobsBelowMarginGate: number;
+  jobsWithSpiff: number;
+  commissionsOpen: number;
+  commissionsPaid: number;
+  activeJobs: number;
+  designerCount: number;
+  metricNotes: {
+    sales: string;
+    cashCollected: string;
+    outstanding: string;
+    collectionRate: string;
+    avgMarginStarting: string;
+    avgMarginFinal: string;
+    belowGate: string;
+    spiffJobs: string;
+    commissionsOpen: string;
+    commissionsPaid: string;
+    activeJobs: string;
+  };
+};
+
 function cubbySourceLabel(source: CubbySource) {
-  if (source === "claude+quickbooks+sheets") return "Live · Claude + QuickBooks + Craig sheet";
-  if (source === "claude+quickbooks") return "Live · Claude + QuickBooks";
-  if (source === "claude+sheets") return "Live · Claude + Craig sheet";
+  if (source === "claude+sheets") return "Live · Claude + Payroll Workbook";
   if (source === "claude+demo") return "Live · Claude";
   if (source === "demo-fallback") return "Demo fallback · Claude unavailable";
   return "Demo · no API key";
@@ -57,15 +79,15 @@ function cubbySourceLabel(source: CubbySource) {
 export default function GavinDashboard() {
   const [period, setPeriod] = useState<Period>("This week");
   const [activeSection, setActiveSection] = useState<NavSectionId>("attention");
-  const [expandedId, setExpandedId] = useState<string | null>("att-1");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<StageFilter>("All");
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [qbConnected, setQbConnected] = useState(false);
-  const [qbCompany, setQbCompany] = useState<string | null>(null);
-  const [livePulse, setLivePulse] = useState<ReturnType<typeof getFinancialPulseForPeriod> | null>(
-    null,
-  );
+  const [workbookPulse, setWorkbookPulse] = useState<WorkbookPulse | null>(null);
+  const [liveAttention, setLiveAttention] = useState<LiveAttentionItem[] | null>(null);
+  const [workbookSyncedAt, setWorkbookSyncedAt] = useState<string | null>(null);
+  const [workbookReady, setWorkbookReady] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
@@ -75,88 +97,102 @@ export default function GavinDashboard() {
   ]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [doneTodos, setDoneTodos] = useState<Record<string, boolean>>({});
+  const [assignees, setAssignees] = useState<Record<string, string>>(() =>
+    Object.fromEntries(attentionItems.map((item) => [item.id, item.defaultAssignee])),
+  );
+  const [assignOpenId, setAssignOpenId] = useState<string | null>(null);
+  const [notifiedAt, setNotifiedAt] = useState<Record<string, string>>({});
+  const [notifyLoadingId, setNotifyLoadingId] = useState<string | null>(null);
+  const [actionFlash, setActionFlash] = useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement>(null);
+
+  const activeAttention = liveAttention ?? attentionItems;
 
   const periodFinancialPulse = useMemo(() => {
     const demo = getFinancialPulseForPeriod(period);
-    if (!livePulse) return demo;
+    if (!workbookPulse) return demo;
 
     return {
       ...demo,
-      ...livePulse,
+      sales: workbookPulse.sales,
+      cashCollected: workbookPulse.cashCollected,
+      outstandingBalances: workbookPulse.outstandingBalances,
+      avgMargin: workbookPulse.avgMarginFinal || workbookPulse.avgMarginStarting,
+      unverifiedCosts: 0,
+      jobsBelowMarginGate: workbookPulse.jobsBelowMarginGate,
+      spiffsPending: workbookPulse.commissionsOpen,
       deltas: undefined,
       metricNotes: {
         ...demo.metricNotes,
-        sales: qbCompany
-          ? `QuickBooks sandbox · ${qbCompany}`
-          : "QuickBooks sandbox · live sync",
-        cashCollected: "QuickBooks payments",
-        outstanding: "QuickBooks open invoices",
-        unverifiedCosts: "QuickBooks open bills",
+        sales: workbookPulse.metricNotes.sales,
+        cashCollected: workbookPulse.metricNotes.cashCollected,
+        outstanding: workbookPulse.metricNotes.outstanding,
+        avgMargin: workbookPulse.metricNotes.avgMarginFinal,
+        unverifiedCosts: workbookPulse.metricNotes.spiffJobs,
+        belowGate: workbookPulse.metricNotes.belowGate,
       },
     };
-  }, [period, livePulse, qbCompany]);
+  }, [period, workbookPulse]);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadQuickBooks() {
+    async function loadWorkbook() {
       try {
-        const statusRes = await fetch("/api/integrations/quickbooks/status");
-        const status = (await statusRes.json()) as {
-          connected?: boolean;
-        };
-        if (cancelled) return;
-        setQbConnected(Boolean(status.connected));
-
-        if (!status.connected) {
-          setLivePulse(null);
-          setQbCompany(null);
-          return;
-        }
-
-        const pulseRes = await fetch("/api/integrations/quickbooks/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ period }),
-        });
-        const payload = (await pulseRes.json()) as {
-          pulse?: {
-            sales: number;
-            cashCollected: number;
-            outstandingBalances: number;
-            avgMargin: number;
-            unverifiedCosts: number;
-            jobsBelowMarginGate: number;
-            bankBalance: number;
-            spiffsPending: number;
-            companyName?: string;
+        const response = await fetch(
+          `/api/inspired-closets/workbook?period=${encodeURIComponent(period)}`,
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          hub?: {
+            syncedAt: string;
+            pulse: WorkbookPulse;
+            attentionItems: LiveAttentionItem[];
           };
         };
 
-        if (cancelled || !payload.pulse) return;
+        if (cancelled) return;
 
-        setLivePulse({
-          sales: payload.pulse.sales,
-          cashCollected: payload.pulse.cashCollected,
-          outstandingBalances: payload.pulse.outstandingBalances,
-          avgMargin: payload.pulse.avgMargin,
-          unverifiedCosts: payload.pulse.unverifiedCosts,
-          jobsBelowMarginGate: payload.pulse.jobsBelowMarginGate,
-          bankBalance: payload.pulse.bankBalance,
-          spiffsPending: payload.pulse.spiffsPending,
-          metricNotes: getFinancialPulseForPeriod(period).metricNotes,
-        });
-        setQbCompany(payload.pulse.companyName ?? null);
+        if (payload.ok && payload.hub) {
+          setWorkbookPulse(payload.hub.pulse);
+          setLiveAttention(payload.hub.attentionItems);
+          setWorkbookSyncedAt(payload.hub.syncedAt);
+          setWorkbookReady(true);
+          setAssignees((prev) => {
+            const next = { ...prev };
+            for (const item of payload.hub!.attentionItems) {
+              if (!next[item.id]) next[item.id] = item.defaultAssignee;
+            }
+            return next;
+          });
+          return;
+        }
+
+        setWorkbookReady(false);
+        setWorkbookPulse(null);
+        setLiveAttention(null);
       } catch {
         if (!cancelled) {
-          setQbConnected(false);
-          setLivePulse(null);
+          setWorkbookReady(false);
+          setWorkbookPulse(null);
+          setLiveAttention(null);
         }
       }
     }
 
-    void loadQuickBooks();
+    async function loadQbStatus() {
+      try {
+        const statusRes = await fetch("/api/integrations/quickbooks/status");
+        const status = (await statusRes.json()) as { connected?: boolean };
+        if (!cancelled) setQbConnected(Boolean(status.connected));
+      } catch {
+        if (!cancelled) setQbConnected(false);
+      }
+    }
+
+    void loadWorkbook();
+    void loadQbStatus();
     return () => {
       cancelled = true;
     };
@@ -165,7 +201,7 @@ export default function GavinDashboard() {
   const symphonyInsights = useMemo(
     () =>
       buildSymphonyInsights({
-        attentionItems,
+        attentionItems: activeAttention,
         financialPulse: periodFinancialPulse,
         financeExceptions,
         jobs,
@@ -174,7 +210,7 @@ export default function GavinDashboard() {
         marginGate: gavinDemoMeta.marginGate,
         formatCurrency,
       }),
-    [period, periodFinancialPulse],
+    [period, periodFinancialPulse, activeAttention],
   );
 
   const askSymphony = async (question: string) => {
@@ -217,32 +253,23 @@ export default function GavinDashboard() {
     }, 50);
   };
 
-  const [doneTodos, setDoneTodos] = useState<Record<string, boolean>>({});
-  const [assignees, setAssignees] = useState<Record<string, string>>(() =>
-    Object.fromEntries(attentionItems.map((item) => [item.id, item.defaultAssignee])),
-  );
-  const [assignOpenId, setAssignOpenId] = useState<string | null>(null);
-  const [notifiedAt, setNotifiedAt] = useState<Record<string, string>>({});
-  const [notifyLoadingId, setNotifyLoadingId] = useState<string | null>(null);
-  const [actionFlash, setActionFlash] = useState<string | null>(null);
-
   const filteredJobs = useMemo(() => {
     if (stageFilter === "All") return jobs;
     return jobs.filter((job) => job.stage === stageFilter);
   }, [stageFilter]);
 
-  const todosRemaining = attentionItems.filter((item) => !doneTodos[item.id]).length;
+  const todosRemaining = activeAttention.filter((item) => !doneTodos[item.id]).length;
 
   const searchLower = search.trim().toLowerCase();
   const visibleAttention = useMemo(() => {
-    if (!searchLower) return attentionItems;
-    return attentionItems.filter(
+    if (!searchLower) return activeAttention;
+    return activeAttention.filter(
       (item) =>
         item.title.toLowerCase().includes(searchLower) ||
         item.detail.toLowerCase().includes(searchLower) ||
         item.todoLabel.toLowerCase().includes(searchLower),
     );
-  }, [searchLower]);
+  }, [searchLower, activeAttention]);
 
   const flash = (message: string) => {
     setActionFlash(message);
@@ -261,7 +288,7 @@ export default function GavinDashboard() {
     flash(`Assigned to ${person}. Notify them when you’re ready.`);
   };
 
-  const notifyAssignee = async (item: (typeof attentionItems)[number]) => {
+  const notifyAssignee = async (item: LiveAttentionItem) => {
     const person = assignees[item.id] ?? item.defaultAssignee;
     setNotifyLoadingId(item.id);
     setExpandedId(item.id);
@@ -341,13 +368,20 @@ export default function GavinDashboard() {
                 <div>
                   <h1 className={styles.pageTitle}>Here&apos;s what&apos;s happening</h1>
                   <p className={styles.pageLead}>
-                    {gavinDemoMeta.viewer} · {gavinDemoMeta.role} · Updated{" "}
-                    {gavinDemoMeta.updatedAt}
+                    {gavinDemoMeta.viewer} · {gavinDemoMeta.role} ·{" "}
+                    {workbookReady && workbookSyncedAt
+                      ? `Payroll Workbook synced ${new Date(workbookSyncedAt).toLocaleString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}`
+                      : `Updated ${gavinDemoMeta.updatedAt}`}
                   </p>
                 </div>
                 <div className={styles.headMeta}>
                   <span className={`${styles.pill} ${styles.pillAccent}`}>
-                    {gavinDemoMeta.prototypeLabel}
+                    {workbookReady ? "Live · Payroll Workbook" : gavinDemoMeta.prototypeLabel}
                   </span>
                 </div>
               </div>
@@ -383,7 +417,10 @@ export default function GavinDashboard() {
                   <div>
                     <h2 className={styles.panelTitle}>Today&apos;s attention</h2>
                     <p className={styles.panelHint}>
-                      {todosRemaining} open · {period} · do it, assign, or notify
+                      {todosRemaining} open · {period} ·{" "}
+                      {workbookReady
+                        ? "from red 2026 tabs · assign or Slack notify"
+                        : "demo data · connect workbook for live items"}
                     </p>
                   </div>
                 </div>
@@ -506,21 +543,11 @@ export default function GavinDashboard() {
                     <div>
                       <h2 className={styles.panelTitle}>Financial pulse</h2>
                       <p className={styles.panelHint}>
-                        45% spiff gate ·{" "}
-                        {qbConnected ? "QuickBooks sandbox connected" : "QuickBooks not connected"}{" "}
-                        · {period} view
+                        45% spiff gate · Payroll Workbook (red 2026 tabs) · {period} view
+                        {workbookPulse
+                          ? ` · ${workbookPulse.designerCount} designers · ${workbookPulse.activeJobs} jobs`
+                          : " · demo fallback"}
                       </p>
-                      {!qbConnected ? (
-                        <p className={styles.panelHint}>
-                          <a
-                            className={styles.connectLink}
-                            href="/api/integrations/quickbooks/connect"
-                          >
-                            Connect QuickBooks sandbox
-                          </a>{" "}
-                          to pull live test numbers.
-                        </p>
-                      ) : null}
                     </div>
                   </div>
                   <div className={styles.metricsGrid}>
@@ -529,7 +556,9 @@ export default function GavinDashboard() {
                       <p className={styles.metricValue}>
                         {formatCurrency(periodFinancialPulse.sales)}
                       </p>
-                      <p className={styles.metricNote}>{periodFinancialPulse.metricNotes.sales}</p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.sales ?? periodFinancialPulse.metricNotes.sales}
+                      </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricGood}`}>
                       <p className={styles.metricLabel}>Cash collected</p>
@@ -537,7 +566,8 @@ export default function GavinDashboard() {
                         {formatCurrency(periodFinancialPulse.cashCollected)}
                       </p>
                       <p className={styles.metricNote}>
-                        {periodFinancialPulse.metricNotes.cashCollected}
+                        {workbookPulse?.metricNotes.cashCollected ??
+                          periodFinancialPulse.metricNotes.cashCollected}
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricWarn}`}>
@@ -546,23 +576,35 @@ export default function GavinDashboard() {
                         {formatCurrency(periodFinancialPulse.outstandingBalances)}
                       </p>
                       <p className={styles.metricNote}>
-                        {periodFinancialPulse.metricNotes.outstanding}
+                        {workbookPulse?.metricNotes.outstanding ??
+                          periodFinancialPulse.metricNotes.outstanding}
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricGood}`}>
-                      <p className={styles.metricLabel}>Avg margin</p>
-                      <p className={styles.metricValue}>{periodFinancialPulse.avgMargin}%</p>
+                      <p className={styles.metricLabel}>Collection rate</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? `${workbookPulse.collectionRate}%` : "—"}
+                      </p>
                       <p className={styles.metricNote}>
-                        {periodFinancialPulse.metricNotes.avgMargin}
+                        {workbookPulse?.metricNotes.collectionRate ?? "Cash ÷ sales"}
                       </p>
                     </div>
-                    <div className={`${styles.metric} ${styles.metricAlert}`}>
-                      <p className={styles.metricLabel}>Unverified costs</p>
+                    <div className={`${styles.metric} ${styles.metricGood}`}>
+                      <p className={styles.metricLabel}>Avg margin starting</p>
                       <p className={styles.metricValue}>
-                        {formatCurrency(periodFinancialPulse.unverifiedCosts)}
+                        {workbookPulse ? `${workbookPulse.avgMarginStarting}%` : `${periodFinancialPulse.avgMargin}%`}
                       </p>
                       <p className={styles.metricNote}>
-                        {periodFinancialPulse.metricNotes.unverifiedCosts}
+                        {workbookPulse?.metricNotes.avgMarginStarting ?? "At first deposit"}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricGood}`}>
+                      <p className={styles.metricLabel}>Avg margin final</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? `${workbookPulse.avgMarginFinal}%` : `${periodFinancialPulse.avgMargin}%`}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.avgMarginFinal ?? "Final / after spiff"}
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricAlert}`}>
@@ -571,10 +613,54 @@ export default function GavinDashboard() {
                         {periodFinancialPulse.jobsBelowMarginGate}
                       </p>
                       <p className={styles.metricNote}>
-                        {period === "YoY"
-                          ? periodFinancialPulse.metricNotes.belowGate
-                          : `Spiffs pending ${formatCurrency(periodFinancialPulse.spiffsPending)} · ${periodFinancialPulse.metricNotes.belowGate}`}
+                        {workbookPulse?.metricNotes.belowGate ??
+                          periodFinancialPulse.metricNotes.belowGate}
                       </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWarn}`}>
+                      <p className={styles.metricLabel}>Spiff-adjusted jobs</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? workbookPulse.jobsWithSpiff : "—"}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.spiffJobs ?? "After-spiff fields used"}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWarn}`}>
+                      <p className={styles.metricLabel}>Commissions open</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse
+                          ? formatCurrency(workbookPulse.commissionsOpen)
+                          : formatCurrency(periodFinancialPulse.spiffsPending)}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.commissionsOpen ?? "CHECK with no pay date"}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricGood}`}>
+                      <p className={styles.metricLabel}>Commissions paid</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? formatCurrency(workbookPulse.commissionsPaid) : "—"}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.commissionsPaid ?? period}
+                      </p>
+                    </div>
+                    <div className={styles.metric}>
+                      <p className={styles.metricLabel}>Active jobs</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? workbookPulse.activeJobs : "—"}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.activeJobs ?? "From workbook"}
+                      </p>
+                    </div>
+                    <div className={styles.metric}>
+                      <p className={styles.metricLabel}>Designers synced</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? workbookPulse.designerCount : "—"}
+                      </p>
+                      <p className={styles.metricNote}>Red 2026 tabs</p>
                     </div>
                   </div>
                 </section>
@@ -869,8 +955,10 @@ export default function GavinDashboard() {
             </section>
 
             <p className={styles.footerNote}>
-              QuickBooks sample data · live Slack connection · live Claude. Not connected: Community,
-              Studio, or Podium — waiting.
+              {workbookReady
+                ? "Live Payroll Workbook (red 2026 tabs) · live Slack · live Claude. QuickBooks kept separate. Not connected: Community, Studio, or Podium."
+                : "Demo data · connect Payroll Workbook Google Sheet for live pulse + attention. Slack + Claude ready."}
+              {qbConnected ? " QuickBooks sandbox linked (not driving pulse)." : ""}
             </p>
           </div>
           </div>

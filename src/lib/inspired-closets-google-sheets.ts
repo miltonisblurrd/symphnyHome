@@ -166,10 +166,10 @@ async function fetchTabValuesSingle(
   spreadsheetId: string,
   tabName: string,
   accessToken: string,
-): Promise<string[][]> {
+): Promise<unknown[][]> {
   const range = encodeURIComponent(sheetDataRange(tabName));
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueRenderOption=FORMATTED_VALUE`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
@@ -180,7 +180,7 @@ async function fetchTabValuesSingle(
     throw new Error(`Google Sheets read failed for tab "${tabName}": ${detail}`);
   }
 
-  const payload = (await response.json()) as { values?: string[][] };
+  const payload = (await response.json()) as { values?: unknown[][] };
   return payload.values ?? [];
 }
 
@@ -188,7 +188,7 @@ async function fetchTabValuesBatch(
   spreadsheetId: string,
   tabNames: string[],
   accessToken: string,
-): Promise<Array<{ name: string; values: string[][] }>> {
+): Promise<Array<{ name: string; values: unknown[][] }>> {
   if (tabNames.length === 0) return [];
 
   const params = new URLSearchParams();
@@ -196,7 +196,8 @@ async function fetchTabValuesBatch(
     params.append("ranges", sheetDataRange(tabName));
   }
   params.set("majorDimension", "ROWS");
-  params.set("valueRenderOption", "FORMATTED_VALUE");
+  // Raw numbers parse more reliably for money (%) than formatted "$1,234" / "50.00%" strings.
+  params.set("valueRenderOption", "UNFORMATTED_VALUE");
 
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${params.toString()}`,
@@ -207,7 +208,7 @@ async function fetchTabValuesBatch(
 
   if (!response.ok) {
     const batchError = await response.text();
-    const results: Array<{ name: string; values: string[][] }> = [];
+    const results: Array<{ name: string; values: unknown[][] }> = [];
     const errors: string[] = [];
 
     for (const tabName of tabNames) {
@@ -231,7 +232,7 @@ async function fetchTabValuesBatch(
   }
 
   const payload = (await response.json()) as {
-    valueRanges?: Array<{ range?: string; values?: string[][] }>;
+    valueRanges?: Array<{ range?: string; values?: unknown[][] }>;
   };
 
   return (payload.valueRanges ?? []).map((entry, index) => ({
@@ -266,7 +267,7 @@ export async function fetchOperationsSnapshot(
 
   // Batch in chunks to stay under Sheets API URL/range limits
   const chunkSize = 8;
-  const batchedTabs: Array<{ name: string; values: string[][] }> = [];
+  const batchedTabs: Array<{ name: string; values: unknown[][] }> = [];
   for (let i = 0; i < tabNames.length; i += chunkSize) {
     const chunk = tabNames.slice(i, i + chunkSize);
     const part = await fetchTabValuesBatch(config.spreadsheetId, chunk, accessToken);

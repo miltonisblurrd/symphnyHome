@@ -52,11 +52,15 @@ type WorkbookPulse = {
   avgMarginStarting: number;
   avgMarginFinal: number;
   jobsBelowMarginGate: number;
+  jobsMissingMargin: number;
   jobsWithSpiff: number;
+  atRiskSales: number;
   commissionsOpen: number;
   commissionsPaid: number;
   activeJobs: number;
   designerCount: number;
+  marginSampleStarting: number;
+  marginSampleCurrent: number;
   metricNotes: {
     sales: string;
     cashCollected: string;
@@ -65,7 +69,9 @@ type WorkbookPulse = {
     avgMarginStarting: string;
     avgMarginFinal: string;
     belowGate: string;
+    missingMargin: string;
     spiffJobs: string;
+    atRiskSales: string;
     commissionsOpen: string;
     commissionsPaid: string;
     activeJobs: string;
@@ -740,19 +746,19 @@ export default function GavinDashboard() {
                     <div className={`${styles.metric} ${styles.metricGood}`}>
                       <p className={styles.metricLabel}>Collection rate</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? `${workbookPulse.collectionRate}%` : "—"}
+                        {workbookPulse ? `${workbookPulse.collectionRate}%` : "0%"}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.collectionRate ?? "Cash ÷ sales"}
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricGood}`}>
-                      <p className={styles.metricLabel}>Avg margin starting</p>
+                      <p className={styles.metricLabel}>Avg margin as sold</p>
                       <p className={styles.metricValue}>
                         {workbookPulse
-                          ? workbookPulse.metricNotes.avgMarginStarting.startsWith("No ")
-                            ? "—"
-                            : `${workbookPulse.avgMarginStarting}%`
+                          ? workbookPulse.marginSampleStarting > 0
+                            ? `${workbookPulse.avgMarginStarting}%`
+                            : "0%"
                           : `${periodFinancialPulse.avgMargin}%`}
                       </p>
                       <p className={styles.metricNote}>
@@ -760,22 +766,24 @@ export default function GavinDashboard() {
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricGood}`}>
-                      <p className={styles.metricLabel}>Avg margin final</p>
+                      <p className={styles.metricLabel}>Avg margin current</p>
                       <p className={styles.metricValue}>
                         {workbookPulse
-                          ? workbookPulse.metricNotes.avgMarginFinal.startsWith("No ")
-                            ? "—"
-                            : `${workbookPulse.avgMarginFinal}%`
+                          ? workbookPulse.marginSampleCurrent > 0
+                            ? `${workbookPulse.avgMarginFinal}%`
+                            : "0%"
                           : `${periodFinancialPulse.avgMargin}%`}
                       </p>
                       <p className={styles.metricNote}>
-                        {workbookPulse?.metricNotes.avgMarginFinal ?? "Final / after spiff"}
+                        {workbookPulse?.metricNotes.avgMarginFinal ?? "Best available margin"}
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricAlert}`}>
                       <p className={styles.metricLabel}>Below 45% gate</p>
                       <p className={styles.metricValue}>
-                        {periodFinancialPulse.jobsBelowMarginGate}
+                        {workbookPulse
+                          ? workbookPulse.jobsBelowMarginGate
+                          : periodFinancialPulse.jobsBelowMarginGate}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.belowGate ??
@@ -783,9 +791,27 @@ export default function GavinDashboard() {
                       </p>
                     </div>
                     <div className={`${styles.metric} ${styles.metricWarn}`}>
-                      <p className={styles.metricLabel}>Spiff-adjusted jobs</p>
+                      <p className={styles.metricLabel}>At-risk sales</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? workbookPulse.jobsWithSpiff : "—"}
+                        {workbookPulse ? formatCurrency(workbookPulse.atRiskSales) : "$0"}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.atRiskSales ?? "Below-gate contract $"}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWarn}`}>
+                      <p className={styles.metricLabel}>Missing margin</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? workbookPulse.jobsMissingMargin : 0}
+                      </p>
+                      <p className={styles.metricNote}>
+                        {workbookPulse?.metricNotes.missingMargin ?? "Jobs with no margin filled"}
+                      </p>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWarn}`}>
+                      <p className={styles.metricLabel}>Spiff-touched jobs</p>
+                      <p className={styles.metricValue}>
+                        {workbookPulse ? workbookPulse.jobsWithSpiff : 0}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.spiffJobs ?? "After-spiff fields used"}
@@ -805,7 +831,7 @@ export default function GavinDashboard() {
                     <div className={`${styles.metric} ${styles.metricGood}`}>
                       <p className={styles.metricLabel}>Commissions paid</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? formatCurrency(workbookPulse.commissionsPaid) : "—"}
+                        {workbookPulse ? formatCurrency(workbookPulse.commissionsPaid) : "$0"}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.commissionsPaid ?? period}
@@ -814,18 +840,18 @@ export default function GavinDashboard() {
                     <div className={styles.metric}>
                       <p className={styles.metricLabel}>Active jobs</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? workbookPulse.activeJobs : "—"}
+                        {workbookPulse ? workbookPulse.activeJobs : 0}
                       </p>
                       <p className={styles.metricNote}>
                         {workbookPulse?.metricNotes.activeJobs ?? "From workbook"}
                       </p>
                     </div>
                     <div className={styles.metric}>
-                      <p className={styles.metricLabel}>Designers synced</p>
+                      <p className={styles.metricLabel}>Designers with activity</p>
                       <p className={styles.metricValue}>
-                        {workbookPulse ? workbookPulse.designerCount : "—"}
+                        {workbookPulse ? workbookPulse.designerCount : 0}
                       </p>
-                      <p className={styles.metricNote}>Red 2026 tabs</p>
+                      <p className={styles.metricNote}>Red 2026 tabs · dated jobs in period</p>
                     </div>
                   </div>
                 </section>

@@ -16,6 +16,7 @@ export async function GET() {
       return NextResponse.json(probe, { status: 200 });
     }
     const hub = buildWorkbookHub(snapshot, "This week");
+    const sampleTab = snapshot.tabs[0];
     return NextResponse.json({
       ...probe,
       workbook: {
@@ -24,6 +25,13 @@ export async function GET() {
         designerCount: hub.pulse.designerCount,
         salesThisWeek: hub.pulse.sales,
         outstanding: hub.pulse.outstandingBalances,
+        avgMarginStarting: hub.pulse.avgMarginStarting,
+        avgMarginCurrent: hub.pulse.avgMarginFinal,
+        marginSampleStarting: hub.pulse.marginSampleStarting,
+        marginSampleCurrent: hub.pulse.marginSampleCurrent,
+        belowGate: hub.pulse.jobsBelowMarginGate,
+        missingMargin: hub.pulse.jobsMissingMargin,
+        sampleHeaders: sampleTab?.headers.slice(0, 16) ?? [],
       },
     });
   } catch {

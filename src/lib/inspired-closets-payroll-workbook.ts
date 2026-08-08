@@ -80,11 +80,15 @@ export type WorkbookFinancialPulse = {
   avgMarginStarting: number;
   avgMarginFinal: number;
   jobsBelowMarginGate: number;
+  jobsMissingMargin: number;
   jobsWithSpiff: number;
+  atRiskSales: number;
   commissionsOpen: number;
   commissionsPaid: number;
   activeJobs: number;
   designerCount: number;
+  marginSampleStarting: number;
+  marginSampleCurrent: number;
   metricNotes: {
     sales: string;
     cashCollected: string;
@@ -93,7 +97,9 @@ export type WorkbookFinancialPulse = {
     avgMarginStarting: string;
     avgMarginFinal: string;
     belowGate: string;
+    missingMargin: string;
     spiffJobs: string;
+    atRiskSales: string;
     commissionsOpen: string;
     commissionsPaid: string;
     activeJobs: string;
@@ -162,6 +168,21 @@ function parsePercent(value: string | undefined): number | null {
 function parseDate(value: string | undefined): { label: string | null; ms: number | null } {
   if (!value?.trim()) return { label: null, ms: null };
   const raw = value.trim();
+
+  // Google Sheets UNFORMATTED_VALUE returns day serials (Excel epoch).
+  // Only treat as dates in ~1990–2100 so money-like numbers elsewhere stay out.
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial >= 32874 && serial < 73415) {
+      const utcMs = Math.round((serial - 25569) * 86400 * 1000);
+      const year = new Date(utcMs).getUTCFullYear();
+      const month = new Date(utcMs).getUTCMonth();
+      const day = new Date(utcMs).getUTCDate();
+      const ms = Date.UTC(year, month, day);
+      return { label: `${month + 1}/${day}/${year}`, ms };
+    }
+  }
+
   const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (match) {
     const month = Number(match[1]);
@@ -203,6 +224,130 @@ function pickColumn(
     if (index >= 0) return index;
   }
   return -1;
+}
+
+type PayrollColumnMap = {
+  client: number;
+  date: number;
+  contract: number;
+  deposit: number;
+  marginStart: number;
+  contractAfterSpiff: number;
+  marginAfterSpiff: number;
+  depositAfterSpiff: number;
+  marginFinal: number;
+  comm: number;
+  check: number;
+  payDate: number;
+  notes: number;
+};
+
+/**
+ * Fuzzy name match first, then positional fallback from the CLIENT column.
+ * Red 2026 tabs follow a stable left-to-right payroll layout.
+ */
+function resolvePayrollColumns(headers: string[]): PayrollColumnMap {
+  const client = pickColumn(headers, [(k, c) => k === "client" || c === "client"]);
+  const base = client >= 0 ? client : 0;
+
+  const named = {
+    client,
+    date: pickColumn(headers, [(k, c) => k === "date" || c === "date"]),
+    contract: pickColumn(headers, [
+      (k, c) => c.includes("totalcontract"),
+      (k, c) => c === "contractamount",
+      (k) => k.includes("total contract"),
+    ]),
+    deposit: pickColumn(headers, [
+      (k, c) => c === "deposit",
+      (k) => k === "deposit",
+    ]),
+    marginStart: pickColumn(headers, [
+      (k, c) => c.includes("marginstart") || c === "marginpctstarting",
+      (k) => k.includes("margin") && k.includes("start"),
+      // First plain "MARGIN %" after uniquify (before AFTER SPIFF / FINAL renames)
+      (k, c) => c === "margin" || c === "marginpct",
+    ]),
+    contractAfterSpiff: pickColumn(headers, [
+      (k, c) => c.includes("contract") && c.includes("spiff"),
+      (k, c) => c === "contract" && !c.includes("total"),
+    ]),
+    marginAfterSpiff: pickColumn(headers, [
+      (k, c) => c.includes("marginafterspiff") || c.includes("marginafter"),
+      (k) => k.includes("margin") && k.includes("after") && k.includes("spiff"),
+    ]),
+    depositAfterSpiff: pickColumn(headers, [
+      (k, c) => c.includes("depositafterspiff") || c.includes("depositspiff"),
+      (k, c) => c === "finalafterspiff" || c === "final",
+      (k) => k.includes("deposit") && k.includes("spiff"),
+    ]),
+    marginFinal: pickColumn(headers, [
+      (k, c) => c === "marginfinal" || c === "marginpctfinal" || c === "finalmargin",
+      (k, c) => c.includes("marginfinal"),
+      (k) => k.includes("margin") && k.includes("final"),
+      (k, c) => c.includes("final") && c.includes("margin"),
+    ]),
+    comm: pickColumn(headers, [(k, c) => c.startsWith("comm") || c === "commpct"]),
+    check: pickColumn(headers, [(k, c) => c === "check"]),
+    payDate: pickColumn(headers, [(k, c) => c.includes("paydate")]),
+    notes: pickColumn(headers, [(k, c) => c === "notes" || c === "note"]),
+  };
+
+  // Positional fallbacks relative to CLIENT (standard Inspired Closets payroll layout):
+  // CLIENT | DATE | TOTAL CONTRACT | DEPOSIT | MARGIN % | CONTRACT | MARGIN % |
+  // DEPOSIT | FINAL | MARGIN % | COMM | CHECK | PAY DATE | NOTES
+  const positional = {
+    date: base + 1,
+    contract: base + 2,
+    deposit: base + 3,
+    marginStart: base + 4,
+    contractAfterSpiff: base + 5,
+    marginAfterSpiff: base + 6,
+    depositAfterSpiff: base + 7,
+    marginFinal: base + 9,
+  };
+
+  const within = (index: number) => index >= 0 && index < headers.length;
+
+  return {
+    client: named.client >= 0 ? named.client : base,
+    date: named.date >= 0 ? named.date : positional.date,
+    contract: named.contract >= 0 ? named.contract : positional.contract,
+    deposit: named.deposit >= 0 ? named.deposit : positional.deposit,
+    marginStart: named.marginStart >= 0 ? named.marginStart : positional.marginStart,
+    contractAfterSpiff:
+      named.contractAfterSpiff >= 0
+        ? named.contractAfterSpiff
+        : within(positional.contractAfterSpiff)
+          ? positional.contractAfterSpiff
+          : -1,
+    marginAfterSpiff:
+      named.marginAfterSpiff >= 0
+        ? named.marginAfterSpiff
+        : within(positional.marginAfterSpiff)
+          ? positional.marginAfterSpiff
+          : -1,
+    depositAfterSpiff:
+      named.depositAfterSpiff >= 0
+        ? named.depositAfterSpiff
+        : within(positional.depositAfterSpiff)
+          ? positional.depositAfterSpiff
+          : -1,
+    marginFinal:
+      named.marginFinal >= 0
+        ? named.marginFinal
+        : within(positional.marginFinal)
+          ? positional.marginFinal
+          : -1,
+    comm: named.comm,
+    check: named.check,
+    payDate: named.payDate,
+    notes: named.notes,
+  };
+}
+
+function bestMargin(job: Pick<PayrollJob, "marginFinal" | "marginAfterSpiff" | "marginStarting">) {
+  return job.marginFinal ?? job.marginAfterSpiff ?? job.marginStarting ?? null;
 }
 
 function classifyRow(client: string, contract: number, checkAmount: number): PayrollJob["rowType"] {
@@ -251,7 +396,8 @@ function periodBounds(period: GavinPeriod, now = new Date()): { startMs: number;
 }
 
 function inPeriod(job: PayrollJob, startMs: number, endMs: number): boolean {
-  if (job.dateMs == null) return true;
+  // Undated rows are excluded from period sales (they still count in open-book metrics).
+  if (job.dateMs == null) return false;
   return job.dateMs >= startMs && job.dateMs <= endMs;
 }
 
@@ -291,63 +437,10 @@ export function parsePayrollJobsFromSnapshot(snapshot: OperationsSnapshot): Payr
 
   for (const tab of snapshot.tabs) {
     const designer = designerFromTab(tab.name);
-    // Rebuild matrix-style access from object rows using headers
     const headers = tab.headers;
     if (headers.length === 0) continue;
 
-    const idx = {
-      client: pickColumn(headers, [(k, c) => k === "client" || c === "client"]),
-      date: pickColumn(headers, [(k, c) => k === "date" || c === "date"]),
-      contract: pickColumn(headers, [
-        (k, c) => c.includes("totalcontract"),
-        (k, c) => c === "contractamount",
-        (k) => k.includes("total contract"),
-      ]),
-      deposit: pickColumn(headers, [
-        (k, c) => c === "deposit",
-        (k) => k === "deposit",
-      ]),
-      marginStart: pickColumn(headers, [
-        (k, c) => c.includes("marginstart"),
-        (k, c) => c === "marginstarting" || c === "marginpctstarting",
-        (k) => k.includes("margin") && k.includes("start"),
-      ]),
-      contractAfterSpiff: pickColumn(headers, [
-        (k, c) => c.includes("contract") && c.includes("spiff"),
-        (k) => k.includes("contract") && k.includes("spiff"),
-      ]),
-      marginAfterSpiff: pickColumn(headers, [
-        (k, c) => c.includes("marginafterspiff") || c.includes("marginafter"),
-        (k) => k.includes("margin") && k.includes("after") && k.includes("spiff"),
-      ]),
-      depositAfterSpiff: pickColumn(headers, [
-        (k, c) => c.includes("depositafterspiff") || c.includes("depositspiff"),
-        (k, c) => c === "finalafterspiff",
-        (k) => k.includes("deposit") && k.includes("spiff"),
-      ]),
-      marginFinal: pickColumn(headers, [
-        // Prefer exact final margin, not "final margin after spiff"
-        (k, c) => c === "marginfinal" || c === "marginpctfinal" || c === "finalmargin",
-        (k, c) => c.includes("marginfinal") && !c.includes("spiff"),
-        (k) => k.includes("margin") && k.includes("final") && !k.includes("spiff"),
-        (k, c) => c.includes("finalmargin"),
-      ]),
-      comm: pickColumn(headers, [
-        (k, c) => c.startsWith("comm") || c === "commpct",
-        (k) => k.startsWith("comm"),
-      ]),
-      check: pickColumn(headers, [(k, c) => c === "check" || k === "check"]),
-      payDate: pickColumn(headers, [
-        (k, c) => c.includes("paydate"),
-        (k) => k.includes("pay date"),
-      ]),
-      notes: pickColumn(headers, [
-        (k, c) => c === "notes" || c === "note",
-        (k) => k === "notes" || k.includes("note"),
-      ]),
-    };
-
-    if (idx.client < 0) continue;
+    const idx = resolvePayrollColumns(headers);
 
     tab.rows.forEach((row, rowIndex) => {
       const values = headers.map((header) => row[header] ?? "");
@@ -364,19 +457,20 @@ export function parsePayrollJobsFromSnapshot(snapshot: OperationsSnapshot): Payr
       const depositAfter =
         idx.depositAfterSpiff >= 0 ? parseMoney(values[idx.depositAfterSpiff]) : 0;
       const checkAmount = idx.check >= 0 ? parseMoney(values[idx.check]) : 0;
-      const collected = Math.max(deposit, depositAfter);
-      const outstanding = Math.max(0, contract - collected);
+      const collected = Math.max(deposit, depositAfter > 0 ? depositAfter : 0);
+      // If "final after spiff" looks like a full remaining balance payment, still count deposit.
+      const outstanding = Math.max(0, contract - Math.max(deposit, collected));
       const marginStarting = idx.marginStart >= 0 ? parsePercent(values[idx.marginStart]) : null;
       const marginAfterSpiff =
         idx.marginAfterSpiff >= 0 ? parsePercent(values[idx.marginAfterSpiff]) : null;
       const marginFinal = idx.marginFinal >= 0 ? parsePercent(values[idx.marginFinal]) : null;
-      const effectiveMargin = marginFinal ?? marginAfterSpiff ?? marginStarting;
+      const effectiveMargin = bestMargin({ marginFinal, marginAfterSpiff, marginStarting });
       const hasSpiffAdjustment =
         (idx.contractAfterSpiff >= 0 && Boolean(values[idx.contractAfterSpiff]?.trim())) ||
-        (idx.marginAfterSpiff >= 0 && Boolean(values[idx.marginAfterSpiff]?.trim())) ||
-        (idx.depositAfterSpiff >= 0 &&
-          Boolean(values[idx.depositAfterSpiff]?.trim()) &&
-          depositAfter > 0);
+        (idx.marginAfterSpiff >= 0 &&
+          values[idx.marginAfterSpiff] != null &&
+          String(values[idx.marginAfterSpiff]).trim() !== "") ||
+        (idx.depositAfterSpiff >= 0 && depositAfter > 0);
       const dateInfo = idx.date >= 0 ? parseDate(values[idx.date]) : { label: null, ms: null };
       const payInfo = idx.payDate >= 0 ? parseDate(values[idx.payDate]) : { label: null, ms: null };
       const notes = idx.notes >= 0 ? values[idx.notes]?.trim() ?? "" : "";
@@ -394,7 +488,7 @@ export function parsePayrollJobsFromSnapshot(snapshot: OperationsSnapshot): Payr
         dateMs: dateInfo.ms,
         contract,
         deposit,
-        collected,
+        collected: Math.max(deposit, collected),
         outstanding,
         marginStarting,
         marginAfterSpiff,
@@ -415,21 +509,46 @@ export function parsePayrollJobsFromSnapshot(snapshot: OperationsSnapshot): Payr
 }
 
 /** Re-parse from raw sheet values when headers may not be row 0. */
+function cellToString(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return String(value);
+  }
+  return String(value).trim();
+}
+
+function uniquifyHeaders(headerRow: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headerRow.map((cell, index) => {
+    const base = cell.trim() || `column_${index + 1}`;
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    if (count === 0) return base;
+    // Preserve readable names for the known duplicate payroll columns
+    if (/^margin\s*%?$/i.test(base)) {
+      if (count === 1) return "MARGIN % AFTER SPIFF";
+      if (count === 2) return "MARGIN % FINAL";
+    }
+    if (/^deposit$/i.test(base) && count === 1) return "DEPOSIT AFTER SPIFF";
+    if (/^contract$/i.test(base) && count === 1) return "CONTRACT AFTER SPIFF";
+    return `${base} (${count + 1})`;
+  });
+}
+
 export function reparseTabWithDetectedHeaders(
   tabName: string,
-  values: string[][],
+  values: unknown[][],
 ): { headers: string[]; rows: OperationsSheetRow[] } {
   if (values.length === 0) return { headers: [], rows: [] };
 
-  const headerIndex = findHeaderIndex(values);
-  const headerRow = values[headerIndex] ?? [];
-  const headers = headerRow.map((cell, index) => {
-    const trimmed = cell.trim();
-    return trimmed || `column_${index + 1}`;
-  });
+  const asStrings = values.map((row) => row.map((cell) => cellToString(cell)));
+  const headerIndex = findHeaderIndex(asStrings);
+  const headerRow = asStrings[headerIndex] ?? [];
+  const headers = uniquifyHeaders(headerRow);
 
   const rows: OperationsSheetRow[] = [];
-  for (const rawRow of values.slice(headerIndex + 1)) {
+  for (const rawRow of asStrings.slice(headerIndex + 1)) {
     if (!rawRow.some((cell) => cell.trim())) continue;
     const row: OperationsSheetRow = {};
     headers.forEach((header, index) => {
@@ -441,37 +560,83 @@ export function reparseTabWithDetectedHeaders(
   return { headers, rows };
 }
 
+const MIN_MARGIN_SAMPLE = 5;
+
+function marginSet(jobs: PayrollJob[]) {
+  const starting = jobs
+    .map((job) => job.marginStarting)
+    .filter((value): value is number => value != null && value > 0);
+  const current = jobs
+    .map((job) => bestMargin(job))
+    .filter((value): value is number => value != null && value > 0);
+  return { starting, current };
+}
+
 export function buildWorkbookPulse(
   jobs: PayrollJob[],
   period: GavinPeriod,
   syncedAt: string,
 ): WorkbookFinancialPulse {
   const { startMs, endMs } = periodBounds(period);
-  const scoped = jobs.filter(
-    (job) => job.rowType === "job" && inPeriod(job, startMs, endMs),
-  );
+  const ytdBounds = periodBounds("YtD");
 
-  const sales = scoped.reduce((sum, job) => sum + job.contract, 0);
-  const cashCollected = scoped.reduce((sum, job) => sum + job.collected, 0);
-  const outstandingBalances = scoped.reduce((sum, job) => sum + job.outstanding, 0);
+  const realJobs = jobs.filter((job) => job.rowType === "job");
+  const periodJobs = realJobs.filter((job) => inPeriod(job, startMs, endMs));
+  const ytdJobs = realJobs.filter((job) => inPeriod(job, ytdBounds.startMs, ytdBounds.endMs));
+  // Open-book: all unpaid / active economics across the workbook
+  const openJobs = realJobs.filter((job) => job.outstanding > 0 || job.commissionOpen);
+
+  const sales = periodJobs.reduce((sum, job) => sum + job.contract, 0);
+  const cashCollected = periodJobs.reduce((sum, job) => sum + job.collected, 0);
+  const outstandingBalances = openJobs.reduce((sum, job) => sum + job.outstanding, 0);
   const collectionRate =
     sales > 0 ? Number(((cashCollected / sales) * 100).toFixed(1)) : 0;
 
-  const startingMargins = scoped
-    .map((job) => job.marginStarting)
-    .filter((value): value is number => value != null);
-  const finalMargins = scoped
-    .map((job) => job.marginFinal ?? job.marginAfterSpiff ?? job.marginStarting)
-    .filter((value): value is number => value != null);
+  const periodMargins = marginSet(periodJobs);
+  const ytdMargins = marginSet(ytdJobs);
+  const allMargins = marginSet(realJobs);
 
-  const commissionsOpen = jobs
+  const useStartingFallback = periodMargins.starting.length < MIN_MARGIN_SAMPLE;
+  const useCurrentFallback = periodMargins.current.length < MIN_MARGIN_SAMPLE;
+
+  const startingSource = !useStartingFallback
+    ? periodMargins.starting
+    : ytdMargins.starting.length > 0
+      ? ytdMargins.starting
+      : allMargins.starting;
+  const currentSource = !useCurrentFallback
+    ? periodMargins.current
+    : ytdMargins.current.length > 0
+      ? ytdMargins.current
+      : allMargins.current;
+
+  const avgMarginStarting = average(startingSource) ?? 0;
+  const avgMarginFinal = average(currentSource) ?? 0;
+
+  const marginJobsForGate =
+    periodMargins.current.length >= MIN_MARGIN_SAMPLE
+      ? periodJobs
+      : ytdJobs.length > 0
+        ? ytdJobs
+        : realJobs;
+
+  const jobsBelowMarginGate = marginJobsForGate.filter((job) => job.belowGate).length;
+  const jobsMissingMargin = periodJobs.filter(
+    (job) => job.contract > 0 && bestMargin(job) == null,
+  ).length;
+  const jobsWithSpiff = periodJobs.filter((job) => job.hasSpiffAdjustment).length;
+  const atRiskSales = marginJobsForGate
+    .filter((job) => job.belowGate)
+    .reduce((sum, job) => sum + job.contract, 0);
+
+  const commissionsOpen = realJobs
     .filter((job) => job.commissionOpen)
     .reduce((sum, job) => sum + job.checkAmount, 0);
-  const commissionsPaid = scoped
+  const commissionsPaid = periodJobs
     .filter((job) => job.checkAmount > 0 && job.payDate)
     .reduce((sum, job) => sum + job.checkAmount, 0);
 
-  const designers = new Set(scoped.map((job) => job.designer));
+  const designers = new Set(periodJobs.map((job) => job.designer));
   const syncLabel = new Date(syncedAt).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -479,38 +644,54 @@ export function buildWorkbookPulse(
     minute: "2-digit",
   });
 
-  const avgMarginStarting = average(startingMargins);
-  const avgMarginFinal = average(finalMargins);
+  const startingScope = !useStartingFallback
+    ? period
+    : ytdMargins.starting.length > 0
+      ? "YtD fallback"
+      : "All workbook";
+  const currentScope = !useCurrentFallback
+    ? period
+    : ytdMargins.current.length > 0
+      ? "YtD fallback"
+      : "All workbook";
 
   return {
     sales,
     cashCollected,
     outstandingBalances,
     collectionRate,
-    avgMarginStarting: avgMarginStarting ?? 0,
-    avgMarginFinal: avgMarginFinal ?? 0,
-    jobsBelowMarginGate: scoped.filter((job) => job.belowGate).length,
-    jobsWithSpiff: scoped.filter((job) => job.hasSpiffAdjustment).length,
+    avgMarginStarting,
+    avgMarginFinal,
+    jobsBelowMarginGate,
+    jobsMissingMargin,
+    jobsWithSpiff,
+    atRiskSales,
     commissionsOpen,
     commissionsPaid,
-    activeJobs: scoped.length,
+    activeJobs: periodJobs.length,
     designerCount: designers.size,
+    marginSampleStarting: startingSource.length,
+    marginSampleCurrent: currentSource.length,
     metricNotes: {
-      sales: `${period} · Payroll Workbook`,
-      cashCollected: "Sum of deposits",
-      outstanding: "Contract − collected",
-      collectionRate: "Cash ÷ sales",
-      avgMarginStarting: avgMarginStarting == null
-        ? "No starting margin values found"
-        : `At first deposit · n=${startingMargins.length}`,
-      avgMarginFinal: avgMarginFinal == null
-        ? "No final margin values found"
-        : `Final / after spiff · n=${finalMargins.length}`,
-      belowGate: `Gate ${MARGIN_GATE}% · synced ${syncLabel}`,
-      spiffJobs: "Rows with after-spiff fields",
-      commissionsOpen: "CHECK with no pay date",
+      sales: `${period} · dated jobs`,
+      cashCollected: `${period} · sum of deposits`,
+      outstanding: "Open book · contract − collected",
+      collectionRate: `${period} cash ÷ sales`,
+      avgMarginStarting:
+        startingSource.length === 0
+          ? "No margin % starting values readable yet"
+          : `As sold · ${startingScope} · n=${startingSource.length}`,
+      avgMarginFinal:
+        currentSource.length === 0
+          ? "No margin values readable yet"
+          : `Best available (final→spiff→start) · ${currentScope} · n=${currentSource.length}`,
+      belowGate: `Gate ${MARGIN_GATE}% · ${currentScope} · synced ${syncLabel}`,
+      missingMargin: `${period} jobs with contract but no margin`,
+      spiffJobs: `${period} rows with after-spiff fields`,
+      atRiskSales: `Contract $ on below-gate jobs · ${currentScope}`,
+      commissionsOpen: "Open book · CHECK with no pay date",
       commissionsPaid: `${period} paid checks`,
-      activeJobs: `${designers.size} designers`,
+      activeJobs: `${designers.size} designers with dated jobs`,
     },
   };
 }
@@ -538,8 +719,7 @@ export function buildWorkbookAttention(jobs: PayrollJob[]): WorkbookAttentionIte
     const signals = noteSignals(job.notes);
 
     if (job.belowGate) {
-      const margin =
-        job.marginFinal ?? job.marginAfterSpiff ?? job.marginStarting ?? 0;
+      const margin = bestMargin(job) ?? 0;
       items.push({
         id: `att-margin-${job.id}`,
         severity: "critical",

@@ -10,6 +10,33 @@ import styles from "./field.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
 
+type InstallerProfile = {
+  id: string;
+  name: string;
+  role: string;
+  phone: string | null;
+  avatarUrl: string | null;
+  hiredAt: string | null;
+  title: string;
+  initials: string;
+  tenureLabel: string;
+  onSiteNow: boolean;
+  stats: {
+    installsCompleted: number;
+    activeJobs: number;
+    issuesReported: number;
+    openIssues: number;
+  };
+  recentInstalls: Array<{
+    id: string;
+    clientName: string;
+    address: string | null;
+    stage: string;
+    installDate: string | null;
+    completedDate: string | null;
+  }>;
+};
+
 type TimeEntry = {
   id: string;
   clock_in_at: string;
@@ -66,6 +93,8 @@ type ApiPayload = {
   jobs?: Job[];
   media?: Media[];
   issues?: Issue[];
+  profiles?: InstallerProfile[];
+  profile?: InstallerProfile | null;
 };
 
 const OFFLINE_KEY = "ic-field-offline-queue";
@@ -117,6 +146,13 @@ function formatStamp(value: string | null | undefined): string {
   });
 }
 
+function formatDay(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 function formatDuration(clockIn: string, clockOut: string | null, now = Date.now()): string {
   const start = new Date(clockIn).getTime();
   const end = clockOut ? new Date(clockOut).getTime() : now;
@@ -128,10 +164,38 @@ function formatDuration(clockIn: string, clockOut: string | null, now = Date.now
   return `${hours}h ${mins}m`;
 }
 
+function Avatar({
+  profile,
+  large,
+}: {
+  profile: Pick<InstallerProfile, "avatarUrl" | "initials" | "name">;
+  large?: boolean;
+}) {
+  if (profile.avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={profile.avatarUrl}
+        alt={profile.name}
+        className={`${styles.avatar} ${large ? styles.avatarLg : ""}`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${styles.avatar} ${styles.avatarFallback} ${large ? styles.avatarLg : ""}`}
+      aria-hidden
+    >
+      {profile.initials || "?"}
+    </div>
+  );
+}
+
 export default function FieldApp() {
   const [online, setOnline] = useState(true);
-  const [installers, setInstallers] = useState<Staff[]>([]);
+  const [profiles, setProfiles] = useState<InstallerProfile[]>([]);
   const [installer, setInstaller] = useState<{ id: string; name: string } | null>(null);
+  const [myProfile, setMyProfile] = useState<InstallerProfile | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [media, setMedia] = useState<Media[]>([]);
@@ -147,6 +211,7 @@ export default function FieldApp() {
   const [issueType, setIssueType] = useState("site_not_ready");
   const [issueText, setIssueText] = useState("");
   const [queueCount, setQueueCount] = useState(0);
+  const [tab, setTab] = useState<"jobs" | "profile">("jobs");
 
   const selected = useMemo(
     () => jobs.find((job) => job.id === selectedId) ?? null,
@@ -157,17 +222,25 @@ export default function FieldApp() {
     setQueueCount(readQueue().length);
   }, []);
 
-  const loadSessionStaff = useCallback(async () => {
-    const response = await fetch("/api/inspired-closets/ops/session");
+  const loadProfiles = useCallback(async (staffId?: string) => {
+    const url = staffId
+      ? `/api/inspired-closets/field/profiles?id=${staffId}`
+      : "/api/inspired-closets/field/profiles";
+    const response = await fetch(url);
     const payload = (await response.json()) as ApiPayload;
-    if (!payload.ok) throw new Error(payload.error ?? "Failed to load drivers.");
-    setInstallers(payload.installers ?? []);
+    if (!payload.ok) throw new Error(payload.error ?? "Failed to load installer profiles.");
+    if (staffId) {
+      setMyProfile(payload.profile ?? null);
+    } else {
+      setProfiles(payload.profiles ?? []);
+    }
   }, []);
 
   const loadJobs = useCallback(async () => {
     const response = await fetch("/api/inspired-closets/field/jobs");
     if (response.status === 401) {
       setInstaller(null);
+      setMyProfile(null);
       setJobs([]);
       return;
     }
@@ -176,7 +249,10 @@ export default function FieldApp() {
     setInstaller(payload.installer ?? null);
     setJobs(payload.jobs ?? []);
     setSelectedId((current) => current ?? payload.jobs?.[0]?.id ?? null);
-  }, []);
+    if (payload.installer?.id) {
+      await loadProfiles(payload.installer.id);
+    }
+  }, [loadProfiles]);
 
   const loadJobDetails = useCallback(async (jobId: string) => {
     const [mediaRes, issuesRes] = await Promise.all([
@@ -242,7 +318,7 @@ export default function FieldApp() {
     (async () => {
       setLoading(true);
       try {
-        await loadSessionStaff();
+        await loadProfiles();
         await loadJobs();
         await flushQueue();
       } catch (error) {
@@ -254,7 +330,7 @@ export default function FieldApp() {
         setLoading(false);
       }
     })();
-  }, [flushQueue, loadJobs, loadSessionStaff]);
+  }, [flushQueue, loadJobs, loadProfiles]);
 
   useEffect(() => {
     if (selectedId) void loadJobDetails(selectedId);
@@ -282,8 +358,10 @@ export default function FieldApp() {
         throw new Error("This login is for drivers/installers only.");
       }
       setInstaller(payload.staff);
+      setTab("jobs");
       await loadJobs();
-      setNotice({ kind: "ok", text: `Signed in as ${payload.staff.name}.` });
+      await loadProfiles(payload.staff.id);
+      setNotice({ kind: "ok", text: `Welcome back, ${payload.staff.name}.` });
     } catch (error) {
       setNotice({
         kind: "error",
@@ -309,8 +387,10 @@ export default function FieldApp() {
       }
       setInstaller(payload.staff);
       setNewDriverName("");
-      await loadSessionStaff();
+      setTab("jobs");
+      await loadProfiles();
       await loadJobs();
+      await loadProfiles(payload.staff.id);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -324,12 +404,40 @@ export default function FieldApp() {
   async function signOut() {
     await fetch("/api/inspired-closets/ops/session", { method: "DELETE" });
     setInstaller(null);
+    setMyProfile(null);
     setJobs([]);
     setSelectedId(null);
+    setTab("jobs");
+    await loadProfiles();
     setNotice({
       kind: "info",
-      text: "Signed out of driver mode. You can open Jobs / Inventory / Payroll now.",
+      text: "Signed out. Pick your profile when you’re ready for the next stop.",
     });
+  }
+
+  async function uploadAvatar(file: File) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const response = await fetch("/api/inspired-closets/field/profiles", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await response.json()) as ApiPayload;
+      if (!data.ok) throw new Error(data.error ?? "Could not update photo.");
+      if (installer) await loadProfiles(installer.id);
+      await loadProfiles();
+      setNotice({ kind: "ok", text: "Profile photo updated." });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not update photo.",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function clock(action: "in" | "out") {
@@ -370,12 +478,10 @@ export default function FieldApp() {
       const stamp = formatStamp(new Date().toISOString());
       setNotice({
         kind: "ok",
-        text:
-          action === "in"
-            ? `Clocked in at ${stamp}.`
-            : `Clocked out at ${stamp}.`,
+        text: action === "in" ? `Clocked in at ${stamp}.` : `Clocked out at ${stamp}.`,
       });
       await loadJobs();
+      if (installer) await loadProfiles(installer.id);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -450,6 +556,7 @@ export default function FieldApp() {
       setNotice({ kind: "ok", text: "Issue flagged for the office." });
       await loadJobDetails(selected.id);
       await loadJobs();
+      if (installer) await loadProfiles(installer.id);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -477,6 +584,7 @@ export default function FieldApp() {
         text: "Install complete. Office can trigger final payment.",
       });
       await loadJobs();
+      if (installer) await loadProfiles(installer.id);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -486,6 +594,20 @@ export default function FieldApp() {
       setBusy(false);
     }
   }
+
+  const noticeEl = notice ? (
+    <p
+      className={`${styles.notice} ${
+        notice.kind === "error"
+          ? styles.noticeError
+          : notice.kind === "ok"
+            ? styles.noticeOk
+            : ""
+      }`}
+    >
+      {notice.text}
+    </p>
+  ) : null;
 
   if (loading) {
     return (
@@ -503,62 +625,98 @@ export default function FieldApp() {
           <div>
             <p className={styles.brand}>Inspired Closets OS</p>
             <h1 className={styles.title}>Field</h1>
-            <p className={styles.subtitle}>Drivers & installers only</p>
+            <p className={styles.subtitle}>Installer profiles · clock · photos · issues</p>
           </div>
         </header>
-        {notice ? (
-          <p
-            className={`${styles.notice} ${
-              notice.kind === "error"
-                ? styles.noticeError
-                : notice.kind === "ok"
-                  ? styles.noticeOk
-                  : ""
-            }`}
-          >
-            {notice.text}
+        {noticeEl}
+        <div className={styles.loginHero}>
+          <h2 className={styles.loginHeroTitle}>Who’s on the truck?</h2>
+          <p className={styles.loginHeroText}>
+            Tap your profile to start the day. You’ll see today’s installs, clock time, photos, and
+            your past jobs — same account every time.
           </p>
-        ) : null}
+        </div>
         <section className={`${styles.card} ${styles.loginCard}`}>
-          <h2 className={styles.jobName}>Who’s driving today?</h2>
-          <p className={styles.jobMeta}>
-            Pick your name. This app cannot open Jobs, Inventory, or Payroll.
+          <p className={styles.sectionTitle} style={{ marginTop: 0 }}>
+            Installer roster
           </p>
-          <div className={styles.driverList}>
-            {installers.map((member) => (
-              <button
-                key={member.id}
-                type="button"
-                className={styles.driverBtn}
-                disabled={busy}
-                onClick={() => void signIn(member.id)}
-              >
-                {member.name}
-              </button>
-            ))}
+          {profiles.length === 0 ? (
+            <p className={styles.jobMeta}>No installer profiles yet — add yourself below.</p>
+          ) : (
+            <div className={styles.profileList}>
+              {profiles.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  className={styles.profileCard}
+                  disabled={busy}
+                  onClick={() => void signIn(member.id)}
+                >
+                  <Avatar profile={member} />
+                  <div className={styles.profileMain}>
+                    <h3 className={styles.profileName}>{member.name}</h3>
+                    <p className={styles.profileMeta}>
+                      {member.title} · {member.tenureLabel}
+                    </p>
+                    <div className={styles.statRow}>
+                      <span className={styles.statChip}>
+                        {member.stats.installsCompleted} installs done
+                      </span>
+                      {member.stats.activeJobs > 0 ? (
+                        <span className={styles.statChip}>
+                          {member.stats.activeJobs} active
+                        </span>
+                      ) : null}
+                      {member.onSiteNow ? (
+                        <span className={`${styles.statChip} ${styles.statChipLive}`}>On site</span>
+                      ) : null}
+                    </div>
+                    {member.recentInstalls.length > 0 ? (
+                      <ul className={styles.historyPreview}>
+                        {member.recentInstalls.slice(0, 2).map((job) => (
+                          <li key={job.id}>
+                            {job.clientName}
+                            {job.completedDate || job.installDate
+                              ? ` · ${formatDay(job.completedDate ?? job.installDate)}`
+                              : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className={styles.profileMeta}>No completed installs yet</p>
+                    )}
+                    <p className={styles.tapHint}>Tap to sign in →</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={styles.newDriverBox}>
+            <div className={styles.field}>
+              <span className={styles.label}>New to the crew?</span>
+              <input
+                className={styles.input}
+                value={newDriverName}
+                onChange={(event) => setNewDriverName(event.target.value)}
+                placeholder="Your full name"
+              />
+            </div>
+            <button
+              type="button"
+              className={`${styles.btn} ${styles.full}`}
+              style={{ marginTop: "0.75rem", width: "100%" }}
+              disabled={busy || !newDriverName.trim()}
+              onClick={() => void createDriver()}
+            >
+              Create my profile & sign in
+            </button>
           </div>
-          <div className={styles.field}>
-            <span className={styles.label}>New driver</span>
-            <input
-              className={styles.input}
-              value={newDriverName}
-              onChange={(event) => setNewDriverName(event.target.value)}
-              placeholder="First name"
-            />
-          </div>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.full}`}
-            style={{ marginTop: "0.75rem", width: "100%" }}
-            disabled={busy || !newDriverName.trim()}
-            onClick={() => void createDriver()}
-          >
-            Add me & sign in
-          </button>
         </section>
       </div>
     );
   }
+
+  const profile = myProfile;
 
   return (
     <div className={styles.page}>
@@ -570,228 +728,326 @@ export default function FieldApp() {
         <div className={styles.offlineBanner}>Syncing {queueCount} queued action(s)…</div>
       ) : null}
 
-      <header className={styles.top}>
+      <div className={styles.profileHeader}>
+        {profile ? <Avatar profile={profile} large /> : null}
         <div>
           <p className={styles.brand}>Inspired Closets OS · Field</p>
           <h1 className={styles.title}>{installer.name}</h1>
-          <p className={styles.subtitle}>Clock · photos · issues · complete</p>
+          <p className={styles.subtitle}>
+            {profile
+              ? `${profile.title} · ${profile.tenureLabel}`
+              : "Clock · photos · issues · complete"}
+          </p>
+          {profile ? (
+            <div className={styles.statRow}>
+              <span className={styles.statChip}>
+                {profile.stats.installsCompleted} completed
+              </span>
+              <span className={styles.statChip}>{profile.stats.activeJobs} active</span>
+              {profile.onSiteNow ? (
+                <span className={`${styles.statChip} ${styles.statChipLive}`}>Clocked in</span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-        <button type="button" className={styles.pill} onClick={() => void signOut()}>
-          Sign out
-        </button>
-      </header>
+        <div className={styles.profileHeaderActions}>
+          <button type="button" className={styles.pill} onClick={() => void signOut()}>
+            Sign out
+          </button>
+          <label className={styles.avatarUpload}>
+            Photo
+            <input
+              type="file"
+              accept="image/*"
+              capture="user"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void uploadAvatar(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+      </div>
 
-      {notice ? (
-        <p
-          className={`${styles.notice} ${
-            notice.kind === "error"
-              ? styles.noticeError
-              : notice.kind === "ok"
-                ? styles.noticeOk
-                : ""
-          }`}
+      {noticeEl}
+
+      <div className={styles.tabRow} role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "jobs"}
+          className={`${styles.tabBtn} ${tab === "jobs" ? styles.tabBtnActive : ""}`}
+          onClick={() => setTab("jobs")}
         >
-          {notice.text}
-        </p>
-      ) : null}
+          Today’s jobs
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "profile"}
+          className={`${styles.tabBtn} ${tab === "profile" ? styles.tabBtnActive : ""}`}
+          onClick={() => setTab("profile")}
+        >
+          My profile
+        </button>
+      </div>
 
-      <p className={styles.sectionTitle}>Today’s jobs</p>
-      {jobs.length === 0 ? (
-        <p className={styles.empty}>
-          No install jobs assigned yet. Ops can move a job to Install scheduled, or you can claim
-          an open one when it appears.
-        </p>
-      ) : (
-        jobs.map((job) => (
-          <button
-            key={job.id}
-            type="button"
-            className={`${styles.card} ${selectedId === job.id ? styles.cardActive : ""}`}
-            style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
-            onClick={() => setSelectedId(job.id)}
-          >
-            <h2 className={styles.jobName}>{job.client?.name ?? "Client"}</h2>
-            <p className={styles.jobMeta}>
-              {job.client?.address || "No address on file"}
-              {job.install_date ? ` · ${job.install_date}` : ""}
+      {tab === "profile" && profile ? (
+        <>
+          <section className={styles.card}>
+            <h2 className={styles.jobName}>About you</h2>
+            <p className={styles.jobMeta} style={{ marginTop: "0.45rem" }}>
+              {profile.title}
+              {profile.phone ? ` · ${profile.phone}` : " · No phone on file"}
             </p>
-            <div className={styles.badgeRow}>
-              <span className={styles.badge}>{stageLabel(job.stage)}</span>
-              {job.openClock ? (
-                <span className={styles.badgeOk}>
-                  In since {formatStamp(job.openClock.clock_in_at)}
+            <p className={styles.jobMeta}>
+              Tenure: {profile.tenureLabel}
+              {profile.hiredAt ? ` (started ${formatDay(profile.hiredAt)})` : ""}
+            </p>
+            <div className={styles.statRow} style={{ marginTop: "0.75rem" }}>
+              <span className={styles.statChip}>
+                {profile.stats.installsCompleted} installs completed
+              </span>
+              <span className={styles.statChip}>{profile.stats.activeJobs} active jobs</span>
+              <span className={styles.statChip}>
+                {profile.stats.issuesReported} issues reported
+              </span>
+              {profile.stats.openIssues > 0 ? (
+                <span className={`${styles.statChip} ${styles.badgeHot}`}>
+                  {profile.stats.openIssues} open
                 </span>
               ) : null}
-              {job.risk_flag ? <span className={styles.badgeHot}>Issue</span> : null}
-              {job.mine ? <span className={styles.badge}>Mine</span> : null}
             </div>
-          </button>
-        ))
-      )}
+          </section>
 
-      {selected ? (
+          <p className={styles.sectionTitle}>Previous installs</p>
+          {profile.recentInstalls.length === 0 ? (
+            <p className={styles.empty}>No completed installs on your record yet.</p>
+          ) : (
+            profile.recentInstalls.map((job) => (
+              <article key={job.id} className={styles.card}>
+                <div className={styles.historyItem}>
+                  <span className={styles.historyDate}>
+                    {formatDay(job.completedDate ?? job.installDate)}
+                  </span>
+                  <h3 className={styles.jobName}>{job.clientName}</h3>
+                  <p className={styles.jobMeta}>{job.address || "No address on file"}</p>
+                  <div className={styles.badgeRow}>
+                    <span className={styles.badge}>{stageLabel(job.stage)}</span>
+                  </div>
+                </div>
+              </article>
+            ))
+          )}
+        </>
+      ) : null}
+
+      {tab === "jobs" ? (
         <>
-          <p className={styles.sectionTitle}>On site · {selected.client?.name}</p>
-          <section className={styles.card}>
-            <p className={styles.jobMeta}>
-              {selected.client?.phone ? `📞 ${selected.client.phone}` : "No phone"}
-              {selected.notes ? ` · ${selected.notes}` : ""}
+          <p className={styles.sectionTitle}>Assigned / available installs</p>
+          {jobs.length === 0 ? (
+            <p className={styles.empty}>
+              No install jobs assigned yet. Ops can move a job to Install scheduled, or you can claim
+              an open one when it appears.
             </p>
-            {selected.openClock ? (
-              <p className={styles.jobMeta} style={{ marginTop: "0.55rem", fontWeight: 700 }}>
-                Clocked in {formatStamp(selected.openClock.clock_in_at)} · live{" "}
-                {formatDuration(selected.openClock.clock_in_at, null, nowTick)}
-                {selected.openClock.clock_in_lat
-                  ? ` · GPS ${Number(selected.openClock.clock_in_lat).toFixed(4)}, ${Number(selected.openClock.clock_in_lng).toFixed(4)}`
-                  : ""}
-              </p>
-            ) : (
-              <p className={styles.jobMeta} style={{ marginTop: "0.55rem" }}>
-                Not clocked in — tap Clock in when you arrive so job time is recorded.
-              </p>
-            )}
-            <div className={styles.actions}>
+          ) : (
+            jobs.map((job) => (
               <button
+                key={job.id}
                 type="button"
-                className={styles.btnOk}
-                disabled={busy || Boolean(selected.openClock)}
-                onClick={() => void clock("in")}
+                className={`${styles.card} ${selectedId === job.id ? styles.cardActive : ""}`}
+                style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
+                onClick={() => setSelectedId(job.id)}
               >
-                Clock in
-              </button>
-              <button
-                type="button"
-                className={styles.btnGhost}
-                disabled={busy || !selected.openClock}
-                onClick={() => void clock("out")}
-              >
-                Clock out
-              </button>
-              <button
-                type="button"
-                className={`${styles.btn} ${styles.full}`}
-                disabled={busy || ["install_complete", "final_payment", "closed"].includes(selected.stage)}
-                onClick={() => void completeJob()}
-              >
-                Mark install complete
-              </button>
-            </div>
-            <div style={{ marginTop: "0.85rem" }}>
-              <p className={styles.label}>Time log (saved to Supabase)</p>
-              {(selected.timeEntries?.length ?? 0) === 0 ? (
-                <p className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
-                  No clock times yet for this job. Clock in / out here — Gavin and ops can use these
-                  for how long installs take.
+                <h2 className={styles.jobName}>{job.client?.name ?? "Client"}</h2>
+                <p className={styles.jobMeta}>
+                  {job.client?.address || "No address on file"}
+                  {job.install_date ? ` · ${job.install_date}` : ""}
                 </p>
-              ) : (
-                selected.timeEntries?.map((entry) => (
-                  <p key={entry.id} className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
-                    In {formatStamp(entry.clock_in_at)}
-                    {entry.clock_out_at
-                      ? ` → Out ${formatStamp(entry.clock_out_at)} · ${formatDuration(entry.clock_in_at, entry.clock_out_at)}`
-                      : ` → still on site · ${formatDuration(entry.clock_in_at, null, nowTick)}`}
-                  </p>
-                ))
-              )}
-            </div>
-          </section>
+                <div className={styles.badgeRow}>
+                  <span className={styles.badge}>{stageLabel(job.stage)}</span>
+                  {job.openClock ? (
+                    <span className={styles.badgeOk}>
+                      In since {formatStamp(job.openClock.clock_in_at)}
+                    </span>
+                  ) : null}
+                  {job.risk_flag ? <span className={styles.badgeHot}>Issue</span> : null}
+                  {job.mine ? <span className={styles.badge}>Mine</span> : null}
+                </div>
+              </button>
+            ))
+          )}
 
-          <section className={styles.card}>
-            <h3 className={styles.jobName}>Photos</h3>
-            <div className={styles.field}>
-              <span className={styles.label}>Type</span>
-              <select
-                className={styles.select}
-                value={mediaKind}
-                onChange={(event) => setMediaKind(event.target.value)}
-              >
-                {MEDIA_KINDS.map((kind) => (
-                  <option key={kind.id} value={kind.id}>
-                    {kind.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className={styles.field}>
-              <span className={styles.label}>Capture / upload</span>
-              <input
-                className={styles.input}
-                type="file"
-                accept="image/*,video/*"
-                capture="environment"
-                disabled={busy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void uploadPhoto(file);
-                  event.target.value = "";
-                }}
-              />
-            </div>
-            {media.length > 0 ? (
-              <div className={styles.mediaGrid}>
-                {media.map((item) =>
-                  item.public_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={item.id}
-                      src={item.public_url}
-                      alt={item.caption || item.kind}
-                      className={styles.mediaThumb}
-                    />
-                  ) : null,
+          {selected ? (
+            <>
+              <p className={styles.sectionTitle}>On site · {selected.client?.name}</p>
+              <section className={styles.card}>
+                <p className={styles.jobMeta}>
+                  {selected.client?.phone ? `📞 ${selected.client.phone}` : "No phone"}
+                  {selected.notes ? ` · ${selected.notes}` : ""}
+                </p>
+                {selected.openClock ? (
+                  <p className={styles.jobMeta} style={{ marginTop: "0.55rem", fontWeight: 700 }}>
+                    Clocked in {formatStamp(selected.openClock.clock_in_at)} · live{" "}
+                    {formatDuration(selected.openClock.clock_in_at, null, nowTick)}
+                    {selected.openClock.clock_in_lat
+                      ? ` · GPS ${Number(selected.openClock.clock_in_lat).toFixed(4)}, ${Number(selected.openClock.clock_in_lng).toFixed(4)}`
+                      : ""}
+                  </p>
+                ) : (
+                  <p className={styles.jobMeta} style={{ marginTop: "0.55rem" }}>
+                    Not clocked in — tap Clock in when you arrive so job time is recorded.
+                  </p>
                 )}
-              </div>
-            ) : (
-              <p className={styles.jobMeta} style={{ marginTop: "0.65rem" }}>
-                No photos yet — snap before / during / after.
-              </p>
-            )}
-          </section>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.btnOk}
+                    disabled={busy || Boolean(selected.openClock)}
+                    onClick={() => void clock("in")}
+                  >
+                    Clock in
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btnGhost}
+                    disabled={busy || !selected.openClock}
+                    onClick={() => void clock("out")}
+                  >
+                    Clock out
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.btn} ${styles.full}`}
+                    disabled={
+                      busy ||
+                      ["install_complete", "final_payment", "closed"].includes(selected.stage)
+                    }
+                    onClick={() => void completeJob()}
+                  >
+                    Mark install complete
+                  </button>
+                </div>
+                <div style={{ marginTop: "0.85rem" }}>
+                  <p className={styles.label}>Time log (saved to Supabase)</p>
+                  {(selected.timeEntries?.length ?? 0) === 0 ? (
+                    <p className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
+                      No clock times yet for this job. Clock in / out here — Gavin and ops can use
+                      these for how long installs take.
+                    </p>
+                  ) : (
+                    selected.timeEntries?.map((entry) => (
+                      <p key={entry.id} className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
+                        In {formatStamp(entry.clock_in_at)}
+                        {entry.clock_out_at
+                          ? ` → Out ${formatStamp(entry.clock_out_at)} · ${formatDuration(entry.clock_in_at, entry.clock_out_at)}`
+                          : ` → still on site · ${formatDuration(entry.clock_in_at, null, nowTick)}`}
+                      </p>
+                    ))
+                  )}
+                </div>
+              </section>
 
-          <section className={styles.card}>
-            <h3 className={styles.jobName}>Report issue</h3>
-            <div className={styles.field}>
-              <span className={styles.label}>Type</span>
-              <select
-                className={styles.select}
-                value={issueType}
-                onChange={(event) => setIssueType(event.target.value)}
-              >
-                {ISSUE_TYPES.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className={styles.field}>
-              <span className={styles.label}>What happened</span>
-              <textarea
-                className={styles.textarea}
-                value={issueText}
-                onChange={(event) => setIssueText(event.target.value)}
-                placeholder="Site not ready, missing hardware, damage…"
-              />
-            </div>
-            <button
-              type="button"
-              className={`${styles.btnDanger} ${styles.full}`}
-              style={{ marginTop: "0.75rem", width: "100%" }}
-              disabled={busy || !issueText.trim()}
-              onClick={() => void reportIssue()}
-            >
-              Flag issue to office
-            </button>
-            {issues.length > 0 ? (
-              <div style={{ marginTop: "0.75rem" }}>
-                {issues.map((issue) => (
-                  <p key={issue.id} className={styles.jobMeta}>
-                    · {issue.issue_type.replace(/_/g, " ")} — {issue.description}
+              <section className={styles.card}>
+                <h3 className={styles.jobName}>Photos</h3>
+                <div className={styles.field}>
+                  <span className={styles.label}>Type</span>
+                  <select
+                    className={styles.select}
+                    value={mediaKind}
+                    onChange={(event) => setMediaKind(event.target.value)}
+                  >
+                    {MEDIA_KINDS.map((kind) => (
+                      <option key={kind.id} value={kind.id}>
+                        {kind.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>Capture / upload</span>
+                  <input
+                    className={styles.input}
+                    type="file"
+                    accept="image/*,video/*"
+                    capture="environment"
+                    disabled={busy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadPhoto(file);
+                      event.target.value = "";
+                    }}
+                  />
+                </div>
+                {media.length > 0 ? (
+                  <div className={styles.mediaGrid}>
+                    {media.map((item) =>
+                      item.public_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={item.id}
+                          src={item.public_url}
+                          alt={item.caption || item.kind}
+                          className={styles.mediaThumb}
+                        />
+                      ) : null,
+                    )}
+                  </div>
+                ) : (
+                  <p className={styles.jobMeta} style={{ marginTop: "0.65rem" }}>
+                    No photos yet — snap before / during / after.
                   </p>
-                ))}
-              </div>
-            ) : null}
-          </section>
+                )}
+              </section>
+
+              <section className={styles.card}>
+                <h3 className={styles.jobName}>Report issue</h3>
+                <div className={styles.field}>
+                  <span className={styles.label}>Type</span>
+                  <select
+                    className={styles.select}
+                    value={issueType}
+                    onChange={(event) => setIssueType(event.target.value)}
+                  >
+                    {ISSUE_TYPES.map((type) => (
+                      <option key={type.id} value={type.id}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>What happened</span>
+                  <textarea
+                    className={styles.textarea}
+                    value={issueText}
+                    onChange={(event) => setIssueText(event.target.value)}
+                    placeholder="Site not ready, missing hardware, damage…"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`${styles.btnDanger} ${styles.full}`}
+                  style={{ marginTop: "0.75rem", width: "100%" }}
+                  disabled={busy || !issueText.trim()}
+                  onClick={() => void reportIssue()}
+                >
+                  Flag issue to office
+                </button>
+                {issues.length > 0 ? (
+                  <div style={{ marginTop: "0.75rem" }}>
+                    {issues.map((issue) => (
+                      <p key={issue.id} className={styles.jobMeta}>
+                        · {issue.issue_type.replace(/_/g, " ")} — {issue.description}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            </>
+          ) : null}
         </>
       ) : null}
 

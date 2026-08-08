@@ -57,9 +57,15 @@ export async function POST(request: Request) {
   const createRole = typeof body.role === "string" ? body.role : "installer";
 
   if (!staffId && createName) {
+    const today = new Date().toISOString().slice(0, 10);
     const { data: created, error } = await supabase
       .from("ic_staff")
-      .insert({ name: createName, role: createRole === "installer" ? "installer" : createRole })
+      .insert({
+        name: createName,
+        role: createRole === "installer" ? "installer" : createRole,
+        title: createRole === "installer" ? "Installer" : null,
+        hired_at: today,
+      })
       .select("id, name, role")
       .single();
     if (error) {

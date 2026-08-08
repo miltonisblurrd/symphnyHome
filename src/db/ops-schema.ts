@@ -62,6 +62,12 @@ export const icStaff = pgTable("ic_staff", {
   role: icRoleEnum("role").notNull(),
   email: text("email"),
   phone: text("phone"),
+  /** Optional public avatar URL (Supabase storage or external). */
+  avatarUrl: text("avatar_url"),
+  /** When they started — used for Field tenure (“with us X years”). */
+  hiredAt: date("hired_at"),
+  /** Display title, e.g. Lead Installer. */
+  title: text("title"),
   active: boolean("active").notNull().default(true),
   /** Legacy identifier, e.g. payroll workbook tab name ("REB 26"). */
   workbookTab: text("workbook_tab"),

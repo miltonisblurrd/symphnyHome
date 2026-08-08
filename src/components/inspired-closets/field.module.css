@@ -231,28 +231,222 @@
 }
 
 .loginCard {
-  margin-top: 2rem;
+  margin-top: 0.5rem;
 }
 
-.driverList {
+.loginHero {
+  margin: 0.5rem 0 1.25rem;
+}
+
+.loginHeroTitle {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.loginHeroText {
+  margin: 0.45rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 28rem;
+}
+
+.profileList {
   display: grid;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
 }
 
-.driverBtn {
+.profileCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
   text-align: left;
   border: 1px solid var(--line);
   background: var(--ic-white);
-  border-radius: 0.85rem;
-  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  padding: 0.95rem 1rem;
+  cursor: pointer;
+  width: 100%;
+  color: inherit;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+  transition: border-color 0.15s ease, transform 0.12s ease;
+}
+
+.profileCard:active {
+  transform: scale(0.99);
+}
+
+.profileCard:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.avatar {
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid rgba(130, 31, 45, 0.2);
+  background: var(--ic-bone);
+  flex-shrink: 0;
+}
+
+.avatarLg {
+  width: 4.25rem;
+  height: 4.25rem;
+}
+
+.avatarFallback {
+  display: grid;
+  place-items: center;
+  font-weight: 800;
   font-size: 1rem;
-  font-weight: 700;
+  color: var(--ic-red);
+  background: var(--ic-blush);
+}
+
+.avatarLg.avatarFallback {
+  font-size: 1.25rem;
+}
+
+.profileMain {
+  min-width: 0;
+}
+
+.profileName {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.profileMeta {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.statRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.statChip {
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  background: var(--ic-bone);
+  color: var(--ink);
+}
+
+.statChipLive {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.historyPreview {
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.historyPreview li {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tapHint {
+  margin: 0.55rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ic-red);
+}
+
+.profileHeader {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.85rem;
+  align-items: start;
+  margin-bottom: 0.85rem;
+}
+
+.profileHeaderActions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-end;
+}
+
+.avatarUpload {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--ic-red);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.avatarUpload input {
+  display: none;
+}
+
+.tabRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin: 0.25rem 0 1rem;
+  padding: 0.3rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+}
+
+.tabBtn {
+  border: none;
+  background: transparent;
+  border-radius: 0.7rem;
+  padding: 0.65rem 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--muted);
   cursor: pointer;
 }
 
-.driverBtn:active {
-  transform: scale(0.99);
+.tabBtnActive {
+  background: var(--ic-white);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.historyItem {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.historyDate {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.newDriverBox {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
 }
 
 .dock {

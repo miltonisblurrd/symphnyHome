@@ -21,7 +21,7 @@ export async function GET() {
 
   const supabase = getSupabaseAdmin();
 
-  const [{ data: jobs, error }, { data: openClocks }, { data: clients }, { data: staff }] =
+  const [{ data: jobs, error }, { data: timeEntries }, { data: clients }, { data: staff }] =
     await Promise.all([
       supabase
         .from("ic_jobs")
@@ -34,7 +34,8 @@ export async function GET() {
         .from("ic_time_entries")
         .select("*")
         .eq("installer_id", installerId)
-        .is("clock_out_at", null),
+        .order("clock_in_at", { ascending: false })
+        .limit(200),
       supabase.from("ic_clients").select("id, name, address, phone").is("deleted_at", null),
       supabase
         .from("ic_staff")
@@ -48,9 +49,12 @@ export async function GET() {
   }
 
   const clientsById = new Map((clients ?? []).map((client) => [client.id, client]));
-  const openClockByJob = new Map(
-    (openClocks ?? []).map((entry) => [entry.job_id, entry]),
-  );
+  const entriesByJob = new Map<string, typeof timeEntries>();
+  for (const entry of timeEntries ?? []) {
+    const list = entriesByJob.get(entry.job_id) ?? [];
+    list.push(entry);
+    entriesByJob.set(entry.job_id, list);
+  }
 
   const enriched = (jobs ?? [])
     .filter((job) => {
@@ -64,12 +68,17 @@ export async function GET() {
       }
       return false;
     })
-    .map((job) => ({
-      ...job,
-      client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
-      openClock: openClockByJob.get(job.id) ?? null,
-      mine: job.installer_id === installerId,
-    }));
+    .map((job) => {
+      const entries = entriesByJob.get(job.id) ?? [];
+      const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
+      return {
+        ...job,
+        client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
+        openClock,
+        timeEntries: entries,
+        mine: job.installer_id === installerId,
+      };
+    });
 
   return NextResponse.json({
     ok: true,

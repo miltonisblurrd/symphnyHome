@@ -10,6 +10,16 @@ import styles from "./field.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
 
+type TimeEntry = {
+  id: string;
+  clock_in_at: string;
+  clock_out_at: string | null;
+  clock_in_lat: string | null;
+  clock_in_lng: string | null;
+  clock_out_lat: string | null;
+  clock_out_lng: string | null;
+};
+
 type Job = {
   id: string;
   stage: string;
@@ -19,7 +29,8 @@ type Job = {
   risk_flag: boolean;
   mine: boolean;
   client: { id: string; name: string; address: string | null; phone: string | null } | null;
-  openClock: { id: string; clock_in_at: string } | null;
+  openClock: TimeEntry | null;
+  timeEntries?: TimeEntry[];
 };
 
 type Media = {
@@ -92,6 +103,29 @@ function getGeo(): Promise<{ lat: string | null; lng: string | null }> {
 
 function stageLabel(stage: string) {
   return stage.replace(/_/g, " ");
+}
+
+function formatStamp(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(clockIn: string, clockOut: string | null): string {
+  const start = new Date(clockIn).getTime();
+  const end = clockOut ? new Date(clockOut).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
+  const minutes = Math.round((end - start) / 60000);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours <= 0) return `${mins}m`;
+  return `${hours}h ${mins}m`;
 }
 
 export default function FieldApp() {
@@ -325,9 +359,13 @@ export default function FieldApp() {
       });
       const data = (await response.json()) as ApiPayload;
       if (!data.ok) throw new Error(data.error ?? "Clock failed.");
+      const stamp = formatStamp(new Date().toISOString());
       setNotice({
         kind: "ok",
-        text: action === "in" ? "Clocked in on site." : "Clocked out.",
+        text:
+          action === "in"
+            ? `Clocked in at ${stamp}.`
+            : `Clocked out at ${stamp}.`,
       });
       await loadJobs();
     } catch (error) {
@@ -571,7 +609,11 @@ export default function FieldApp() {
             </p>
             <div className={styles.badgeRow}>
               <span className={styles.badge}>{stageLabel(job.stage)}</span>
-              {job.openClock ? <span className={styles.badgeOk}>Clocked in</span> : null}
+              {job.openClock ? (
+                <span className={styles.badgeOk}>
+                  In since {formatStamp(job.openClock.clock_in_at)}
+                </span>
+              ) : null}
               {job.risk_flag ? <span className={styles.badgeHot}>Issue</span> : null}
               {job.mine ? <span className={styles.badge}>Mine</span> : null}
             </div>
@@ -587,6 +629,19 @@ export default function FieldApp() {
               {selected.client?.phone ? `📞 ${selected.client.phone}` : "No phone"}
               {selected.notes ? ` · ${selected.notes}` : ""}
             </p>
+            {selected.openClock ? (
+              <p className={styles.jobMeta} style={{ marginTop: "0.55rem", fontWeight: 700 }}>
+                Clocked in {formatStamp(selected.openClock.clock_in_at)} · live{" "}
+                {formatDuration(selected.openClock.clock_in_at, null)}
+                {selected.openClock.clock_in_lat
+                  ? ` · GPS ${Number(selected.openClock.clock_in_lat).toFixed(4)}, ${Number(selected.openClock.clock_in_lng).toFixed(4)}`
+                  : ""}
+              </p>
+            ) : (
+              <p className={styles.jobMeta} style={{ marginTop: "0.55rem" }}>
+                Not clocked in
+              </p>
+            )}
             <div className={styles.actions}>
               <button
                 type="button"
@@ -613,6 +668,19 @@ export default function FieldApp() {
                 Mark install complete
               </button>
             </div>
+            {(selected.timeEntries?.length ?? 0) > 0 ? (
+              <div style={{ marginTop: "0.85rem" }}>
+                <p className={styles.label}>Time log</p>
+                {selected.timeEntries?.map((entry) => (
+                  <p key={entry.id} className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
+                    In {formatStamp(entry.clock_in_at)}
+                    {entry.clock_out_at
+                      ? ` → Out ${formatStamp(entry.clock_out_at)} · ${formatDuration(entry.clock_in_at, entry.clock_out_at)}`
+                      : " → still on site"}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section className={styles.card}>

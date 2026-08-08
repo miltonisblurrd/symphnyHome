@@ -214,6 +214,36 @@ export default function OpsJobsWorkspace() {
     }
   }
 
+  async function updateInstallDate(job: Job, installDate: string) {
+    try {
+      const response = await fetch("/api/inspired-closets/ops/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: job.id,
+          install_date: installDate || null,
+        }),
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok || !payload.job) {
+        throw new Error(payload.error ?? "Failed to update install date.");
+      }
+      const updated = payload.job;
+      setJobs((current) =>
+        current.map((item) =>
+          item.id === job.id
+            ? { ...item, ...updated, client: item.client, designer: item.designer }
+            : item,
+        ),
+      );
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Failed to update install date.",
+      });
+    }
+  }
+
   return (
     <OpsShell
       title="Jobs"
@@ -324,7 +354,16 @@ export default function OpsJobsWorkspace() {
                     </select>
                   </td>
                   <td>{job.sold_date ?? "—"}</td>
-                  <td>{job.install_date ?? "—"}</td>
+                  <td>
+                    <input
+                      className={styles.input}
+                      type="date"
+                      value={job.install_date ?? ""}
+                      onChange={(event) => void updateInstallDate(job, event.target.value)}
+                      style={{ minWidth: "9.5rem" }}
+                      title="Install date"
+                    />
+                  </td>
                   <td>{centsToDisplay(job.contract_cents)}</td>
                   <td>{centsToDisplay(job.deposit_cents)}</td>
                   <td>{centsToDisplay(job.collected_cents)}</td>

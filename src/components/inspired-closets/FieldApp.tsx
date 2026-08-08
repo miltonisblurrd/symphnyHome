@@ -284,6 +284,10 @@ export default function FieldApp() {
     setInstaller(null);
     setJobs([]);
     setSelectedId(null);
+    setNotice({
+      kind: "info",
+      text: "Signed out of driver mode. You can open Jobs / Inventory / Payroll now.",
+    });
   }
 
   async function clock(action: "in" | "out") {

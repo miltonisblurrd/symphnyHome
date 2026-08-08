@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import OpsShell from "@/components/inspired-closets/OpsShell";
 import styles from "./ops-payroll.module.css";
 
 type Staff = {
@@ -238,16 +239,11 @@ export default function OpsPayrollWorkspace() {
   }
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Payroll &amp; Commissions</h1>
-          <p className={styles.subtitle}>
-            Inspired Closets OS · replaces the red 2026 workbook · {marginGateBp / 100}% spiff
-            gate enforced
-          </p>
-        </div>
-        <div className={styles.actions}>
+    <OpsShell
+      title="Payroll & Commissions"
+      subtitle={`Replaces the red 2026 workbook · ${marginGateBp / 100}% spiff gate enforced`}
+      actions={
+        <>
           <button
             type="button"
             className={styles.buttonGhost}
@@ -264,9 +260,9 @@ export default function OpsPayrollWorkspace() {
           >
             {importing ? "Importing…" : "Import from workbook"}
           </button>
-        </div>
-      </header>
-
+        </>
+      }
+    >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
           {notice.text}
@@ -458,6 +454,6 @@ export default function OpsPayrollWorkspace() {
           </div>
         </form>
       </section>
-    </div>
+    </OpsShell>
   );
 }

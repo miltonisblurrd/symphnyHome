@@ -161,18 +161,29 @@ export default function OpsScheduleWorkspace() {
     setBusy(true);
     setNotice(null);
     try {
+      if (!form.scheduled_at || form.scheduled_at.length < 16) {
+        throw new Error("Pick both a date and a time in When (e.g. 08/09/2026, 10:00 AM).");
+      }
+      const when = new Date(form.scheduled_at);
+      if (Number.isNaN(when.getTime())) {
+        throw new Error("When is invalid — set a full date and time.");
+      }
+      const leadId = form.lead_id.trim();
+      if (leadId && !/^[0-9a-f-]{36}$/i.test(leadId)) {
+        throw new Error(
+          "Lead id looks incomplete. Paste the full UUID from Leads, or clear the field and pick Client.",
+        );
+      }
       const response = await fetch("/api/inspired-closets/ops/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          lead_id: form.lead_id || null,
+          lead_id: leadId || null,
           client_id: form.client_id || null,
           job_id: form.job_id || null,
           designer_id: form.designer_id || null,
-          scheduled_at: form.scheduled_at
-            ? new Date(form.scheduled_at).toISOString()
-            : null,
+          scheduled_at: when.toISOString(),
         }),
       });
       const payload = (await response.json()) as ApiResponse;

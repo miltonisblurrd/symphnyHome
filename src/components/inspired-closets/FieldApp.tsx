@@ -670,7 +670,7 @@ export default function FieldApp() {
               <button
                 type="button"
                 className={`${styles.btn} ${styles.full}`}
-                disabled={busy || selected.stage === "install_complete"}
+                disabled={busy || ["install_complete", "final_payment", "closed"].includes(selected.stage)}
                 onClick={() => void completeJob()}
               >
                 Mark install complete

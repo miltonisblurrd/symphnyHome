@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { JOB_STAGES, type IcJobStage } from "@/lib/inspired-closets-ops-jobs";
+import {
+  ensurePaymentMilestones,
+  markInstallFortyDue,
+} from "@/lib/inspired-closets-ops-billing";
 
 export const runtime = "nodejs";
 
@@ -18,6 +22,7 @@ const EDITABLE = new Set([
   "community_ref",
   "notes",
   "risk_flag",
+  "lead_id",
 ]);
 
 const VALID_STAGES = new Set(JOB_STAGES.map((stage) => stage.id));
@@ -151,6 +156,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
+  if ((insert.contract_cents as number) > 0) {
+    try {
+      await ensurePaymentMilestones(data.id, insert.contract_cents as number);
+    } catch {
+      // Non-fatal — billing page can ensure later.
+    }
+  }
+
   await supabase.from("ic_activity_log").insert({
     entity_type: "job",
     entity_id: data.id,
@@ -232,6 +245,34 @@ export async function PATCH(request: Request) {
     actor_label: actorId ? null : "ops-app",
     changes,
   });
+
+  const nextStage = (updated.stage as string) ?? current.stage;
+  if (
+    nextStage === "install_scheduled" ||
+    nextStage === "install_in_progress"
+  ) {
+    const due =
+      updated.install_date != null
+        ? `${updated.install_date}T12:00:00.000Z`
+        : new Date().toISOString();
+    try {
+      await ensurePaymentMilestones(id, updated.contract_cents ?? 0);
+      await markInstallFortyDue(id, due);
+    } catch {
+      // Billing ensure is best-effort on stage change.
+    }
+  }
+
+  if (
+    typeof update.contract_cents === "number" &&
+    update.contract_cents > 0
+  ) {
+    try {
+      await ensurePaymentMilestones(id, update.contract_cents);
+    } catch {
+      // ignore
+    }
+  }
 
   return NextResponse.json({ ok: true, job: updated });
 }

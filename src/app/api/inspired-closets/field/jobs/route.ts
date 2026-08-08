@@ -5,6 +5,7 @@ import {
   FIELD_JOB_STAGES,
   IC_STAFF_ID_COOKIE,
 } from "@/lib/inspired-closets-ops-field";
+import { markCompletionTenDue } from "@/lib/inspired-closets-ops-billing";
 
 export const runtime = "nodejs";
 
@@ -174,6 +175,13 @@ export async function PATCH(request: Request) {
       .eq("installer_id", installerId)
       .is("clock_out_at", null);
 
+    // Queue final 10% for Des billing + advance stage to final_payment.
+    try {
+      await markCompletionTenDue(jobId);
+    } catch {
+      // Non-fatal — office can ensure milestones from Billing.
+    }
+
     await supabase.from("ic_activity_log").insert({
       entity_type: "job",
       entity_id: jobId,
@@ -182,11 +190,18 @@ export async function PATCH(request: Request) {
       changes: { stage: { from: job.stage, to: "install_complete" } },
     });
 
+    // Re-read job after billing helper may have advanced stage.
+    const { data: refreshed } = await supabase
+      .from("ic_jobs")
+      .select("*")
+      .eq("id", jobId)
+      .maybeSingle();
+
     return NextResponse.json({
       ok: true,
-      job: data,
+      job: refreshed ?? data,
       next: "final_payment",
-      message: "Install marked complete. Final 10% payment can be triggered from ops/billing.",
+      message: "Install marked complete. Final 10% is due — open Billing to send link / record payment.",
     });
   }
 

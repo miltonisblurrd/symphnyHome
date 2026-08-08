@@ -85,10 +85,100 @@ export const icClients = pgTable("ic_clients", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
+export const icLeadSourceEnum = pgEnum("ic_lead_source", [
+  "call",
+  "website",
+  "google",
+  "meta",
+  "instagram",
+  "yelp",
+  "billboard",
+  "referral",
+  "email",
+  "other",
+]);
+
+export const icLeadStageEnum = pgEnum("ic_lead_stage", [
+  "new",
+  "schedule",
+  "follow_up",
+  "nurturing",
+  "not_interested",
+  "junk",
+  "appointment_set",
+]);
+
+export const icAppointmentKindEnum = pgEnum("ic_appointment_kind", [
+  "consultation",
+  "job_check",
+  "install",
+]);
+
+export const icAppointmentLocationEnum = pgEnum("ic_appointment_location", [
+  "on_site",
+  "showroom",
+  "virtual",
+]);
+
+export const icAppointmentStatusEnum = pgEnum("ic_appointment_status", [
+  "scheduled",
+  "confirmed",
+  "completed",
+  "cancelled",
+  "rescheduled",
+]);
+
+export const icPaymentMilestoneEnum = pgEnum("ic_payment_milestone", [
+  "deposit_50",
+  "install_40",
+  "completion_10",
+]);
+
+export const icPaymentStatusEnum = pgEnum("ic_payment_status", [
+  "pending",
+  "partial",
+  "paid",
+  "void",
+]);
+
+export const icPaymentMethodEnum = pgEnum("ic_payment_method", [
+  "podium",
+  "check",
+  "card",
+  "other",
+]);
+
+/** Front-office CRM lead (Des). Converts into ic_jobs when sold. */
+export const icLeads = pgTable("ic_leads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clientId: uuid("client_id").references(() => icClients.id),
+  source: icLeadSourceEnum("source").notNull().default("call"),
+  stage: icLeadStageEnum("stage").notNull().default("new"),
+  ownerId: uuid("owner_id").references(() => icStaff.id),
+  designerId: uuid("designer_id").references(() => icStaff.id),
+  contactAttempts: integer("contact_attempts").notNull().default(0),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true }),
+  nextActionNote: text("next_action_note"),
+  disqualificationReason: text("disqualification_reason"),
+  projectArea: text("project_area"),
+  motivation: text("motivation"),
+  desiredTimeline: text("desired_timeline"),
+  communityRef: text("community_ref"),
+  convertedJobId: uuid("converted_job_id"),
+  riskFlag: boolean("risk_flag").notNull().default(false),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
 /** The spine. Every module hangs off a job. */
 export const icJobs = pgTable("ic_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
   clientId: uuid("client_id").references(() => icClients.id),
+  leadId: uuid("lead_id").references(() => icLeads.id),
   designerId: uuid("designer_id").references(() => icStaff.id),
   installerId: uuid("installer_id").references(() => icStaff.id),
   stage: icJobStageEnum("stage").notNull().default("lead"),
@@ -109,6 +199,54 @@ export const icJobs = pgTable("ic_jobs", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/** Consultations / job checks / installs — Des calendar (manual double-entry). */
+export const icAppointments = pgTable("ic_appointments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leadId: uuid("lead_id").references(() => icLeads.id),
+  clientId: uuid("client_id").references(() => icClients.id),
+  jobId: uuid("job_id").references(() => icJobs.id),
+  designerId: uuid("designer_id").references(() => icStaff.id),
+  kind: icAppointmentKindEnum("kind").notNull().default("consultation"),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+  locationType: icAppointmentLocationEnum("location_type").notNull().default("on_site"),
+  status: icAppointmentStatusEnum("status").notNull().default("scheduled"),
+  delayReason: text("delay_reason"),
+  confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
+  confirmationNote: text("confirmation_note"),
+  communityRef: text("community_ref"),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/** 50 / 40 / 10 customer payment ledger. Podium stays the rail; app owns owed/paid. */
+export const icPayments = pgTable("ic_payments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  milestone: icPaymentMilestoneEnum("milestone").notNull(),
+  amountDueCents: integer("amount_due_cents").notNull().default(0),
+  amountPaidCents: integer("amount_paid_cents").notNull().default(0),
+  status: icPaymentStatusEnum("status").notNull().default("pending"),
+  method: icPaymentMethodEnum("method"),
+  podiumRef: text("podium_ref"),
+  checkRef: text("check_ref"),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  linkSentAt: timestamp("link_sent_at", { withTimezone: true }),
+  lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+  reminderLevel: integer("reminder_level").notNull().default(0),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /**
@@ -291,7 +429,10 @@ export const icFieldIssues = pgTable("ic_field_issues", {
 
 export type IcStaff = typeof icStaff.$inferSelect;
 export type IcClient = typeof icClients.$inferSelect;
+export type IcLead = typeof icLeads.$inferSelect;
 export type IcJob = typeof icJobs.$inferSelect;
+export type IcAppointment = typeof icAppointments.$inferSelect;
+export type IcPayment = typeof icPayments.$inferSelect;
 export type IcPayrollEntry = typeof icPayrollEntries.$inferSelect;
 export type IcActivityLog = typeof icActivityLog.$inferSelect;
 export type IcPart = typeof icParts.$inferSelect;
@@ -302,6 +443,14 @@ export type IcFieldIssue = typeof icFieldIssues.$inferSelect;
 
 export type IcRole = (typeof icRoleEnum.enumValues)[number];
 export type IcJobStage = (typeof icJobStageEnum.enumValues)[number];
+export type IcLeadSource = (typeof icLeadSourceEnum.enumValues)[number];
+export type IcLeadStage = (typeof icLeadStageEnum.enumValues)[number];
+export type IcAppointmentKind = (typeof icAppointmentKindEnum.enumValues)[number];
+export type IcAppointmentLocation = (typeof icAppointmentLocationEnum.enumValues)[number];
+export type IcAppointmentStatus = (typeof icAppointmentStatusEnum.enumValues)[number];
+export type IcPaymentMilestone = (typeof icPaymentMilestoneEnum.enumValues)[number];
+export type IcPaymentStatus = (typeof icPaymentStatusEnum.enumValues)[number];
+export type IcPaymentMethod = (typeof icPaymentMethodEnum.enumValues)[number];
 export type IcPayrollStatus = (typeof icPayrollStatusEnum.enumValues)[number];
 export type IcStockMovementType = (typeof icStockMovementTypeEnum.enumValues)[number];
 export type IcMediaKind = (typeof icMediaKindEnum.enumValues)[number];

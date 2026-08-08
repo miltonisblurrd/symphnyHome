@@ -161,12 +161,69 @@ export const icActivityLog = pgTable("ic_activity_log", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const icStockMovementTypeEnum = pgEnum("ic_stock_movement_type", [
+  "receive", // stock in (Stow / order / purchase)
+  "allocate", // pulled to a job
+  "return", // unused parts back from job
+  "adjust", // cycle count correction
+  "scrap", // damaged / unusable
+  "sell_excess", // reclaim capital on dead stock
+]);
+
+/** Parts catalog + live qty. Source of truth for Frank's warehouse. */
+export const icParts = pgTable("ic_parts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sku: text("sku").notNull().unique(),
+  name: text("name").notNull(),
+  category: text("category").notNull().default("hardware"),
+  /** Bin / aisle / shelf label in the warehouse. */
+  location: text("location"),
+  barcode: text("barcode"),
+  unitCostCents: integer("unit_cost_cents").notNull().default(0),
+  qtyOnHand: integer("qty_on_hand").notNull().default(0),
+  /** Soft reserve for open job allocations (optional tracking). */
+  qtyReserved: integer("qty_reserved").notNull().default(0),
+  reorderPoint: integer("reorder_point").notNull().default(0),
+  /** Flag for dead/excess stock Gavin wants sold or used down. */
+  isExcess: boolean("is_excess").notNull().default(false),
+  vendor: text("vendor"),
+  notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/**
+ * Append-only stock ledger. qty_on_hand on ic_parts is updated with every row.
+ * allocate/return rows should include job_id so material cost can attach to jobs.
+ */
+export const icStockMovements = pgTable("ic_stock_movements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  partId: uuid("part_id")
+    .notNull()
+    .references(() => icParts.id),
+  jobId: uuid("job_id").references(() => icJobs.id),
+  movementType: icStockMovementTypeEnum("movement_type").notNull(),
+  /** Signed quantity: receive/return positive; allocate/scrap/sell_excess negative in effect. */
+  qty: integer("qty").notNull(),
+  unitCostCents: integer("unit_cost_cents"),
+  note: text("note"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export type IcStaff = typeof icStaff.$inferSelect;
 export type IcClient = typeof icClients.$inferSelect;
 export type IcJob = typeof icJobs.$inferSelect;
 export type IcPayrollEntry = typeof icPayrollEntries.$inferSelect;
 export type IcActivityLog = typeof icActivityLog.$inferSelect;
+export type IcPart = typeof icParts.$inferSelect;
+export type IcStockMovement = typeof icStockMovements.$inferSelect;
 
 export type IcRole = (typeof icRoleEnum.enumValues)[number];
 export type IcJobStage = (typeof icJobStageEnum.enumValues)[number];
 export type IcPayrollStatus = (typeof icPayrollStatusEnum.enumValues)[number];
+export type IcStockMovementType = (typeof icStockMovementTypeEnum.enumValues)[number];

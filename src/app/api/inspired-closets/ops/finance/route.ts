@@ -58,7 +58,7 @@ export async function GET() {
       ...snapshot,
       luluTips: [
         "Start with Today — anything that needs you is listed first.",
-        "After you enter a Podium payment in QuickBooks, tap Mark entered in QB (replaces the Excel checkmark).",
+        "After YOU enter a payment in QuickBooks, tap Marked in QB (checklist only — we never post to QB).",
         `Spiffs only when margin ≥ ${MARGIN_GATE_PCT}% — approve from the Spiffs tab.`,
         "Mark costs verified once the Stow invoice is itemized to the job.",
       ],

@@ -306,7 +306,7 @@ export async function buildFinanceSnapshot(): Promise<{
       jobId: row.jobId,
       paymentId: row.paymentId,
       clientName: row.clientName,
-      actionLabel: "Mark entered in QB",
+      actionLabel: "Marked in QB",
     });
   }
 

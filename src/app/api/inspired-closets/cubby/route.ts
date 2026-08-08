@@ -35,8 +35,9 @@ function resolveCubbySource(input: {
   fallback?: boolean;
 }): CubbyResponseSource {
   if (input.fallback) return "demo-fallback";
-  if (input.hasOs) return "claude+os";
+  // Prefer live payroll workbook while OS finance is still being worked out.
   if (input.hasSheets) return "claude+sheets";
+  if (input.hasOs) return "claude+os";
   return "claude+demo";
 }
 
@@ -145,13 +146,14 @@ export async function POST(request: Request) {
   const context = {
     period,
     company: gavinDemoMeta.company,
-    financialPulseSource: opsContext
-      ? "inspired_closets_os"
-      : workbookPulse
-        ? "payroll_workbook"
+    financialPulseSource: workbookPulse
+      ? "payroll_workbook"
+      : opsContext
+        ? "inspired_closets_os_secondary"
         : "demo",
-    ops: opsContext,
     workbook: workbookContext,
+    /** Secondary while OS modules are still being worked out — do not override workbook totals. */
+    opsPreview: opsContext,
     suggestedInsights: insights.map((item) => ({
       prompt: item.prompt,
       answer: item.answer,
@@ -165,12 +167,13 @@ export async function POST(request: Request) {
     const response = await client.messages.create({
       model,
       max_tokens: 700,
-      system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant.
-Answer in plain, confident language for a busy executive (Gavin) or finance lead (Lulu).
+      system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant inside Gavin's dashboard.
+Answer in plain, confident language for a busy executive.
 Use ONLY the provided Ops Hub context.
-Prefer ops (Inspired Closets OS) when present — that is the live job, payment, crew, issue, and finance-attention source.
-QuickBooks remains accounting books; Podium remains the customer payment rail; the payroll workbook may still backfill designer commission history.
-The spiff gate is ${gavinDemoMeta.marginGate}% margin — never invent approvals below the gate.
+The Payroll Workbook (red 2026 designer tabs / Excel) is still the LIVE source of truth for sales, deposits, outstanding balances, margins (starting / after spiff / final), commissions, and notes.
+Prefer workbook.pulse for company totals and workbook.jobs / workbook.designers / workbook.attentionItems for specifics.
+opsPreview is early Inspired Closets OS data (jobs, payments, field) — use it only as supplemental context when the workbook does not answer, and say clearly when a number is from OS preview vs the workbook.
+When using sheet data, mention it reflects the last syncedAt timestamp when timing matters.
 If something is not in context, say what is missing instead of inventing numbers.
 Keep answers concise — usually 2-5 sentences unless listing urgent items.`,
       messages: [

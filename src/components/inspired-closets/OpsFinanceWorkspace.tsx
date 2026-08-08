@@ -167,9 +167,11 @@ export default function OpsFinanceWorkspace() {
 
       <p className={styles.notice}>
         QuickBooks stays the books
-        {data?.quickbooksStatus === "connected" ? " (connected for pulse)" : " (pulse optional)"}.
-        This screen replaces your payment/due-date Excel checklist — mark QB when you’ve entered
-        it, verify Stow costs, and only release spiffs when margin clears {gate}%.
+        {data?.quickbooksStatus === "connected" ? " (pulse connected)" : ""} — this app does{" "}
+        <strong>not</strong> write into QuickBooks. After <em>you</em> enter a payment in QB,
+        tap <strong>Marked in QB</strong> here so the checklist clears (same idea as checking it
+        off in Excel). Des records the payment in Billing/Podium; Lulu owns the QB entry +
+        checkmark.
       </p>
 
       <div className={styles.summaryRow}>
@@ -274,7 +276,7 @@ export default function OpsFinanceWorkspace() {
                             })
                           }
                         >
-                          Mark entered in QB
+                          Marked in QB
                         </button>
                       ) : item.kind === "who_owes" || item.kind === "final_unpaid" ? (
                         <Link className={styles.buttonGhost} href="/inspired-closets/ops/billing">
@@ -311,8 +313,9 @@ export default function OpsFinanceWorkspace() {
       ) : tab === "qb" ? (
         <div className={styles.panel}>
           <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-            Paid in the app / Podium, not yet checked off in QuickBooks. Enter in QB, then mark
-            done here (~your 5–10 min recon loop).
+            Payments already recorded in the app (from Billing / Podium). This is Lulu’s
+            checklist — enter each one in QuickBooks yourself, then mark it here. Nothing is
+            sent to QB automatically.
           </p>
           {(data.needsQb ?? []).length === 0 ? (
             <p className={styles.empty}>All recorded payments have a QuickBooks checkmark.</p>

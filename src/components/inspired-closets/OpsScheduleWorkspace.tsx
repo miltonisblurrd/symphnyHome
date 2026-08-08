@@ -56,6 +56,17 @@ type ApiResponse = {
   locations?: Option[];
   statuses?: Option[];
   appointment?: Appointment;
+  googleCalendar?: {
+    configured?: boolean;
+    calendarId?: string | null;
+    serviceAccountEmail?: string | null;
+    officeChecklist?: string[];
+    ok?: boolean;
+    skipped?: boolean;
+    reason?: string;
+    error?: string;
+    action?: string;
+  };
 };
 
 function startOfWeek(d = new Date()): string {
@@ -101,6 +112,7 @@ export default function OpsScheduleWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
+  const [calendarStatus, setCalendarStatus] = useState<ApiResponse["googleCalendar"] | null>(null);
   const [reschedule, setReschedule] = useState<Record<string, { at: string; reason: string }>>({});
   const [form, setForm] = useState({
     lead_id: presetLeadId ?? "",
@@ -143,6 +155,7 @@ export default function OpsScheduleWorkspace() {
       setClients(payload.clients ?? []);
       setKinds(payload.kinds ?? []);
       setLocations(payload.locations ?? []);
+      setCalendarStatus(payload.googleCalendar ?? null);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -188,9 +201,18 @@ export default function OpsScheduleWorkspace() {
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Failed to create appointment.");
+      const cal = payload.googleCalendar;
+      const calNote =
+        cal?.ok === true
+          ? ` Google Calendar: ${cal.action ?? "synced"}.`
+          : cal?.skipped
+            ? " Google Calendar not connected yet (office setup)."
+            : cal?.error
+              ? ` Google Calendar error: ${cal.error}`
+              : "";
       setNotice({
         kind: "info",
-        text: "Appointment saved. Confirm in Community / Google Calendar as needed.",
+        text: `Appointment saved. Confirm in Community as needed.${calNote}`,
       });
       setForm((f) => ({
         ...f,
@@ -261,6 +283,26 @@ export default function OpsScheduleWorkspace() {
           {notice.text}
         </p>
       ) : null}
+
+      <p className={styles.notice}>
+        {calendarStatus?.configured ? (
+          <>
+            Google Calendar: <strong>connected</strong>
+            {calendarStatus.calendarId ? ` · ${calendarStatus.calendarId}` : ""}. New /
+            rescheduled appointments push automatically.
+          </>
+        ) : (
+          <>
+            Google Calendar: <strong>not connected</strong> — appointments still save here.
+            In-office checklist:{" "}
+            {(calendarStatus?.officeChecklist ?? []).join(" → ") ||
+              "Enable Calendar API → share calendar with service account → set INSPIRED_CLOSETS_GOOGLE_CALENDAR_ID on Vercel → redeploy."}
+            {calendarStatus?.serviceAccountEmail
+              ? ` Share to: ${calendarStatus.serviceAccountEmail}`
+              : ""}
+          </>
+        )}
+      </p>
 
       <div className={styles.summaryRow}>
         {closing.slice(0, 8).map((row) => (

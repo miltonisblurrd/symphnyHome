@@ -10,6 +10,10 @@ import {
   type IcAppointmentStatus,
 } from "@/lib/inspired-closets-ops-appointments";
 import { isDepositPaid } from "@/lib/inspired-closets-ops-billing";
+import {
+  getGoogleCalendarStatus,
+  pushAppointmentById,
+} from "@/lib/inspired-closets-google-calendar";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 
 export const runtime = "nodejs";
@@ -120,6 +124,7 @@ export async function GET(request: Request) {
     closing,
     staff: staffResult.data ?? [],
     clients: clientsResult.data ?? [],
+    googleCalendar: getGoogleCalendarStatus(),
   });
 }
 
@@ -238,7 +243,18 @@ export async function POST(request: Request) {
     changes: { kind, scheduled_at: scheduledAt },
   });
 
-  return NextResponse.json({ ok: true, appointment: data });
+  const calendar = await pushAppointmentById(data.id);
+  const { data: refreshed } = await supabase
+    .from("ic_appointments")
+    .select("*")
+    .eq("id", data.id)
+    .maybeSingle();
+
+  return NextResponse.json({
+    ok: true,
+    appointment: refreshed ?? data,
+    googleCalendar: calendar,
+  });
 }
 
 export async function PATCH(request: Request) {
@@ -367,5 +383,16 @@ export async function PATCH(request: Request) {
     changes: updates,
   });
 
-  return NextResponse.json({ ok: true, appointment: data });
+  const calendar = await pushAppointmentById(id);
+  const { data: refreshed } = await supabase
+    .from("ic_appointments")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  return NextResponse.json({
+    ok: true,
+    appointment: refreshed ?? data,
+    googleCalendar: calendar,
+  });
 }

@@ -216,6 +216,8 @@ export const icAppointments = pgTable("ic_appointments", {
   confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
   confirmationNote: text("confirmation_note"),
   communityRef: text("community_ref"),
+  /** Google Calendar event id once push sync is connected. */
+  googleEventId: text("google_event_id"),
   notes: text("notes"),
   createdBy: uuid("created_by").references(() => icStaff.id),
   updatedBy: uuid("updated_by").references(() => icStaff.id),

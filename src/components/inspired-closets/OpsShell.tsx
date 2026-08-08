@@ -3,12 +3,14 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import OpsRoleGate from "@/components/inspired-closets/OpsRoleGate";
 import styles from "./ops-shell.module.css";
 
 const NAV = [
   { href: "/inspired-closets/ops/jobs", label: "Jobs" },
   { href: "/inspired-closets/ops/inventory", label: "Inventory" },
   { href: "/inspired-closets/ops", label: "Payroll" },
+  { href: "/inspired-closets/field", label: "Field app" },
 ] as const;
 
 export default function OpsShell({
@@ -25,6 +27,7 @@ export default function OpsShell({
   const pathname = usePathname();
 
   return (
+    <OpsRoleGate>
     <div className={styles.page}>
       <header className={styles.topBar}>
         <div className={styles.brandBlock}>
@@ -57,5 +60,6 @@ export default function OpsShell({
       </header>
       {children}
     </div>
+    </OpsRoleGate>
   );
 }

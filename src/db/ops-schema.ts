@@ -215,6 +215,80 @@ export const icStockMovements = pgTable("ic_stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const icMediaKindEnum = pgEnum("ic_media_kind", [
+  "before",
+  "during",
+  "after",
+  "issue",
+  "staging",
+  "other",
+]);
+
+export const icFieldIssueTypeEnum = pgEnum("ic_field_issue_type", [
+  "site_not_ready",
+  "missing_part",
+  "damage",
+  "access_problem",
+  "customer_issue",
+  "other",
+]);
+
+export const icFieldIssueStatusEnum = pgEnum("ic_field_issue_status", [
+  "open",
+  "acknowledged",
+  "resolved",
+]);
+
+/** Driver/installer clock sessions on a job site. */
+export const icTimeEntries = pgTable("ic_time_entries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  installerId: uuid("installer_id")
+    .notNull()
+    .references(() => icStaff.id),
+  clockInAt: timestamp("clock_in_at", { withTimezone: true }).notNull(),
+  clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
+  clockInLat: text("clock_in_lat"),
+  clockInLng: text("clock_in_lng"),
+  clockOutLat: text("clock_out_lat"),
+  clockOutLng: text("clock_out_lng"),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Photos/videos captured in the field, tagged to a job. */
+export const icJobMedia = pgTable("ic_job_media", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  installerId: uuid("installer_id").references(() => icStaff.id),
+  kind: icMediaKindEnum("kind").notNull().default("other"),
+  storagePath: text("storage_path").notNull(),
+  publicUrl: text("public_url"),
+  caption: text("caption"),
+  mimeType: text("mime_type"),
+  bytes: integer("bytes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Field issues → feeds service wall later. */
+export const icFieldIssues = pgTable("ic_field_issues", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  installerId: uuid("installer_id").references(() => icStaff.id),
+  issueType: icFieldIssueTypeEnum("issue_type").notNull().default("other"),
+  description: text("description").notNull(),
+  mediaId: uuid("media_id").references(() => icJobMedia.id),
+  status: icFieldIssueStatusEnum("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
 export type IcStaff = typeof icStaff.$inferSelect;
 export type IcClient = typeof icClients.$inferSelect;
 export type IcJob = typeof icJobs.$inferSelect;
@@ -222,8 +296,14 @@ export type IcPayrollEntry = typeof icPayrollEntries.$inferSelect;
 export type IcActivityLog = typeof icActivityLog.$inferSelect;
 export type IcPart = typeof icParts.$inferSelect;
 export type IcStockMovement = typeof icStockMovements.$inferSelect;
+export type IcTimeEntry = typeof icTimeEntries.$inferSelect;
+export type IcJobMedia = typeof icJobMedia.$inferSelect;
+export type IcFieldIssue = typeof icFieldIssues.$inferSelect;
 
 export type IcRole = (typeof icRoleEnum.enumValues)[number];
 export type IcJobStage = (typeof icJobStageEnum.enumValues)[number];
 export type IcPayrollStatus = (typeof icPayrollStatusEnum.enumValues)[number];
 export type IcStockMovementType = (typeof icStockMovementTypeEnum.enumValues)[number];
+export type IcMediaKind = (typeof icMediaKindEnum.enumValues)[number];
+export type IcFieldIssueType = (typeof icFieldIssueTypeEnum.enumValues)[number];
+export type IcFieldIssueStatus = (typeof icFieldIssueStatusEnum.enumValues)[number];

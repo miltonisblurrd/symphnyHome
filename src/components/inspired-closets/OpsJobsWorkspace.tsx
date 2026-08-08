@@ -131,7 +131,13 @@ export default function OpsJobsWorkspace() {
       const response = await fetch("/api/inspired-closets/ops/jobs/sync-from-payroll", {
         method: "POST",
       });
-      const payload = (await response.json()) as ApiResponse;
+      const raw = await response.text();
+      let payload: ApiResponse;
+      try {
+        payload = JSON.parse(raw) as ApiResponse;
+      } catch {
+        throw new Error(raw.slice(0, 160) || `Sync failed (${response.status}).`);
+      }
       if (!payload.ok) throw new Error(payload.error ?? "Sync failed.");
       setNotice({
         kind: "info",

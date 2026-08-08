@@ -68,9 +68,19 @@ export type JobsSyncResult = {
   skipped: number;
 };
 
+async function chunked<T>(
+  items: T[],
+  size: number,
+  run: (slice: T[]) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += size) {
+    await run(items.slice(i, i + size));
+  }
+}
+
 /**
  * Create clients + jobs from payroll entries that have no job_id yet.
- * Idempotent via workbook_ref = payroll import_key (or entry id).
+ * Batched for Vercel timeouts. Idempotent via workbook_ref.
  */
 export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
   const supabase = getSupabaseAdmin();
@@ -85,12 +95,8 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
   if (error) throw error;
 
   const rows = (entries ?? []) as PayrollSeedRow[];
-  let clientsCreated = 0;
-  let jobsCreated = 0;
-  let jobsLinked = 0;
   let skipped = 0;
 
-  // Cache existing clients by normalized name
   const { data: existingClients, error: clientsError } = await supabase
     .from("ic_clients")
     .select("id, name")
@@ -102,7 +108,34 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
     clientIdByName.set(normalizeClientName(client.name), client.id);
   }
 
-  // Cache existing jobs by workbook_ref
+  // Collect unique new clients
+  const newClientNames: string[] = [];
+  const seenNew = new Set<string>();
+  for (const row of rows) {
+    const name = row.client_name?.trim();
+    if (!name) {
+      skipped += 1;
+      continue;
+    }
+    const key = normalizeClientName(name);
+    if (clientIdByName.has(key) || seenNew.has(key)) continue;
+    seenNew.add(key);
+    newClientNames.push(name.trim());
+  }
+
+  let clientsCreated = 0;
+  await chunked(newClientNames, 100, async (slice) => {
+    const { data, error: insertError } = await supabase
+      .from("ic_clients")
+      .insert(slice.map((name) => ({ name })))
+      .select("id, name");
+    if (insertError) throw insertError;
+    for (const client of data ?? []) {
+      clientIdByName.set(normalizeClientName(client.name), client.id);
+      clientsCreated += 1;
+    }
+  });
+
   const { data: existingJobs, error: jobsError } = await supabase
     .from("ic_jobs")
     .select("id, workbook_ref")
@@ -115,79 +148,98 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
     if (job.workbook_ref) jobIdByRef.set(job.workbook_ref, job.id);
   }
 
+  type JobInsert = {
+    client_id: string;
+    designer_id: string;
+    stage: IcJobStage;
+    contract_cents: number;
+    deposit_cents: number;
+    collected_cents: number;
+    sold_date: string | null;
+    completed_date: string | null;
+    workbook_ref: string;
+    notes: string | null;
+    risk_flag: boolean;
+  };
+
+  const jobsToInsert: JobInsert[] = [];
+  const linkPlan: Array<{ entryId: string; ref: string }> = [];
+
   for (const row of rows) {
     const name = row.client_name?.trim();
-    if (!name) {
-      skipped += 1;
-      continue;
-    }
+    if (!name) continue;
 
     const ref = row.import_key || row.id;
-    let jobId = row.job_id ?? jobIdByRef.get(ref) ?? null;
-
-    // Ensure client
-    const key = normalizeClientName(name);
-    let clientId = clientIdByName.get(key) ?? null;
-    if (!clientId) {
-      const { data: created, error: createClientError } = await supabase
-        .from("ic_clients")
-        .insert({ name: name.trim() })
-        .select("id")
-        .single();
-      if (createClientError) throw createClientError;
-      const newClientId = created?.id;
-      if (!newClientId) throw new Error("Client create returned no id.");
-      clientId = newClientId;
-      clientIdByName.set(key, newClientId);
-      clientsCreated += 1;
-    }
-
+    const clientId = clientIdByName.get(normalizeClientName(name));
     if (!clientId) {
       skipped += 1;
       continue;
     }
 
-    if (!jobId) {
-      const stage = inferStageFromPayroll(row);
-      const { data: createdJob, error: createJobError } = await supabase
-        .from("ic_jobs")
-        .insert({
-          client_id: clientId,
-          designer_id: row.designer_id,
-          stage,
-          contract_cents: row.contract_cents ?? 0,
-          deposit_cents: row.deposit_cents ?? 0,
-          collected_cents: row.deposit_cents ?? 0,
-          sold_date: row.entry_date,
-          completed_date: row.pay_date,
-          workbook_ref: ref,
-          notes: row.notes,
-          risk_flag: false,
-        })
-        .select("id")
-        .single();
-      if (createJobError) throw createJobError;
-      const newJobId = createdJob?.id;
-      if (!newJobId) throw new Error("Job create returned no id.");
-      jobId = newJobId;
-      jobIdByRef.set(ref, newJobId);
+    if (row.job_id) {
+      jobIdByRef.set(ref, row.job_id);
+      continue;
+    }
+
+    if (jobIdByRef.has(ref)) {
+      linkPlan.push({ entryId: row.id, ref });
+      continue;
+    }
+
+    jobsToInsert.push({
+      client_id: clientId,
+      designer_id: row.designer_id,
+      stage: inferStageFromPayroll(row),
+      contract_cents: row.contract_cents ?? 0,
+      deposit_cents: row.deposit_cents ?? 0,
+      collected_cents: row.deposit_cents ?? 0,
+      sold_date: row.entry_date,
+      completed_date: row.pay_date,
+      workbook_ref: ref,
+      notes: row.notes,
+      risk_flag: false,
+    });
+    linkPlan.push({ entryId: row.id, ref });
+  }
+
+  let jobsCreated = 0;
+  await chunked(jobsToInsert, 100, async (slice) => {
+    const { data, error: insertError } = await supabase
+      .from("ic_jobs")
+      .insert(slice)
+      .select("id, workbook_ref");
+    if (insertError) throw insertError;
+    for (const job of data ?? []) {
+      if (job.workbook_ref) jobIdByRef.set(job.workbook_ref, job.id);
       jobsCreated += 1;
     }
+  });
 
-    if (!jobId) {
-      skipped += 1;
-      continue;
-    }
+  // Batch-link payroll rows in chunks via Promise.all of small updates
+  // (Supabase JS doesn't support multi-row different values easily).
+  let jobsLinked = 0;
+  const links = linkPlan
+    .map(({ entryId, ref }) => {
+      const jobId = jobIdByRef.get(ref);
+      return jobId ? { entryId, jobId } : null;
+    })
+    .filter((item): item is { entryId: string; jobId: string } => Boolean(item));
 
-    if (row.job_id !== jobId) {
-      const { error: linkError } = await supabase
-        .from("ic_payroll_entries")
-        .update({ job_id: jobId, updated_at: new Date().toISOString() })
-        .eq("id", row.id);
-      if (linkError) throw linkError;
+  await chunked(links, 40, async (slice) => {
+    const results = await Promise.all(
+      slice.map(({ entryId, jobId }) =>
+        supabase
+          .from("ic_payroll_entries")
+          .update({ job_id: jobId, updated_at: new Date().toISOString() })
+          .eq("id", entryId)
+          .is("job_id", null),
+      ),
+    );
+    for (const result of results) {
+      if (result.error) throw result.error;
       jobsLinked += 1;
     }
-  }
+  });
 
   await supabase.from("ic_activity_log").insert({
     entity_type: "job",

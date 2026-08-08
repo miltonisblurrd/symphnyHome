@@ -3,7 +3,7 @@ import { isDbConfigured } from "@/db/client";
 import { syncJobsFromPayroll } from "@/lib/inspired-closets-ops-jobs";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST() {
   if (!isDbConfigured()) {

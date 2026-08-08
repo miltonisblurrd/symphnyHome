@@ -97,9 +97,16 @@ function formatStamp(value: string | null): string {
   });
 }
 
-export default function OpsScheduleWorkspace() {
+export default function OpsScheduleWorkspace({
+  forcedTab,
+}: {
+  forcedTab?: "appointments" | "installs" | "designers";
+} = {}) {
   const searchParams = useSearchParams();
   const presetLeadId = searchParams.get("leadId");
+  const tabParam = forcedTab ?? searchParams.get("tab");
+  const mainTab =
+    tabParam === "installs" ? "installs" : tabParam === "designers" ? "designers" : "appointments";
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [installJobs, setInstallJobs] = useState<InstallJob[]>([]);
@@ -125,6 +132,15 @@ export default function OpsScheduleWorkspace() {
     notes: "",
     community_ref: "",
   });
+
+  const consultAppts = useMemo(
+    () => appointments.filter((a) => a.kind !== "install"),
+    [appointments],
+  );
+  const installAppts = useMemo(
+    () => appointments.filter((a) => a.kind === "install"),
+    [appointments],
+  );
 
   useEffect(() => {
     if (presetLeadId) {
@@ -255,8 +271,14 @@ export default function OpsScheduleWorkspace() {
 
   return (
     <OpsShell
-      title="Schedule"
-      subtitle="This week’s consultations, job checks, and installs. Manual double-entry with Community."
+      title={mainTab === "installs" ? "Installs" : mainTab === "designers" ? "Designer load" : "Appointments"}
+      subtitle={
+        mainTab === "installs"
+          ? "Scheduled installs this week — assign from the lead/project with Install Event"
+          : mainTab === "designers"
+            ? "Which designer got which leads (closing ratio)"
+            : "Scheduled appointments — prefer New Event on the lead so there’s no double entry"
+      }
       actions={
         <>
           <select
@@ -284,6 +306,30 @@ export default function OpsScheduleWorkspace() {
         </p>
       ) : null}
 
+      <nav className={styles.tabs}>
+        <a
+          className={`${styles.tab} ${mainTab === "appointments" ? styles.tabActive : ""}`}
+          href="/inspired-closets/ops/appointments"
+          style={{ textDecoration: "none" }}
+        >
+          Appointments
+        </a>
+        <a
+          className={`${styles.tab} ${mainTab === "installs" ? styles.tabActive : ""}`}
+          href="/inspired-closets/ops/installs"
+          style={{ textDecoration: "none" }}
+        >
+          Installs
+        </a>
+        <a
+          className={`${styles.tab} ${mainTab === "designers" ? styles.tabActive : ""}`}
+          href="/inspired-closets/ops/schedule?tab=designers"
+          style={{ textDecoration: "none" }}
+        >
+          Designers
+        </a>
+      </nav>
+
       <p className={styles.notice}>
         {calendarStatus?.configured ? (
           <>
@@ -294,34 +340,45 @@ export default function OpsScheduleWorkspace() {
         ) : (
           <>
             Google Calendar: <strong>not connected</strong> — appointments still save here.
-            In-office checklist:{" "}
-            {(calendarStatus?.officeChecklist ?? []).join(" → ") ||
-              "Enable Calendar API → share calendar with service account → set INSPIRED_CLOSETS_GOOGLE_CALENDAR_ID on Vercel → redeploy."}
-            {calendarStatus?.serviceAccountEmail
-              ? ` Share to: ${calendarStatus.serviceAccountEmail}`
-              : ""}
+            Prefer booking from the lead’s <strong>New Event</strong> so the lead auto-moves to
+            Scheduled.
           </>
         )}
       </p>
 
-      <div className={styles.summaryRow}>
-        {closing.slice(0, 8).map((row) => (
-          <span key={row.id}>
-            {row.name}{" "}
-            <span className={styles.summaryStrong}>
-              {row.closingRatioPct == null ? "—" : `${row.closingRatioPct}%`}
-            </span>
-            <span style={{ color: row.closingRatioPct != null && row.closingRatioPct < 50 ? "var(--ic-red)" : undefined }}>
-              {" "}
-              ({row.converted}/{row.assigned})
-            </span>
-          </span>
-        ))}
-      </div>
+      {mainTab === "designers" ? (
+        <div className={styles.panel}>
+          <div className={styles.summaryRow}>
+            {closing.map((row) => (
+              <span key={row.id}>
+                {row.name}{" "}
+                <span className={styles.summaryStrong}>
+                  {row.closingRatioPct == null ? "—" : `${row.closingRatioPct}%`}
+                </span>
+                <span
+                  style={{
+                    color:
+                      row.closingRatioPct != null && row.closingRatioPct < 50
+                        ? "var(--ic-red)"
+                        : undefined,
+                  }}
+                >
+                  {" "}
+                  ({row.converted}/{row.assigned})
+                </span>
+              </span>
+            ))}
+          </div>
+          {closing.length === 0 ? (
+            <p className={styles.empty}>No designer stats yet.</p>
+          ) : null}
+        </div>
+      ) : null}
 
+      {mainTab === "appointments" ? (
       <div className={styles.panel} style={{ marginBottom: "1rem" }}>
         <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-          New appointment
+          Manual add (only if needed — normally use New Event on the lead)
         </p>
         <div className={styles.formGrid}>
           <label className={styles.field}>
@@ -429,16 +486,18 @@ export default function OpsScheduleWorkspace() {
           </div>
         </div>
       </div>
+      ) : null}
 
+      {mainTab !== "designers" ? (
       <div className={styles.panel}>
         {loading ? (
           <p className={styles.empty}>Loading schedule…</p>
-        ) : (
+        ) : mainTab === "appointments" ? (
           <>
             <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-              Appointments this week
+              Appointments this week (design / consult)
             </p>
-            {appointments.length === 0 ? (
+            {consultAppts.length === 0 ? (
               <p className={styles.empty}>No appointments this week.</p>
             ) : (
               <table className={styles.table} style={{ minWidth: "48rem" }}>
@@ -454,7 +513,7 @@ export default function OpsScheduleWorkspace() {
                   </tr>
                 </thead>
                 <tbody>
-                  {appointments.map((row) => {
+                  {consultAppts.map((row) => {
                     const draft = reschedule[row.id] ?? {
                       at: row.scheduled_at.slice(0, 16),
                       reason: "",
@@ -534,9 +593,39 @@ export default function OpsScheduleWorkspace() {
                 </tbody>
               </table>
             )}
+          </>
+        ) : (
+          <>
+            <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+              Install events this week
+            </p>
+            {installAppts.length === 0 ? (
+              <p className={styles.empty}>No install events this week.</p>
+            ) : (
+              <table className={styles.table} style={{ minWidth: "40rem" }}>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Client</th>
+                    <th>Designer</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {installAppts.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatStamp(row.scheduled_at)}</td>
+                      <td>{row.client?.name ?? "—"}</td>
+                      <td>{row.designer?.name ?? "—"}</td>
+                      <td>{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
 
             <p className={styles.subtitle} style={{ margin: "1.25rem 0 0.75rem" }}>
-              Jobs with install dates (from Jobs spine)
+              Jobs with install dates
             </p>
             {installJobs.length === 0 ? (
               <p className={styles.empty}>No install dates set this week.</p>
@@ -565,6 +654,7 @@ export default function OpsScheduleWorkspace() {
           </>
         )}
       </div>
+      ) : null}
     </OpsShell>
   );
 }

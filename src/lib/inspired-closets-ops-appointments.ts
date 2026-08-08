@@ -5,9 +5,9 @@ import type {
 } from "@/db/ops-schema";
 
 export const APPOINTMENT_KINDS: { id: IcAppointmentKind; label: string }[] = [
-  { id: "consultation", label: "Consultation" },
+  { id: "consultation", label: "Design Event" },
   { id: "job_check", label: "Job check" },
-  { id: "install", label: "Install" },
+  { id: "install", label: "Install Event" },
 ];
 
 export const APPOINTMENT_LOCATIONS: { id: IcAppointmentLocation; label: string }[] = [

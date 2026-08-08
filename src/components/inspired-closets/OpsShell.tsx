@@ -10,24 +10,26 @@ import styles from "./ops-shell.module.css";
 type NavItem = { href: string; label: string; icon: string };
 type NavGroup = { label: string; items: NavItem[] };
 
-/** Process-shaped for Des, then supporting lanes. */
+/** Sequenced process for Des → Craig → money, then supporting lanes. */
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Process",
     items: [
       { href: "/inspired-closets/ops/leads", label: "Leads", icon: "◉" },
-      { href: "/inspired-closets/ops/schedule", label: "Schedule", icon: "◷" },
+      { href: "/inspired-closets/ops/appointments", label: "Appointments", icon: "◷" },
+      { href: "/inspired-closets/ops/installs", label: "Installs", icon: "▸" },
       { href: "/inspired-closets/ops/billing", label: "Billing", icon: "◈" },
       { href: "/inspired-closets/ops/finance", label: "Finance", icon: "◆" },
+      { href: "/inspired-closets/ops/designer-sales", label: "Leads vs Sales", icon: "▣" },
     ],
   },
   {
     label: "Operations",
     items: [
       { href: "/inspired-closets/ops/jobs", label: "Jobs", icon: "▤" },
-      { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▣" },
+      { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
       { href: "/inspired-closets/ops/crew", label: "Crew", icon: "◎" },
-      { href: "/inspired-closets/field", label: "Field app", icon: "▸" },
+      { href: "/inspired-closets/field", label: "Field app", icon: "◦" },
     ],
   },
   {

@@ -9,6 +9,7 @@ import styles from "./ops-shell.module.css";
 const NAV = [
   { href: "/inspired-closets/ops/jobs", label: "Jobs" },
   { href: "/inspired-closets/ops/inventory", label: "Inventory" },
+  { href: "/inspired-closets/ops/crew", label: "Crew" },
   { href: "/inspired-closets/ops", label: "Payroll" },
   { href: "/inspired-closets/field", label: "Field app" },
 ] as const;

@@ -117,9 +117,9 @@ function formatStamp(value: string | null | undefined): string {
   });
 }
 
-function formatDuration(clockIn: string, clockOut: string | null): string {
+function formatDuration(clockIn: string, clockOut: string | null, now = Date.now()): string {
   const start = new Date(clockIn).getTime();
-  const end = clockOut ? new Date(clockOut).getTime() : Date.now();
+  const end = clockOut ? new Date(clockOut).getTime() : now;
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
   const minutes = Math.round((end - start) / 60000);
   const hours = Math.floor(minutes / 60);
@@ -137,6 +137,7 @@ export default function FieldApp() {
   const [media, setMedia] = useState<Media[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error" | "ok"; text: string } | null>(
     null,
@@ -258,6 +259,13 @@ export default function FieldApp() {
   useEffect(() => {
     if (selectedId) void loadJobDetails(selectedId);
   }, [selectedId, loadJobDetails]);
+
+  const hasOpenClock = jobs.some((job) => Boolean(job.openClock));
+  useEffect(() => {
+    if (!hasOpenClock) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [hasOpenClock]);
 
   async function signIn(staffId: string) {
     setBusy(true);
@@ -632,14 +640,14 @@ export default function FieldApp() {
             {selected.openClock ? (
               <p className={styles.jobMeta} style={{ marginTop: "0.55rem", fontWeight: 700 }}>
                 Clocked in {formatStamp(selected.openClock.clock_in_at)} · live{" "}
-                {formatDuration(selected.openClock.clock_in_at, null)}
+                {formatDuration(selected.openClock.clock_in_at, null, nowTick)}
                 {selected.openClock.clock_in_lat
                   ? ` · GPS ${Number(selected.openClock.clock_in_lat).toFixed(4)}, ${Number(selected.openClock.clock_in_lng).toFixed(4)}`
                   : ""}
               </p>
             ) : (
               <p className={styles.jobMeta} style={{ marginTop: "0.55rem" }}>
-                Not clocked in
+                Not clocked in — tap Clock in when you arrive so job time is recorded.
               </p>
             )}
             <div className={styles.actions}>
@@ -668,19 +676,24 @@ export default function FieldApp() {
                 Mark install complete
               </button>
             </div>
-            {(selected.timeEntries?.length ?? 0) > 0 ? (
-              <div style={{ marginTop: "0.85rem" }}>
-                <p className={styles.label}>Time log</p>
-                {selected.timeEntries?.map((entry) => (
+            <div style={{ marginTop: "0.85rem" }}>
+              <p className={styles.label}>Time log (saved to Supabase)</p>
+              {(selected.timeEntries?.length ?? 0) === 0 ? (
+                <p className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
+                  No clock times yet for this job. Clock in / out here — Gavin and ops can use these
+                  for how long installs take.
+                </p>
+              ) : (
+                selected.timeEntries?.map((entry) => (
                   <p key={entry.id} className={styles.jobMeta} style={{ marginTop: "0.35rem" }}>
                     In {formatStamp(entry.clock_in_at)}
                     {entry.clock_out_at
                       ? ` → Out ${formatStamp(entry.clock_out_at)} · ${formatDuration(entry.clock_in_at, entry.clock_out_at)}`
-                      : " → still on site"}
+                      : ` → still on site · ${formatDuration(entry.clock_in_at, null, nowTick)}`}
                   </p>
-                ))}
-              </div>
-            ) : null}
+                ))
+              )}
+            </div>
           </section>
 
           <section className={styles.card}>

@@ -10,6 +10,7 @@ const NAV = [
   { href: "/inspired-closets/ops/leads", label: "Leads" },
   { href: "/inspired-closets/ops/schedule", label: "Schedule" },
   { href: "/inspired-closets/ops/billing", label: "Billing" },
+  { href: "/inspired-closets/ops/finance", label: "Finance" },
   { href: "/inspired-closets/ops/jobs", label: "Jobs" },
   { href: "/inspired-closets/ops/inventory", label: "Inventory" },
   { href: "/inspired-closets/ops/crew", label: "Crew" },

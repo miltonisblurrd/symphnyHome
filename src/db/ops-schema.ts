@@ -239,6 +239,7 @@ export const icPayments = pgTable("ic_payments", {
   method: icPaymentMethodEnum("method"),
   podiumRef: text("podium_ref"),
   checkRef: text("check_ref"),
+  quickbooksRef: text("quickbooks_ref"),
   dueAt: timestamp("due_at", { withTimezone: true }),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   linkSentAt: timestamp("link_sent_at", { withTimezone: true }),
@@ -249,6 +250,43 @@ export const icPayments = pgTable("ic_payments", {
   updatedBy: uuid("updated_by").references(() => icStaff.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icReconExceptionTypeEnum = pgEnum("ic_recon_exception_type", [
+  "needs_qb_entry",
+  "missing_podium_ref",
+  "final_unpaid",
+  "below_margin_gate",
+  "unverified_costs",
+  "spiff_approval",
+  "duplicate_risk",
+  "other",
+]);
+
+export const icReconExceptionStatusEnum = pgEnum("ic_recon_exception_status", [
+  "open",
+  "investigating",
+  "resolved",
+  "wont_fix",
+]);
+
+/** Lulu job-costing overrides + spiff control (July 15 finance workflow). */
+export const icJobFinancials = pgTable("ic_job_financials", {
+  jobId: uuid("job_id")
+    .primaryKey()
+    .references(() => icJobs.id),
+  materialCents: integer("material_cents"),
+  laborCents: integer("labor_cents"),
+  otherFeesCents: integer("other_fees_cents").notNull().default(0),
+  spiffCents: integer("spiff_cents").notNull().default(0),
+  spiffRecipient: text("spiff_recipient"),
+  spiffStatus: text("spiff_status").notNull().default("none"),
+  costsVerified: boolean("costs_verified").notNull().default(false),
+  stowInvoiceRef: text("stow_invoice_ref"),
+  notes: text("notes"),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /**
@@ -287,6 +325,26 @@ export const icPayrollEntries = pgTable("ic_payroll_entries", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/** Finance exceptions queue — replaces Lulu’s “watch this in Excel” list. */
+export const icReconciliationExceptions = pgTable("ic_reconciliation_exceptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  exceptionType: icReconExceptionTypeEnum("exception_type").notNull().default("other"),
+  status: icReconExceptionStatusEnum("status").notNull().default("open"),
+  jobId: uuid("job_id").references(() => icJobs.id),
+  paymentId: uuid("payment_id").references(() => icPayments.id),
+  payrollEntryId: uuid("payroll_entry_id").references(() => icPayrollEntries.id),
+  amountCents: integer("amount_cents").notNull().default(0),
+  title: text("title").notNull(),
+  detail: text("detail"),
+  ownerId: uuid("owner_id").references(() => icStaff.id),
+  podiumRef: text("podium_ref"),
+  quickbooksRef: text("quickbooks_ref"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /** Append-only audit trail. Every module writes here; Cubby reads it. */
@@ -435,6 +493,8 @@ export type IcLead = typeof icLeads.$inferSelect;
 export type IcJob = typeof icJobs.$inferSelect;
 export type IcAppointment = typeof icAppointments.$inferSelect;
 export type IcPayment = typeof icPayments.$inferSelect;
+export type IcJobFinancials = typeof icJobFinancials.$inferSelect;
+export type IcReconciliationException = typeof icReconciliationExceptions.$inferSelect;
 export type IcPayrollEntry = typeof icPayrollEntries.$inferSelect;
 export type IcActivityLog = typeof icActivityLog.$inferSelect;
 export type IcPart = typeof icParts.$inferSelect;
@@ -453,6 +513,8 @@ export type IcAppointmentStatus = (typeof icAppointmentStatusEnum.enumValues)[nu
 export type IcPaymentMilestone = (typeof icPaymentMilestoneEnum.enumValues)[number];
 export type IcPaymentStatus = (typeof icPaymentStatusEnum.enumValues)[number];
 export type IcPaymentMethod = (typeof icPaymentMethodEnum.enumValues)[number];
+export type IcReconExceptionType = (typeof icReconExceptionTypeEnum.enumValues)[number];
+export type IcReconExceptionStatus = (typeof icReconExceptionStatusEnum.enumValues)[number];
 export type IcPayrollStatus = (typeof icPayrollStatusEnum.enumValues)[number];
 export type IcStockMovementType = (typeof icStockMovementTypeEnum.enumValues)[number];
 export type IcMediaKind = (typeof icMediaKindEnum.enumValues)[number];

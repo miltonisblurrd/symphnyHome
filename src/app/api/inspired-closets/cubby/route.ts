@@ -15,6 +15,8 @@ import {
   buildCubbyWorkbookContext,
   buildWorkbookHub,
 } from "@/lib/inspired-closets-payroll-workbook";
+import { buildCubbyOpsContext } from "@/lib/inspired-closets-ops-finance";
+import { isDbConfigured } from "@/db/client";
 
 export const runtime = "nodejs";
 
@@ -24,13 +26,16 @@ export type CubbyResponseSource =
   | "demo"
   | "claude+demo"
   | "claude+sheets"
+  | "claude+os"
   | "demo-fallback";
 
 function resolveCubbySource(input: {
+  hasOs?: boolean;
   hasSheets: boolean;
   fallback?: boolean;
 }): CubbyResponseSource {
   if (input.fallback) return "demo-fallback";
+  if (input.hasOs) return "claude+os";
   if (input.hasSheets) return "claude+sheets";
   return "claude+demo";
 }
@@ -53,6 +58,18 @@ export async function POST(request: Request) {
 
   const apiKey = process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim();
   const model = process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
+
+  let opsContext: Record<string, unknown> | null = null;
+  if (isDbConfigured()) {
+    try {
+      opsContext = await buildCubbyOpsContext();
+    } catch (error) {
+      console.error(
+        "[cubby] OS finance context failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 
   let workbookContext = null;
   let hubAttention = null;
@@ -95,16 +112,18 @@ export async function POST(request: Request) {
           {
             id: "demo",
             severity: "info" as const,
-            title: "Workbook not connected",
-            detail: "Connect Google Sheets to load live attention.",
+            title: opsContext ? "OS connected" : "Workbook not connected",
+            detail: opsContext
+              ? "Answering from Inspired Closets OS jobs, payments, and finance queue."
+              : "Connect Google Sheets or OS finance data for live attention.",
             owner: "Gavin",
             amount: null,
-            action: "Connect sheet",
-            todoLabel: "Connect payroll workbook",
-            todoWhy: "Live numbers require the shared Google Sheet.",
+            action: "Ask Cubby",
+            todoLabel: "Use OS / workbook",
+            todoWhy: "Live numbers need OS or the shared Google Sheet.",
             defaultAssignee: "Gavin",
-            notifyMessage: "Payroll workbook is not connected.",
-            context: "Demo fallback.",
+            notifyMessage: "Check finance attention in OS.",
+            context: opsContext ? "OS" : "Demo fallback.",
           },
         ],
     financialPulse: pulseForInsights,
@@ -126,7 +145,12 @@ export async function POST(request: Request) {
   const context = {
     period,
     company: gavinDemoMeta.company,
-    financialPulseSource: workbookPulse ? "payroll_workbook" : "demo",
+    financialPulseSource: opsContext
+      ? "inspired_closets_os"
+      : workbookPulse
+        ? "payroll_workbook"
+        : "demo",
+    ops: opsContext,
     workbook: workbookContext,
     suggestedInsights: insights.map((item) => ({
       prompt: item.prompt,
@@ -141,12 +165,12 @@ export async function POST(request: Request) {
     const response = await client.messages.create({
       model,
       max_tokens: 700,
-      system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant inside Gavin's dashboard.
-Answer in plain, confident language for a busy executive.
+      system: `You are Cubby, the Inspired Closets Las Vegas executive ops assistant.
+Answer in plain, confident language for a busy executive (Gavin) or finance lead (Lulu).
 Use ONLY the provided Ops Hub context.
-The Payroll Workbook (red 2026 designer tabs) is the source of truth for sales, deposits, outstanding balances, margins (starting / after spiff / final), commissions, and notes.
-Prefer workbook.pulse for company totals and workbook.jobs / workbook.designers / workbook.attentionItems for specifics.
-When using sheet data, mention it reflects the last syncedAt timestamp when timing matters.
+Prefer ops (Inspired Closets OS) when present — that is the live job, payment, crew, issue, and finance-attention source.
+QuickBooks remains accounting books; Podium remains the customer payment rail; the payroll workbook may still backfill designer commission history.
+The spiff gate is ${gavinDemoMeta.marginGate}% margin — never invent approvals below the gate.
 If something is not in context, say what is missing instead of inventing numbers.
 Keep answers concise — usually 2-5 sentences unless listing urgent items.`,
       messages: [
@@ -166,6 +190,7 @@ Keep answers concise — usually 2-5 sentences unless listing urgent items.`,
     return NextResponse.json({
       answer,
       source: resolveCubbySource({
+        hasOs: Boolean(opsContext),
         hasSheets: Boolean(workbookContext),
       }),
       model,
@@ -175,6 +200,7 @@ Keep answers concise — usually 2-5 sentences unless listing urgent items.`,
     return NextResponse.json({
       answer: resolveSymphonyAnswer(question, insights),
       source: resolveCubbySource({
+        hasOs: Boolean(opsContext),
         hasSheets: Boolean(workbookContext),
         fallback: true,
       }),

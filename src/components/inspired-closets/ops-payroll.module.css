@@ -1,0 +1,245 @@
+/* Inspired Closets OS — payroll workspace. Brand tokens match Gavin dashboard. */
+
+.page {
+  --ic-black: #000000;
+  --ic-white: #ffffff;
+  --ic-red: #821f2d;
+  --ic-blush: #fdeae6;
+  --ic-bone: #efe9e5;
+  --ink: var(--ic-black);
+  --muted: rgba(0, 0, 0, 0.55);
+  --line: rgba(0, 0, 0, 0.1);
+
+  min-height: 100vh;
+  background: var(--ic-bone);
+  color: var(--ink);
+  font-family: "Lato", system-ui, sans-serif;
+  padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 4rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+.subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.buttonPrimary,
+.buttonGhost {
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--ic-red);
+}
+
+.buttonPrimary {
+  background: var(--ic-red);
+  color: var(--ic-white);
+}
+
+.buttonPrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.buttonGhost {
+  background: transparent;
+  color: var(--ic-red);
+}
+
+.notice {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.55rem;
+  font-size: 0.82rem;
+  background: var(--ic-blush);
+  border: 1px solid rgba(130, 31, 45, 0.25);
+}
+
+.noticeError {
+  background: #fff2f2;
+  border-color: rgba(180, 30, 30, 0.4);
+  color: #7a1212;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  border: 1px solid var(--line);
+  background: var(--ic-white);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.tabActive {
+  background: var(--ic-black);
+  color: var(--ic-white);
+  border-color: var(--ic-black);
+}
+
+.panel {
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  min-width: 72rem;
+}
+
+.table th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.rowHeld {
+  background: #fff6f6;
+}
+
+.statusBadge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.statusOpen {
+  background: var(--ic-bone);
+}
+
+.statusPayable {
+  background: #fdf3d7;
+  color: #6b4d00;
+}
+
+.statusPaid {
+  background: #e5f4e8;
+  color: #1c5c2c;
+}
+
+.statusHeld {
+  background: var(--ic-blush);
+  color: var(--ic-red);
+}
+
+.marginBelow {
+  color: var(--ic-red);
+  font-weight: 800;
+}
+
+.notesCell {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.fieldLabel {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.input {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.8rem;
+  background: var(--ic-white);
+  color: var(--ink);
+  width: 100%;
+}
+
+.formActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.summaryRow {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.summaryStrong {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}

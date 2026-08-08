@@ -223,7 +223,6 @@ export async function buildFinanceSnapshot(): Promise<{
     const spiffCents = cents(fin?.spiff_cents);
     const commissionCents = cents(pr?.check_cents);
     const contractCents = cents(job.contract_cents);
-    const costsBeforeSpiff = materialCents + laborCents + otherFeesCents + commissionCents;
     const grossProfitCents = contractCents - materialCents - laborCents - otherFeesCents;
     const netProfitCents = grossProfitCents - commissionCents - spiffCents;
 

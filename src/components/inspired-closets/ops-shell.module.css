@@ -1,3 +1,5 @@
+/* Inspired Closets OS shell — Gavin-style black sidebar + bone content. */
+
 .page {
   --ic-black: #000000;
   --ic-white: #ffffff;
@@ -7,59 +9,176 @@
   --ink: var(--ic-black);
   --muted: rgba(0, 0, 0, 0.55);
   --line: rgba(0, 0, 0, 0.1);
+  --chrome-bg: var(--ic-black);
+  --chrome-ink: var(--ic-white);
+  --chrome-muted: rgba(255, 255, 255, 0.62);
+  --chrome-line: rgba(255, 255, 255, 0.12);
+  --sidebar-w: 15.5rem;
 
   min-height: 100vh;
   background: var(--ic-bone);
   color: var(--ink);
   font-family: "Lato", system-ui, sans-serif;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  background: var(--chrome-bg);
+  color: var(--chrome-ink);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 0.85rem 1.1rem;
+  border-right: 1px solid var(--chrome-line);
+  z-index: 40;
+  overflow-y: auto;
+}
+
+.sidebarBrand {
+  width: 100%;
+  padding: 0 0.25rem 0.85rem;
+  border-bottom: 1px solid var(--chrome-line);
+  display: grid;
+  gap: 0.55rem;
+}
+
+.osLabel {
+  margin: 0;
+  padding: 0 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ic-blush);
+}
+
+.sidebarNav {
+  flex: 1;
+  padding: 1rem 0.15rem;
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.navGroup {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.navGroupLabel {
+  margin: 0;
+  padding: 0 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chrome-muted);
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.navItem {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--chrome-ink);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 400;
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ic-blush);
+}
+
+.navIcon {
+  width: 1.1rem;
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+
+.navItemActive {
+  background: rgba(255, 255, 255, 0.14);
+  font-weight: 700;
+}
+
+.sidebarBottom {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem 0.25rem 0;
+  border-top: 1px solid var(--chrome-line);
+}
+
+.sidebarLink {
+  color: var(--chrome-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.45rem;
+}
+
+.sidebarLink:hover {
+  color: var(--ic-white);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebarBackdrop {
+  display: none;
+}
+
+.main {
+  min-width: 0;
   padding: 1.25rem clamp(1rem, 3vw, 2.5rem) 4rem;
 }
 
 .topBar {
   margin-bottom: 1.1rem;
+  display: grid;
+  gap: 0.75rem;
 }
 
-.brandBlock {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.85rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.brand {
-  margin: 0;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ic-red);
-}
-
-.nav {
-  display: flex;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-}
-
-.navLink {
+.menuBtn {
+  display: none;
+  appearance: none;
+  width: 2.5rem;
+  height: 2.5rem;
   border: 1px solid var(--line);
+  border-radius: 0.65rem;
   background: var(--ic-white);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-decoration: none;
+  padding: 0.55rem;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.28rem;
 }
 
-.navLinkActive {
+.menuBtn span {
+  display: block;
+  height: 2px;
   background: var(--ic-black);
-  color: var(--ic-white);
-  border-color: var(--ic-black);
+  border-radius: 999px;
 }
 
 .headerRow {
@@ -80,6 +199,7 @@
   margin: 0.2rem 0 0;
   font-size: 0.85rem;
   color: var(--muted);
+  max-width: 40rem;
 }
 
 .actions {
@@ -87,4 +207,47 @@
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .page {
+    --sidebar-w: 0px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: min(18rem, 86vw);
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .sidebarBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 35;
+  }
+
+  .sidebarBackdropOpen {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .menuBtn {
+    display: flex;
+  }
 }

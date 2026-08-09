@@ -154,6 +154,7 @@ export default function OpsScheduleWorkspace({
     client_id: "",
     job_id: "",
     designer_id: "",
+    installer_id: "",
     kind: "consultation",
     location_type: "on_site",
     scheduled_at: "",
@@ -251,6 +252,10 @@ export default function OpsScheduleWorkspace({
     () => staff.filter((s) => s.role === "designer" || s.role === "owner"),
     [staff],
   );
+  const installers = useMemo(
+    () => staff.filter((s) => s.role === "installer"),
+    [staff],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -309,7 +314,8 @@ export default function OpsScheduleWorkspace({
           lead_id: leadId || null,
           client_id: form.client_id || null,
           job_id: form.job_id || null,
-          designer_id: form.designer_id || null,
+          designer_id: form.kind === "install" ? null : form.designer_id || null,
+          installer_id: form.kind === "install" ? form.installer_id || null : null,
           scheduled_at: when.toISOString(),
         }),
       });
@@ -493,7 +499,14 @@ export default function OpsScheduleWorkspace({
             <select
               className={styles.input}
               value={form.kind}
-              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  kind: e.target.value,
+                  designer_id: "",
+                  installer_id: "",
+                }))
+              }
             >
               {kinds.map((k) => (
                 <option key={k.id} value={k.id}>
@@ -516,21 +529,39 @@ export default function OpsScheduleWorkspace({
               ))}
             </select>
           </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Designer</span>
-            <select
-              className={styles.input}
-              value={form.designer_id}
-              onChange={(e) => setForm((f) => ({ ...f, designer_id: e.target.value }))}
-            >
-              <option value="">Unassigned</option>
-              {designers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {form.kind === "install" ? (
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Installer</span>
+              <select
+                className={styles.input}
+                value={form.installer_id}
+                onChange={(e) => setForm((f) => ({ ...f, installer_id: e.target.value }))}
+              >
+                <option value="">Unassigned</option>
+                {installers.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Designer</span>
+              <select
+                className={styles.input}
+                value={form.designer_id}
+                onChange={(e) => setForm((f) => ({ ...f, designer_id: e.target.value }))}
+              >
+                <option value="">Unassigned</option>
+                {designers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Client</span>
             <select

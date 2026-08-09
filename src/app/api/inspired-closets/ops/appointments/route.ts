@@ -171,6 +171,7 @@ export async function POST(request: Request) {
   const clientId = typeof body.client_id === "string" ? body.client_id : null;
   const jobId = typeof body.job_id === "string" ? body.job_id : null;
   const designerId = typeof body.designer_id === "string" ? body.designer_id : null;
+  const installerId = typeof body.installer_id === "string" ? body.installer_id : null;
   const notes = typeof body.notes === "string" ? body.notes : null;
   const communityRef = typeof body.community_ref === "string" ? body.community_ref : null;
 
@@ -241,7 +242,8 @@ export async function POST(request: Request) {
       .update({
         stage: "install_scheduled",
         install_date: installDate,
-        designer_id: designerId,
+        installer_id: installerId,
+        ...(designerId ? { designer_id: designerId } : {}),
         updated_at: new Date().toISOString(),
         updated_by: actor,
       })

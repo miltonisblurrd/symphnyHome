@@ -520,6 +520,8 @@ export async function PATCH(request: Request) {
         : "on_site";
     const designerId =
       typeof body.designer_id === "string" ? body.designer_id : existing.designer_id;
+    const installerId =
+      typeof body.installer_id === "string" ? body.installer_id : null;
 
     if (kind === "install" && !existing.converted_job_id) {
       return NextResponse.json(
@@ -537,7 +539,7 @@ export async function PATCH(request: Request) {
         lead_id: leadId,
         client_id: existing.client_id,
         job_id: existing.converted_job_id,
-        designer_id: designerId,
+        designer_id: kind === "install" ? existing.designer_id ?? designerId : designerId,
         kind,
         scheduled_at: scheduledAt,
         location_type: locationType,
@@ -555,14 +557,18 @@ export async function PATCH(request: Request) {
     const nextStage =
       kind === "consultation" || kind === "job_check" ? "appointment_set" : existing.stage;
 
+    const leadUpdates: Record<string, unknown> = {
+      stage: nextStage,
+      updated_at: nowIso,
+      updated_by: actorId,
+    };
+    if (kind !== "install" && designerId) {
+      leadUpdates.designer_id = designerId;
+    }
+
     const { data: lead, error: leadError } = await supabase
       .from("ic_leads")
-      .update({
-        stage: nextStage,
-        designer_id: designerId,
-        updated_at: nowIso,
-        updated_by: actorId,
-      })
+      .update(leadUpdates)
       .eq("id", leadId)
       .select("*")
       .single();
@@ -576,6 +582,7 @@ export async function PATCH(request: Request) {
         .update({
           stage: "install_scheduled",
           install_date: scheduledAt.slice(0, 10),
+          installer_id: installerId,
           updated_at: nowIso,
           updated_by: actorId,
         })
@@ -591,6 +598,7 @@ export async function PATCH(request: Request) {
       changes: {
         kind,
         scheduled_at: scheduledAt,
+        installer_id: installerId,
         "Lead Status": { from: existing.stage, to: nextStage },
       },
     });

@@ -176,12 +176,17 @@ export default function OpsLeadsWorkspace() {
     scheduled_at: "",
     location_type: "on_site",
     designer_id: "",
+    installer_id: "",
     notes: "",
   });
   const [draft, setDraft] = useState<Partial<Lead> | null>(null);
 
   const designers = useMemo(
     () => staff.filter((s) => s.role === "designer" || s.role === "front_office" || s.role === "owner"),
+    [staff],
+  );
+  const installers = useMemo(
+    () => staff.filter((s) => s.role === "installer"),
     [staff],
   );
 
@@ -362,7 +367,12 @@ export default function OpsLeadsWorkspace() {
           kind: eventForm.kind,
           scheduled_at: when.toISOString(),
           location_type: eventForm.location_type,
-          designer_id: eventForm.designer_id || draft?.designer_id || null,
+          designer_id:
+            eventForm.kind === "install"
+              ? draft?.designer_id || null
+              : eventForm.designer_id || draft?.designer_id || null,
+          installer_id:
+            eventForm.kind === "install" ? eventForm.installer_id || null : null,
           notes: eventForm.notes || null,
         }),
       });
@@ -374,11 +384,15 @@ export default function OpsLeadsWorkspace() {
         scheduled_at: "",
         location_type: "on_site",
         designer_id: "",
+        installer_id: "",
         notes: "",
       });
       setNotice({
         kind: "info",
-        text: "Appointment saved — lead moved to Scheduled. No need to enter it again.",
+        text:
+          eventForm.kind === "install"
+            ? "Install event saved — installer assigned on the job."
+            : "Appointment saved — lead moved to Scheduled. No need to enter it again.",
       });
       await loadList();
       await loadDetail(selectedId);
@@ -914,7 +928,14 @@ export default function OpsLeadsWorkspace() {
                 <select
                   className={styles.input}
                   value={eventForm.kind}
-                  onChange={(e) => setEventForm((f) => ({ ...f, kind: e.target.value }))}
+                  onChange={(e) =>
+                    setEventForm((f) => ({
+                      ...f,
+                      kind: e.target.value,
+                      designer_id: "",
+                      installer_id: "",
+                    }))
+                  }
                 >
                   <option value="consultation">Design Event</option>
                   <option value="install">Install Event</option>
@@ -945,23 +966,43 @@ export default function OpsLeadsWorkspace() {
                   <option value="virtual">Virtual</option>
                 </select>
               </label>
-              <label className={styles.field} style={{ marginTop: "0.55rem" }}>
-                <span className={styles.fieldLabel}>Designer</span>
-                <select
-                  className={styles.input}
-                  value={eventForm.designer_id}
-                  onChange={(e) =>
-                    setEventForm((f) => ({ ...f, designer_id: e.target.value }))
-                  }
-                >
-                  <option value="">Unassigned</option>
-                  {designers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {eventForm.kind === "install" ? (
+                <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                  <span className={styles.fieldLabel}>Installer</span>
+                  <select
+                    className={styles.input}
+                    value={eventForm.installer_id}
+                    onChange={(e) =>
+                      setEventForm((f) => ({ ...f, installer_id: e.target.value }))
+                    }
+                  >
+                    <option value="">Unassigned</option>
+                    {installers.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                  <span className={styles.fieldLabel}>Designer</span>
+                  <select
+                    className={styles.input}
+                    value={eventForm.designer_id}
+                    onChange={(e) =>
+                      setEventForm((f) => ({ ...f, designer_id: e.target.value }))
+                    }
+                  >
+                    <option value="">Unassigned</option>
+                    {designers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className={styles.formActions} style={{ marginTop: "1rem" }}>
                 <button
                   type="button"

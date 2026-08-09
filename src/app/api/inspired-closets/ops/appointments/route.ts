@@ -168,21 +168,22 @@ export async function GET(request: Request) {
     };
   }
 
-  const installJobs = (jobsResult.data ?? [])
+  const installJobs = ((jobsResult.data ?? []) as Record<string, unknown>[])
     .filter((job) => {
       if (designerId && job.designer_id !== designerId) return false;
       // Date-only bounds: from inclusive, to exclusive (weekStart + 7 days).
-      if (from && job.install_date && job.install_date < from.slice(0, 10)) return false;
-      if (to && job.install_date && job.install_date >= to.slice(0, 10)) return false;
+      const installDate = job.install_date as string | null;
+      if (from && installDate && installDate < from.slice(0, 10)) return false;
+      if (to && installDate && installDate >= to.slice(0, 10)) return false;
       return true;
     })
     .map((job) => mapJob(job));
 
-  const readyToSchedule = (readyResult.data ?? [])
+  const readyToSchedule = ((readyResult.data ?? []) as Record<string, unknown>[])
     .filter((job) => !designerId || job.designer_id === designerId)
     .map((job) => mapJob(job));
 
-  const awaitingDeposit = (awaitingResult.data ?? [])
+  const awaitingDeposit = ((awaitingResult.data ?? []) as Record<string, unknown>[])
     .filter((job) => !designerId || job.designer_id === designerId)
     .map((job) => mapJob(job));
 

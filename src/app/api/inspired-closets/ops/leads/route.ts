@@ -740,7 +740,7 @@ export async function PATCH(request: Request) {
 
     // If already sold, update intake on the existing job instead of creating another.
     if (existing.converted_job_id && action === "sell") {
-      const jobUpdate: Record<string, unknown> = {
+      const jobUpdateFull: Record<string, unknown> = {
         contract_cents: contractCents,
         deposit_cents: depositCents,
         sold_date: soldDate,
@@ -751,17 +751,39 @@ export async function PATCH(request: Request) {
         site_ready_notes: siteReadyNotes,
         deposit_intake_status: depositIntakeStatus,
         designer_id: designerId,
+        notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || existing.notes,
         updated_at: nowIso,
         updated_by: actorId,
       };
-      const { data: job, error: jobError } = await supabase
+      let { data: job, error: jobError } = await supabase
         .from("ic_jobs")
-        .update(jobUpdate)
+        .update(jobUpdateFull)
         .eq("id", existing.converted_job_id)
         .select("*")
         .single();
-      if (jobError) {
-        return NextResponse.json({ ok: false, error: jobError.message }, { status: 500 });
+      if (jobError && /column|schema cache/i.test(jobError.message)) {
+        const baseUpdate = {
+          contract_cents: contractCents,
+          deposit_cents: depositCents,
+          sold_date: soldDate,
+          community_ref: communityRef,
+          designer_id: designerId,
+          notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || existing.notes,
+          updated_at: nowIso,
+          updated_by: actorId,
+        };
+        ({ data: job, error: jobError } = await supabase
+          .from("ic_jobs")
+          .update(baseUpdate)
+          .eq("id", existing.converted_job_id)
+          .select("*")
+          .single());
+      }
+      if (jobError || !job) {
+        return NextResponse.json(
+          { ok: false, error: jobError?.message ?? "Could not update sold job." },
+          { status: 500 },
+        );
       }
       try {
         await ensurePaymentMilestones(job.id, contractCents, { dueDepositNow: true });
@@ -789,31 +811,55 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true, lead: existing, job, updated: true });
     }
 
-    const { data: job, error: jobError } = await supabase
+    const jobInsertFull = {
+      client_id: existing.client_id,
+      lead_id: leadId,
+      designer_id: designerId,
+      stage: depositIntakeStatus === "paid" ? "deposit_received" : "deposit_pending",
+      contract_cents: contractCents,
+      deposit_cents: depositCents,
+      collected_cents: 0,
+      sold_date: soldDate,
+      community_ref: communityRef,
+      studio_ref: studioRef,
+      job_check_owner_id: jobCheckOwnerId,
+      tentative_install_notes: tentativeInstallNotes,
+      site_ready_notes: siteReadyNotes,
+      deposit_intake_status: depositIntakeStatus,
+      notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || null,
+      created_by: actorId,
+      updated_by: actorId,
+    };
+    let { data: job, error: jobError } = await supabase
       .from("ic_jobs")
-      .insert({
-        client_id: existing.client_id,
-        lead_id: leadId,
-        designer_id: designerId,
-        stage: depositIntakeStatus === "paid" ? "deposit_received" : "deposit_pending",
-        contract_cents: contractCents,
-        deposit_cents: depositCents,
-        collected_cents: 0,
-        sold_date: soldDate,
-        community_ref: communityRef,
-        studio_ref: studioRef,
-        job_check_owner_id: jobCheckOwnerId,
-        tentative_install_notes: tentativeInstallNotes,
-        site_ready_notes: siteReadyNotes,
-        deposit_intake_status: depositIntakeStatus,
-        notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || null,
-        created_by: actorId,
-        updated_by: actorId,
-      })
+      .insert(jobInsertFull)
       .select("*")
       .single();
-    if (jobError) {
-      return NextResponse.json({ ok: false, error: jobError.message }, { status: 500 });
+    if (jobError && /column|schema cache/i.test(jobError.message)) {
+      ({ data: job, error: jobError } = await supabase
+        .from("ic_jobs")
+        .insert({
+          client_id: existing.client_id,
+          lead_id: leadId,
+          designer_id: designerId,
+          stage: depositIntakeStatus === "paid" ? "deposit_received" : "deposit_pending",
+          contract_cents: contractCents,
+          deposit_cents: depositCents,
+          collected_cents: 0,
+          sold_date: soldDate,
+          community_ref: communityRef,
+          notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || null,
+          created_by: actorId,
+          updated_by: actorId,
+        })
+        .select("*")
+        .single());
+    }
+    if (jobError || !job) {
+      return NextResponse.json(
+        { ok: false, error: jobError?.message ?? "Could not create sold job." },
+        { status: 500 },
+      );
     }
 
     try {

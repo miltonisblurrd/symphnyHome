@@ -49,22 +49,31 @@ export async function GET(request: Request) {
   if (to) query = query.lte("scheduled_at", to);
   if (designerId) query = query.eq("designer_id", designerId);
 
-  const JOB_SELECT_FULL =
-    "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status";
-  const JOB_SELECT_BASE =
-    "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, community_ref";
-
-  async function loadJobs(select: string) {
-    const [scheduled, ready, awaiting] = await Promise.all([
+  const [apptResult, staffResult, clientsResult, leadsResult, jobsResult, readyResult, awaitingResult] =
+    await Promise.all([
+      query,
+      supabase
+        .from("ic_staff")
+        .select("id, name, role, active")
+        .is("deleted_at", null)
+        .eq("active", true)
+        .order("name"),
+      supabase.from("ic_clients").select("id, name, phone, address").is("deleted_at", null),
+      supabase
+        .from("ic_leads")
+        .select("id, designer_id, stage, converted_job_id, source")
+        .is("deleted_at", null)
+        .limit(3000),
+      // select('*') stays compatible before/after migration 0010
       supabase
         .from("ic_jobs")
-        .select(select)
+        .select("*")
         .is("deleted_at", null)
         .not("install_date", "is", null)
         .limit(1000),
       supabase
         .from("ic_jobs")
-        .select(select)
+        .select("*")
         .is("deleted_at", null)
         .is("install_date", null)
         .in("stage", ["deposit_received", "job_check", "ordered"])
@@ -72,45 +81,13 @@ export async function GET(request: Request) {
         .limit(200),
       supabase
         .from("ic_jobs")
-        .select(select)
+        .select("*")
         .is("deleted_at", null)
         .is("install_date", null)
         .eq("stage", "deposit_pending")
         .order("sold_date", { ascending: false, nullsFirst: false })
         .limit(100),
     ]);
-    return { scheduled, ready, awaiting };
-  }
-
-  const [apptResult, staffResult, clientsResult, leadsResult] = await Promise.all([
-    query,
-    supabase
-      .from("ic_staff")
-      .select("id, name, role, active")
-      .is("deleted_at", null)
-      .eq("active", true)
-      .order("name"),
-    supabase.from("ic_clients").select("id, name, phone, address").is("deleted_at", null),
-    supabase
-      .from("ic_leads")
-      .select("id, designer_id, stage, converted_job_id, source")
-      .is("deleted_at", null)
-      .limit(3000),
-  ]);
-
-  // Prefer full sold-intake columns; fall back if migration 0010 not applied yet
-  // so the Install Calendar still loads.
-  let jobsBundle = await loadJobs(JOB_SELECT_FULL);
-  if (
-    jobsBundle.scheduled.error ||
-    jobsBundle.ready.error ||
-    jobsBundle.awaiting.error
-  ) {
-    jobsBundle = await loadJobs(JOB_SELECT_BASE);
-  }
-  const jobsResult = jobsBundle.scheduled;
-  const readyResult = jobsBundle.ready;
-  const awaitingResult = jobsBundle.awaiting;
 
   if (apptResult.error) {
     return NextResponse.json({ ok: false, error: apptResult.error.message }, { status: 500 });
@@ -168,24 +145,23 @@ export async function GET(request: Request) {
     };
   }
 
-  const installJobs = ((jobsResult.data ?? []) as unknown as Record<string, unknown>[])
+  const installJobs = (jobsResult.data ?? [])
     .filter((job) => {
       if (designerId && job.designer_id !== designerId) return false;
       // Date-only bounds: from inclusive, to exclusive (weekStart + 7 days).
-      const installDate = job.install_date as string | null;
-      if (from && installDate && installDate < from.slice(0, 10)) return false;
-      if (to && installDate && installDate >= to.slice(0, 10)) return false;
+      if (from && job.install_date && job.install_date < from.slice(0, 10)) return false;
+      if (to && job.install_date && job.install_date >= to.slice(0, 10)) return false;
       return true;
     })
-    .map((job) => mapJob(job));
+    .map((job) => mapJob(job as Record<string, unknown>));
 
-  const readyToSchedule = ((readyResult.data ?? []) as unknown as Record<string, unknown>[])
+  const readyToSchedule = (readyResult.data ?? [])
     .filter((job) => !designerId || job.designer_id === designerId)
-    .map((job) => mapJob(job));
+    .map((job) => mapJob(job as Record<string, unknown>));
 
-  const awaitingDeposit = ((awaitingResult.data ?? []) as unknown as Record<string, unknown>[])
+  const awaitingDeposit = (awaitingResult.data ?? [])
     .filter((job) => !designerId || job.designer_id === designerId)
-    .map((job) => mapJob(job));
+    .map((job) => mapJob(job as Record<string, unknown>));
 
   return NextResponse.json({
     ok: true,

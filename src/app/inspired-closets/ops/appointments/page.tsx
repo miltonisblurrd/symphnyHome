@@ -1,7 +1,14 @@
-"use client";
-
+import { Suspense } from "react";
 import OpsScheduleWorkspace from "@/components/inspired-closets/OpsScheduleWorkspace";
 
+export const metadata = {
+  title: "Inspired Closets OS · Appointments",
+};
+
 export default function InspiredClosetsOpsAppointmentsPage() {
-  return <OpsScheduleWorkspace forcedTab="appointments" />;
+  return (
+    <Suspense fallback={<p style={{ padding: "2rem" }}>Loading appointments…</p>}>
+      <OpsScheduleWorkspace forcedTab="appointments" />
+    </Suspense>
+  );
 }

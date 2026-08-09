@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     supabase
       .from("ic_jobs")
       .select(
-        "id, client_id, designer_id, installer_id, install_date, stage, lead_id, contract_cents, notes",
+        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes",
       )
       .is("deleted_at", null)
       .not("install_date", "is", null)
@@ -106,8 +106,9 @@ export async function GET(request: Request) {
   const installJobs = (jobsResult.data ?? [])
     .filter((job) => {
       if (designerId && job.designer_id !== designerId) return false;
+      // Date-only bounds: from inclusive, to exclusive (weekStart + 7 days).
       if (from && job.install_date && job.install_date < from.slice(0, 10)) return false;
-      if (to && job.install_date && job.install_date > to.slice(0, 10)) return false;
+      if (to && job.install_date && job.install_date >= to.slice(0, 10)) return false;
       return true;
     })
     .map((job) => {

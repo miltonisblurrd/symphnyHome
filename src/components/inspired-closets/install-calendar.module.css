@@ -1,0 +1,433 @@
+/* Community-style Install Calendar */
+
+.shell {
+  --ic-red: #821f2d;
+  --ink: #111;
+  --muted: rgba(0, 0, 0, 0.55);
+  --line: rgba(0, 0, 0, 0.12);
+  --assigned: #9ec0e6;
+  --unassigned: #e8a090;
+  --svc: #e8c48a;
+  --company: #5c4a3a;
+
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  gap: 0;
+  min-height: 70vh;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  overflow: hidden;
+  font-family: "Lato", system-ui, sans-serif;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sidebar {
+  background: #f4f6f9;
+  border-right: 1px solid var(--line);
+  padding: 0.85rem 0.75rem 1.25rem;
+  overflow-y: auto;
+}
+
+.sideGroup {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sideHint {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.28rem 0.15rem;
+  cursor: pointer;
+}
+
+.dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 0.15rem;
+  flex-shrink: 0;
+}
+
+.dotAssigned {
+  background: var(--assigned);
+}
+
+.dotUnassigned {
+  background: var(--unassigned);
+}
+
+.dotSvc {
+  background: var(--svc);
+}
+
+.resourceList {
+  margin: 0;
+  padding: 0 0 0 0.2rem;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.resourceList li {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #fafbfc;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.navBtn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.range {
+  margin: 0 0 0 0.45rem;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.viewOn,
+.viewOff {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.viewOn {
+  background: var(--ic-red);
+  color: #fff;
+  border-color: var(--ic-red);
+}
+
+.viewOff {
+  background: #fff;
+  color: var(--ink);
+}
+
+.weekScroll {
+  overflow: auto;
+  padding: 0.5rem;
+  flex: 1;
+}
+
+.weekGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(8.5rem, 1fr));
+  gap: 0.3rem;
+  min-width: 62rem;
+  min-height: 28rem;
+}
+
+.dayCol {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  min-height: 26rem;
+  padding: 0.3rem;
+}
+
+.dayHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.25rem 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.dayHead strong {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.companyBlock {
+  background: var(--company);
+  color: #f5efe8;
+  border-radius: 0.2rem;
+  padding: 0.35rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+  line-height: 1.3;
+}
+
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0.2rem;
+  padding: 0.4rem 0.45rem;
+  margin-bottom: 0.3rem;
+  cursor: pointer;
+  font-family: inherit;
+  color: #10243a;
+}
+
+.cardAssigned {
+  background: var(--assigned);
+}
+
+.cardUnassigned {
+  background: var(--unassigned);
+  color: #3a1510;
+}
+
+.cardSvc {
+  background: var(--svc);
+  color: #3a2a10;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.truck {
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
+.cardLine {
+  margin: 0.12rem 0 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.cardNotes {
+  margin: 0.2rem 0 0;
+  font-size: 0.64rem;
+  line-height: 1.25;
+  opacity: 0.9;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardDate {
+  margin: 0.25rem 0 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.listWrap {
+  padding: 0.75rem;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.table th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 0.45rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.table td {
+  padding: 0.5rem 0.45rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+}
+
+.table tr:hover td {
+  background: rgba(130, 31, 45, 0.04);
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2.5rem 1rem;
+  font-size: 0.88rem;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal {
+  width: min(28rem, 100%);
+  max-height: 90dvh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 0.35rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.modalHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: #0176d3;
+  color: #fff;
+  padding: 0.75rem 0.9rem;
+}
+
+.modalEyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.modalTitle {
+  margin: 0.2rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.modalTabs {
+  display: flex;
+  gap: 1rem;
+  padding: 0.55rem 0.9rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.modalTabOn {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--ic-red);
+  border-bottom: 3px solid var(--ic-red);
+  padding-bottom: 0.4rem;
+}
+
+.modalTab {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding-bottom: 0.4rem;
+}
+
+.modalBody {
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.65rem;
+  font-size: 0.85rem;
+}
+
+.modalBody p {
+  margin: 0;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.assignBlock {
+  margin-top: 0.35rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line);
+}
+
+.assignRow {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.select {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.5rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+.assignBtn {
+  border: none;
+  background: var(--ic-red);
+  color: #fff;
+  border-radius: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.assignBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

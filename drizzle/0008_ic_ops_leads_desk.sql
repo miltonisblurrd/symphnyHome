@@ -1,5 +1,7 @@
--- Inspired Closets OS — Des lead desk: Community-aligned statuses, sources, detail fields, Chatter.
--- Safe after 0007. Adds enum values; keeps legacy values for existing rows.
+-- Inspired Closets OS — Des lead desk (PART 1 of 2).
+-- Safe after 0007. Adds enum values + columns + chatter.
+-- IMPORTANT: Do NOT remap stages here — Postgres requires new enum values
+-- to be committed before use. Run 0009_ic_ops_leads_desk_remap.sql next.
 
 -- ── Sources ──────────────────────────────────────────────────────────────
 DO $$ BEGIN ALTER TYPE "public"."ic_lead_source" ADD VALUE IF NOT EXISTS 'vehicle'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -23,12 +25,6 @@ DO $$ BEGIN ALTER TYPE "public"."ic_lead_stage" ADD VALUE IF NOT EXISTS 'duplica
 DO $$ BEGIN ALTER TYPE "public"."ic_lead_stage" ADD VALUE IF NOT EXISTS 'prospect'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN ALTER TYPE "public"."ic_lead_stage" ADD VALUE IF NOT EXISTS 'rescheduled'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- Map legacy stages → Community-aligned
-UPDATE "ic_leads" SET "stage" = 'attempt_1' WHERE "stage" = 'follow_up';
-UPDATE "ic_leads" SET "stage" = 'appointment_set' WHERE "stage" = 'schedule';
-UPDATE "ic_leads" SET "source" = 'referral_personal' WHERE "source" = 'referral';
-UPDATE "ic_leads" SET "source" = 'facebook' WHERE "source" = 'meta';
-
 -- ── Lead detail fields ───────────────────────────────────────────────────
 ALTER TABLE "ic_leads"
   ADD COLUMN IF NOT EXISTS "lead_type" text DEFAULT 'consumer',
@@ -48,7 +44,6 @@ ALTER TABLE "ic_leads"
   ADD COLUMN IF NOT EXISTS "needs_follow_up_date" date,
   ADD COLUMN IF NOT EXISTS "contact_preference" text,
   ADD COLUMN IF NOT EXISTS "converted_at" timestamp with time zone,
-  -- Craig pipeline labels (his tab only; pulled from lead/job)
   ADD COLUMN IF NOT EXISTS "pipeline_status" text,
   ADD COLUMN IF NOT EXISTS "pipeline_signed" boolean DEFAULT false NOT NULL,
   ADD COLUMN IF NOT EXISTS "pipeline_rto" boolean DEFAULT false NOT NULL,

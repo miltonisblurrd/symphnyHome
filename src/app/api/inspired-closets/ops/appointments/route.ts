@@ -49,8 +49,40 @@ export async function GET(request: Request) {
   if (to) query = query.lte("scheduled_at", to);
   if (designerId) query = query.eq("designer_id", designerId);
 
-  const [apptResult, staffResult, clientsResult, leadsResult, jobsResult, readyResult, awaitingResult] =
-    await Promise.all([
+  const JOB_SELECT_FULL =
+    "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status";
+  const JOB_SELECT_BASE =
+    "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, community_ref";
+
+  async function loadJobs(select: string) {
+    const [scheduled, ready, awaiting] = await Promise.all([
+      supabase
+        .from("ic_jobs")
+        .select(select)
+        .is("deleted_at", null)
+        .not("install_date", "is", null)
+        .limit(1000),
+      supabase
+        .from("ic_jobs")
+        .select(select)
+        .is("deleted_at", null)
+        .is("install_date", null)
+        .in("stage", ["deposit_received", "job_check", "ordered"])
+        .order("sold_date", { ascending: false, nullsFirst: false })
+        .limit(200),
+      supabase
+        .from("ic_jobs")
+        .select(select)
+        .is("deleted_at", null)
+        .is("install_date", null)
+        .eq("stage", "deposit_pending")
+        .order("sold_date", { ascending: false, nullsFirst: false })
+        .limit(100),
+    ]);
+    return { scheduled, ready, awaiting };
+  }
+
+  const [apptResult, staffResult, clientsResult, leadsResult] = await Promise.all([
     query,
     supabase
       .from("ic_staff")
@@ -64,38 +96,28 @@ export async function GET(request: Request) {
       .select("id, designer_id, stage, converted_job_id, source")
       .is("deleted_at", null)
       .limit(3000),
-    supabase
-      .from("ic_jobs")
-      .select(
-        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
-      )
-      .is("deleted_at", null)
-      .not("install_date", "is", null)
-      .limit(1000),
-    supabase
-      .from("ic_jobs")
-      .select(
-        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
-      )
-      .is("deleted_at", null)
-      .is("install_date", null)
-      .in("stage", ["deposit_received", "job_check", "ordered"])
-      .order("sold_date", { ascending: false, nullsFirst: false })
-      .limit(200),
-    supabase
-      .from("ic_jobs")
-      .select(
-        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
-      )
-      .is("deleted_at", null)
-      .is("install_date", null)
-      .eq("stage", "deposit_pending")
-      .order("sold_date", { ascending: false, nullsFirst: false })
-      .limit(100),
   ]);
+
+  // Prefer full sold-intake columns; fall back if migration 0010 not applied yet
+  // so the Install Calendar still loads.
+  let jobsBundle = await loadJobs(JOB_SELECT_FULL);
+  if (
+    jobsBundle.scheduled.error ||
+    jobsBundle.ready.error ||
+    jobsBundle.awaiting.error
+  ) {
+    jobsBundle = await loadJobs(JOB_SELECT_BASE);
+  }
+  const jobsResult = jobsBundle.scheduled;
+  const readyResult = jobsBundle.ready;
+  const awaitingResult = jobsBundle.awaiting;
 
   if (apptResult.error) {
     return NextResponse.json({ ok: false, error: apptResult.error.message }, { status: 500 });
+  }
+
+  if (jobsResult.error) {
+    return NextResponse.json({ ok: false, error: jobsResult.error.message }, { status: 500 });
   }
 
   const staffById = new Map((staffResult.data ?? []).map((s) => [s.id, s]));

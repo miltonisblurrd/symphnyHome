@@ -96,8 +96,8 @@ type EventCard = {
 
 export default function OpsInstallCalendar({
   jobs,
-  readyToSchedule,
-  awaitingDeposit,
+  readyToSchedule = [],
+  awaitingDeposit = [],
   installers,
   busy,
   onAssignInstaller,
@@ -108,8 +108,8 @@ export default function OpsInstallCalendar({
   onWeekChange,
 }: {
   jobs: CalInstallJob[];
-  readyToSchedule: CalInstallJob[];
-  awaitingDeposit: CalInstallJob[];
+  readyToSchedule?: CalInstallJob[];
+  awaitingDeposit?: CalInstallJob[];
   installers: CalStaff[];
   busy: boolean;
   onAssignInstaller: (jobId: string, installerId: string | null) => Promise<void>;

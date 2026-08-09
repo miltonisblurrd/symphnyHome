@@ -1,7 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { ensurePaymentMilestones } from "@/lib/inspired-closets-ops-billing";
+import {
+  ensurePaymentMilestones,
+  isDepositPaid,
+  recordPaymentAmount,
+} from "@/lib/inspired-closets-ops-billing";
 import {
   AREAS_OF_HOME,
   ATTEMPT_STAGES,
@@ -19,6 +23,7 @@ import {
   type IcLeadStageId,
 } from "@/lib/inspired-closets-ops-leads";
 import { IC_STAFF_ID_COOKIE, IC_STAFF_NAME_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 
 export const runtime = "nodejs";
 
@@ -29,6 +34,7 @@ const VALID_NURTURE = new Set<string>(NURTURING_REASONS.map((r) => r.id));
 const VALID_FORM = new Set<string>(FORM_TYPES.map((f) => f.id));
 const VALID_INFLUENCER = new Set<string>(INFLUENCER_TYPES.map((i) => i.id));
 const VALID_PIPELINE = new Set<string>(PIPELINE_STATUSES.map((p) => p.id));
+const VALID_DEPOSIT_INTAKE = new Set(["pending", "link_sent", "check_pending", "paid"]);
 
 async function actor(): Promise<{ id: string | null; name: string | null }> {
   const cookieStore = await cookies();
@@ -36,6 +42,71 @@ async function actor(): Promise<{ id: string | null; name: string | null }> {
     id: cookieStore.get(IC_STAFF_ID_COOKIE)?.value ?? null,
     name: cookieStore.get(IC_STAFF_NAME_COOKIE)?.value ?? null,
   };
+}
+
+async function applyDepositIntakeStatus(
+  jobId: string,
+  status: string,
+  depositCents: number,
+  actorId: string | null,
+) {
+  const supabase = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+
+  if (status === "link_sent") {
+    await supabase
+      .from("ic_payments")
+      .update({ link_sent_at: nowIso, updated_at: nowIso, updated_by: actorId })
+      .eq("job_id", jobId)
+      .eq("milestone", "deposit_50")
+      .is("link_sent_at", null);
+    return;
+  }
+
+  if (status === "paid" || status === "check_pending") {
+    const { data: payment } = await supabase
+      .from("ic_payments")
+      .select("id, amount_due_cents, amount_paid_cents, status")
+      .eq("job_id", jobId)
+      .eq("milestone", "deposit_50")
+      .maybeSingle();
+    if (!payment) return;
+    if (status === "paid" && payment.status !== "paid") {
+      await recordPaymentAmount({
+        paymentId: payment.id,
+        amountPaidCents: payment.amount_due_cents || depositCents,
+        method: "podium",
+        notes: "Marked paid from Sold intake",
+        actorId,
+      });
+    }
+  }
+}
+
+async function notifyDesSold(input: {
+  clientName: string;
+  contractCents: number;
+  jobId: string;
+  depositStatus: string;
+  requestedBy?: string | null;
+}) {
+  const dollars = (input.contractCents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+  try {
+    await postInspiredClosetsSlackNotification({
+      assignee: "Des",
+      title: `Sold — ${input.clientName}`,
+      severity: "info",
+      todoLabel: `${dollars} · deposit ${input.depositStatus.replace(/_/g, " ")}`,
+      notifyMessage: `Sold job ready for Des intake follow-up. Job ${input.jobId}. Mark deposit in Billing when cleared, then schedule from Ready to Schedule.`,
+      requestedBy: input.requestedBy ?? "Ops",
+    });
+  } catch {
+    // Slack is optional — never fail the sell path.
+  }
 }
 
 function formatAddress(parts: {
@@ -527,10 +598,24 @@ export async function PATCH(request: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Install events need a sold job. Move to Studio / sell first, or book a Design Event.",
+          error: "Install events need a sold job. Complete Sold intake first, or book a Design Event.",
         },
         { status: 409 },
       );
+    }
+
+    if (kind === "install" && existing.converted_job_id) {
+      const paid = await isDepositPaid(existing.converted_job_id);
+      if (!paid) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "50% deposit must be received before scheduling install. Mark deposit paid in Billing first.",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     const { data: appointment, error: apptError } = await supabase
@@ -629,7 +714,80 @@ export async function PATCH(request: Request) {
     const designerId =
       typeof body.designer_id === "string" ? body.designer_id : existing.designer_id;
     const depositCents = Math.round(contractCents * 0.5);
-    const today = nowIso.slice(0, 10);
+    const soldDate =
+      typeof body.sold_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.sold_date)
+        ? body.sold_date
+        : nowIso.slice(0, 10);
+    const depositIntakeStatus =
+      typeof body.deposit_intake_status === "string" &&
+      VALID_DEPOSIT_INTAKE.has(body.deposit_intake_status)
+        ? body.deposit_intake_status
+        : "pending";
+    const communityRef =
+      typeof body.community_ref === "string"
+        ? body.community_ref.trim() || null
+        : existing.community_name ?? existing.community_ref ?? null;
+    const studioRef =
+      typeof body.studio_ref === "string" ? body.studio_ref.trim() || null : null;
+    const jobCheckOwnerId =
+      typeof body.job_check_owner_id === "string" ? body.job_check_owner_id : null;
+    const tentativeInstallNotes =
+      typeof body.tentative_install_notes === "string"
+        ? body.tentative_install_notes.trim() || null
+        : null;
+    const siteReadyNotes =
+      typeof body.site_ready_notes === "string" ? body.site_ready_notes.trim() || null : null;
+
+    // If already sold, update intake on the existing job instead of creating another.
+    if (existing.converted_job_id && action === "sell") {
+      const jobUpdate: Record<string, unknown> = {
+        contract_cents: contractCents,
+        deposit_cents: depositCents,
+        sold_date: soldDate,
+        community_ref: communityRef,
+        studio_ref: studioRef,
+        job_check_owner_id: jobCheckOwnerId,
+        tentative_install_notes: tentativeInstallNotes,
+        site_ready_notes: siteReadyNotes,
+        deposit_intake_status: depositIntakeStatus,
+        designer_id: designerId,
+        updated_at: nowIso,
+        updated_by: actorId,
+      };
+      const { data: job, error: jobError } = await supabase
+        .from("ic_jobs")
+        .update(jobUpdate)
+        .eq("id", existing.converted_job_id)
+        .select("*")
+        .single();
+      if (jobError) {
+        return NextResponse.json({ ok: false, error: jobError.message }, { status: 500 });
+      }
+      try {
+        await ensurePaymentMilestones(job.id, contractCents, { dueDepositNow: true });
+        await applyDepositIntakeStatus(job.id, depositIntakeStatus, depositCents, actorId);
+      } catch (err) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: err instanceof Error ? err.message : "Failed to update payment milestones.",
+            job,
+          },
+          { status: 500 },
+        );
+      }
+      const { data: client } = existing.client_id
+        ? await supabase.from("ic_clients").select("name").eq("id", existing.client_id).maybeSingle()
+        : { data: null };
+      await notifyDesSold({
+        clientName: client?.name ?? "Client",
+        contractCents,
+        jobId: job.id,
+        depositStatus: depositIntakeStatus,
+        requestedBy: actorName,
+      });
+      return NextResponse.json({ ok: true, lead: existing, job, updated: true });
+    }
 
     const { data: job, error: jobError } = await supabase
       .from("ic_jobs")
@@ -637,13 +795,18 @@ export async function PATCH(request: Request) {
         client_id: existing.client_id,
         lead_id: leadId,
         designer_id: designerId,
-        stage: "deposit_pending",
+        stage: depositIntakeStatus === "paid" ? "deposit_received" : "deposit_pending",
         contract_cents: contractCents,
         deposit_cents: depositCents,
         collected_cents: 0,
-        sold_date: today,
-        community_ref: existing.community_name ?? existing.community_ref,
-        notes: existing.notes,
+        sold_date: soldDate,
+        community_ref: communityRef,
+        studio_ref: studioRef,
+        job_check_owner_id: jobCheckOwnerId,
+        tentative_install_notes: tentativeInstallNotes,
+        site_ready_notes: siteReadyNotes,
+        deposit_intake_status: depositIntakeStatus,
+        notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || null,
         created_by: actorId,
         updated_by: actorId,
       })
@@ -655,6 +818,7 @@ export async function PATCH(request: Request) {
 
     try {
       await ensurePaymentMilestones(job.id, contractCents, { dueDepositNow: true });
+      await applyDepositIntakeStatus(job.id, depositIntakeStatus, depositCents, actorId);
     } catch (err) {
       return NextResponse.json(
         {
@@ -692,7 +856,23 @@ export async function PATCH(request: Request) {
       action: "converted_to_job",
       actor_id: actorId,
       actor_label: actorName,
-      changes: { job_id: job.id, contract_cents: contractCents },
+      changes: {
+        job_id: job.id,
+        contract_cents: contractCents,
+        deposit_intake_status: depositIntakeStatus,
+      },
+    });
+
+    const { data: client } = existing.client_id
+      ? await supabase.from("ic_clients").select("name").eq("id", existing.client_id).maybeSingle()
+      : { data: null };
+
+    await notifyDesSold({
+      clientName: client?.name ?? "Client",
+      contractCents,
+      jobId: job.id,
+      depositStatus: depositIntakeStatus,
+      requestedBy: actorName,
     });
 
     return NextResponse.json({ ok: true, lead, job });

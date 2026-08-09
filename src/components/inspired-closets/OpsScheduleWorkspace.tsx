@@ -37,9 +37,17 @@ type InstallJob = {
   contract_cents?: number;
   notes?: string | null;
   serviceTag?: "SVC" | "G/B" | null;
+  lead_id?: string | null;
+  studio_ref?: string | null;
+  community_ref?: string | null;
+  receive_date?: string | null;
+  tentative_install_notes?: string | null;
+  site_ready_notes?: string | null;
+  deposit_intake_status?: string | null;
   client: Client | null;
   designer: Staff | null;
   installer?: Staff | null;
+  jobCheckOwner?: Staff | null;
 };
 
 type Closing = {
@@ -55,6 +63,8 @@ type ApiResponse = {
   error?: string;
   appointments?: Appointment[];
   installJobs?: InstallJob[];
+  readyToSchedule?: InstallJob[];
+  awaitingDeposit?: InstallJob[];
   closing?: Closing[];
   staff?: Staff[];
   clients?: Client[];
@@ -116,6 +126,8 @@ export default function OpsScheduleWorkspace({
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [installJobs, setInstallJobs] = useState<InstallJob[]>([]);
+  const [readyToSchedule, setReadyToSchedule] = useState<InstallJob[]>([]);
+  const [awaitingDeposit, setAwaitingDeposit] = useState<InstallJob[]>([]);
   const [closing, setClosing] = useState<Closing[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -173,6 +185,8 @@ export default function OpsScheduleWorkspace({
       if (!payload.ok) throw new Error(payload.error ?? "Failed to load schedule.");
       setAppointments(payload.appointments ?? []);
       setInstallJobs(payload.installJobs ?? []);
+      setReadyToSchedule(payload.readyToSchedule ?? []);
+      setAwaitingDeposit(payload.awaitingDeposit ?? []);
       setClosing(payload.closing ?? []);
       setStaff(payload.staff ?? []);
       setClients(payload.clients ?? []);
@@ -294,6 +308,67 @@ export default function OpsScheduleWorkspace({
       setNotice({
         kind: "error",
         text: error instanceof Error ? error.message : "Could not assign installer.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function scheduleInstall(input: {
+    jobId: string;
+    leadId: string | null;
+    scheduledAt: string;
+    installerId: string | null;
+  }) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "install",
+          job_id: input.jobId,
+          lead_id: input.leadId,
+          scheduled_at: input.scheduledAt,
+          installer_id: input.installerId,
+          location_type: "on_site",
+        }),
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok) throw new Error(payload.error ?? "Could not schedule install.");
+      setNotice({
+        kind: "info",
+        text: "Install scheduled — card is on the calendar. Deposit gate cleared.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not schedule install.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function advanceJobStage(jobId: string, patch: Record<string, unknown>) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: jobId, ...patch }),
+      });
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not update job.");
+      setNotice({ kind: "info", text: "Job stage updated." });
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not update job.",
       });
     } finally {
       setBusy(false);
@@ -653,12 +728,16 @@ export default function OpsScheduleWorkspace({
         ) : (
           <OpsInstallCalendar
             jobs={installJobs}
+            readyToSchedule={readyToSchedule}
+            awaitingDeposit={awaitingDeposit}
             installers={installers}
             busy={busy}
             weekStartIso={weekStart}
             onWeekChange={setWeekStart}
             onRefresh={() => void load()}
             onAssignInstaller={assignInstaller}
+            onScheduleInstall={scheduleInstall}
+            onAdvanceStage={advanceJobStage}
           />
         )}
       </div>

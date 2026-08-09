@@ -252,7 +252,14 @@ export const icJobs = pgTable("ic_jobs", {
   completedDate: date("completed_date"),
   /** Legacy linkage while double-entry with Community continues. */
   communityRef: text("community_ref"),
+  studioRef: text("studio_ref"),
   workbookRef: text("workbook_ref"),
+  receiveDate: date("receive_date"),
+  jobCheckOwnerId: uuid("job_check_owner_id").references(() => icStaff.id),
+  tentativeInstallNotes: text("tentative_install_notes"),
+  siteReadyNotes: text("site_ready_notes"),
+  /** Des intake hint: pending | link_sent | check_pending | paid */
+  depositIntakeStatus: text("deposit_intake_status"),
   notes: text("notes"),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),

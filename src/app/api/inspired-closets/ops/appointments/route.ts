@@ -49,7 +49,8 @@ export async function GET(request: Request) {
   if (to) query = query.lte("scheduled_at", to);
   if (designerId) query = query.eq("designer_id", designerId);
 
-  const [apptResult, staffResult, clientsResult, leadsResult, jobsResult] = await Promise.all([
+  const [apptResult, staffResult, clientsResult, leadsResult, jobsResult, readyResult, awaitingResult] =
+    await Promise.all([
     query,
     supabase
       .from("ic_staff")
@@ -66,11 +67,31 @@ export async function GET(request: Request) {
     supabase
       .from("ic_jobs")
       .select(
-        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes",
+        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
       )
       .is("deleted_at", null)
       .not("install_date", "is", null)
       .limit(1000),
+    supabase
+      .from("ic_jobs")
+      .select(
+        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
+      )
+      .is("deleted_at", null)
+      .is("install_date", null)
+      .in("stage", ["deposit_received", "job_check", "ordered"])
+      .order("sold_date", { ascending: false, nullsFirst: false })
+      .limit(200),
+    supabase
+      .from("ic_jobs")
+      .select(
+        "id, client_id, designer_id, installer_id, install_date, sold_date, stage, lead_id, contract_cents, notes, studio_ref, community_ref, receive_date, job_check_owner_id, tentative_install_notes, site_ready_notes, deposit_intake_status",
+      )
+      .is("deleted_at", null)
+      .is("install_date", null)
+      .eq("stage", "deposit_pending")
+      .order("sold_date", { ascending: false, nullsFirst: false })
+      .limit(100),
   ]);
 
   if (apptResult.error) {
@@ -103,6 +124,28 @@ export async function GET(request: Request) {
     };
   });
 
+  function mapJob(job: Record<string, unknown>) {
+    const notes = String(job.notes ?? "").toLowerCase();
+    const serviceTag =
+      /\b(svc|service)\b/.test(notes) || job.stage === "service"
+        ? "SVC"
+        : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
+          ? "G/B"
+          : null;
+    const clientId = job.client_id as string | null;
+    const designerIdVal = job.designer_id as string | null;
+    const installerIdVal = job.installer_id as string | null;
+    const ownerId = job.job_check_owner_id as string | null;
+    return {
+      ...job,
+      client: clientId ? clientsById.get(clientId) ?? null : null,
+      designer: designerIdVal ? staffById.get(designerIdVal) ?? null : null,
+      installer: installerIdVal ? staffById.get(installerIdVal) ?? null : null,
+      jobCheckOwner: ownerId ? staffById.get(ownerId) ?? null : null,
+      serviceTag,
+    };
+  }
+
   const installJobs = (jobsResult.data ?? [])
     .filter((job) => {
       if (designerId && job.designer_id !== designerId) return false;
@@ -111,22 +154,15 @@ export async function GET(request: Request) {
       if (to && job.install_date && job.install_date >= to.slice(0, 10)) return false;
       return true;
     })
-    .map((job) => {
-      const notes = (job.notes ?? "").toLowerCase();
-      const serviceTag =
-        /\b(svc|service)\b/.test(notes) || job.stage === "service"
-          ? "SVC"
-          : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
-            ? "G/B"
-            : null;
-      return {
-        ...job,
-        client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
-        designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
-        installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
-        serviceTag,
-      };
-    });
+    .map((job) => mapJob(job));
+
+  const readyToSchedule = (readyResult.data ?? [])
+    .filter((job) => !designerId || job.designer_id === designerId)
+    .map((job) => mapJob(job));
+
+  const awaitingDeposit = (awaitingResult.data ?? [])
+    .filter((job) => !designerId || job.designer_id === designerId)
+    .map((job) => mapJob(job));
 
   return NextResponse.json({
     ok: true,
@@ -135,6 +171,8 @@ export async function GET(request: Request) {
     statuses: APPOINTMENT_STATUSES,
     appointments,
     installJobs,
+    readyToSchedule,
+    awaitingDeposit,
     closing,
     staff: staffResult.data ?? [],
     clients: clientsResult.data ?? [],
@@ -176,7 +214,13 @@ export async function POST(request: Request) {
   const notes = typeof body.notes === "string" ? body.notes : null;
   const communityRef = typeof body.community_ref === "string" ? body.community_ref : null;
 
-  if (kind === "install" && jobId) {
+  if (kind === "install") {
+    if (!jobId) {
+      return NextResponse.json(
+        { ok: false, error: "Install scheduling requires a sold job id." },
+        { status: 400 },
+      );
+    }
     const paid = await isDepositPaid(jobId);
     if (!paid) {
       return NextResponse.json(

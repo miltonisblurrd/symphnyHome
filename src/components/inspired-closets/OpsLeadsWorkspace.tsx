@@ -179,6 +179,17 @@ export default function OpsLeadsWorkspace() {
     installer_id: "",
     notes: "",
   });
+  const [soldOpen, setSoldOpen] = useState(false);
+  const [soldForm, setSoldForm] = useState({
+    contract: "",
+    sold_date: new Date().toISOString().slice(0, 10),
+    deposit_intake_status: "pending",
+    community_ref: "",
+    studio_ref: "",
+    job_check_owner_id: "",
+    tentative_install_notes: "",
+    site_ready_notes: "",
+  });
   const [draft, setDraft] = useState<Partial<Lead> | null>(null);
 
   const designers = useMemo(
@@ -406,6 +417,70 @@ export default function OpsLeadsWorkspace() {
     }
   }
 
+  async function submitSoldIntake() {
+    if (!selectedId) return;
+    const contractCents = Math.round(
+      Number(String(soldForm.contract).replace(/[$,\s]/g, "")) * 100,
+    );
+    if (!Number.isFinite(contractCents) || contractCents <= 0) {
+      setNotice({ kind: "error", text: "Enter the contract amount from the sold quote." });
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedId,
+          action: "sell",
+          contract_cents: contractCents,
+          sold_date: soldForm.sold_date || undefined,
+          deposit_intake_status: soldForm.deposit_intake_status,
+          community_ref: soldForm.community_ref || null,
+          studio_ref: soldForm.studio_ref || null,
+          job_check_owner_id: soldForm.job_check_owner_id || null,
+          tentative_install_notes: soldForm.tentative_install_notes || null,
+          site_ready_notes: soldForm.site_ready_notes || null,
+          designer_id: draft?.designer_id || null,
+        }),
+      });
+      const data = (await response.json()) as ApiResponse & { job?: { id: string } };
+      if (!data.ok) throw new Error(data.error ?? "Could not save sold intake.");
+      setSoldOpen(false);
+      setNotice({
+        kind: "info",
+        text:
+          soldForm.deposit_intake_status === "paid"
+            ? "Sold intake saved — deposit marked paid. Job is in Ready to Schedule."
+            : "Sold intake saved — job is awaiting deposit. Mark paid in Billing when cleared.",
+      });
+      await loadList();
+      await loadDetail(selectedId);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not save sold intake.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openSoldIntake() {
+    setSoldForm({
+      contract: "",
+      sold_date: new Date().toISOString().slice(0, 10),
+      deposit_intake_status: "pending",
+      community_ref: detail?.community_name ?? "",
+      studio_ref: "",
+      job_check_owner_id: "",
+      tentative_install_notes: "",
+      site_ready_notes: "",
+    });
+    setSoldOpen(true);
+  }
+
   function toggleArea(area: string) {
     if (!draft) return;
     const current = draft.areas_of_home ?? [];
@@ -472,10 +547,18 @@ export default function OpsLeadsWorkspace() {
             >
               + New Event
             </button>
+            <button
+              type="button"
+              className={styles.buttonPrimary}
+              disabled={busy}
+              onClick={openSoldIntake}
+            >
+              {detail.converted_job_id ? "Update sold intake" : "Sold intake"}
+            </button>
             {detail.stage !== "moved_to_studio" ? (
               <button
                 type="button"
-                className={styles.buttonPrimary}
+                className={styles.buttonGhost}
                 disabled={busy}
                 onClick={() =>
                   void patchLead({ id: detail.id, action: "move_to_studio" })
@@ -910,6 +993,139 @@ export default function OpsLeadsWorkspace() {
             </div>
           </aside>
         </div>
+
+        {soldOpen ? (
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setSoldOpen(false)}
+          >
+            <div
+              className={styles.modal}
+              role="dialog"
+              aria-label="Sold Project Intake"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className={styles.modalTitle}>Sold project intake</h3>
+              <p className={styles.leadContact} style={{ marginBottom: "0.75rem" }}>
+                Designer sold in Studio/Community — Des enters what the OS needs (double entry
+                OK). Deposit paid unlocks Ready to Schedule.
+              </p>
+              <div className={styles.detailGrid}>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Contract $ *</span>
+                  <input
+                    className={styles.input}
+                    value={soldForm.contract}
+                    onChange={(e) => setSoldForm((f) => ({ ...f, contract: e.target.value }))}
+                    placeholder="12500"
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Sold date</span>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={soldForm.sold_date}
+                    onChange={(e) => setSoldForm((f) => ({ ...f, sold_date: e.target.value }))}
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Deposit status</span>
+                  <select
+                    className={styles.input}
+                    value={soldForm.deposit_intake_status}
+                    onChange={(e) =>
+                      setSoldForm((f) => ({ ...f, deposit_intake_status: e.target.value }))
+                    }
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="link_sent">Podium link sent</option>
+                    <option value="check_pending">Check pending</option>
+                    <option value="paid">Paid (50%)</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Job-check owner</span>
+                  <select
+                    className={styles.input}
+                    value={soldForm.job_check_owner_id}
+                    onChange={(e) =>
+                      setSoldForm((f) => ({ ...f, job_check_owner_id: e.target.value }))
+                    }
+                  >
+                    <option value="">— Assign —</option>
+                    {staff
+                      .filter((s) => s.active)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Community ref</span>
+                  <input
+                    className={styles.input}
+                    value={soldForm.community_ref}
+                    onChange={(e) =>
+                      setSoldForm((f) => ({ ...f, community_ref: e.target.value }))
+                    }
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Studio ref</span>
+                  <input
+                    className={styles.input}
+                    value={soldForm.studio_ref}
+                    onChange={(e) => setSoldForm((f) => ({ ...f, studio_ref: e.target.value }))}
+                  />
+                </label>
+                <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                  <span className={styles.fieldLabel}>Tentative install window</span>
+                  <input
+                    className={styles.input}
+                    value={soldForm.tentative_install_notes}
+                    onChange={(e) =>
+                      setSoldForm((f) => ({ ...f, tentative_install_notes: e.target.value }))
+                    }
+                    placeholder="Week of 8/18 · 2 days"
+                  />
+                </label>
+                <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                  <span className={styles.fieldLabel}>Site-ready notes</span>
+                  <textarea
+                    className={styles.input}
+                    rows={2}
+                    value={soldForm.site_ready_notes}
+                    onChange={(e) =>
+                      setSoldForm((f) => ({ ...f, site_ready_notes: e.target.value }))
+                    }
+                    placeholder="Flooring, access, client notes…"
+                  />
+                </label>
+              </div>
+              <div className={styles.formActions} style={{ marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setSoldOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={styles.buttonPrimary}
+                  disabled={busy}
+                  onClick={() => void submitSoldIntake()}
+                >
+                  Save sold job
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {eventOpen ? (
           <div className={styles.modalBackdrop} role="presentation" onClick={() => setEventOpen(false)}>

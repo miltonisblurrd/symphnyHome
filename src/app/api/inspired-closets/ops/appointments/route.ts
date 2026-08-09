@@ -168,7 +168,7 @@ export async function GET(request: Request) {
     };
   }
 
-  const installJobs = ((jobsResult.data ?? []) as Record<string, unknown>[])
+  const installJobs = ((jobsResult.data ?? []) as unknown as Record<string, unknown>[])
     .filter((job) => {
       if (designerId && job.designer_id !== designerId) return false;
       // Date-only bounds: from inclusive, to exclusive (weekStart + 7 days).
@@ -179,11 +179,11 @@ export async function GET(request: Request) {
     })
     .map((job) => mapJob(job));
 
-  const readyToSchedule = ((readyResult.data ?? []) as Record<string, unknown>[])
+  const readyToSchedule = ((readyResult.data ?? []) as unknown as Record<string, unknown>[])
     .filter((job) => !designerId || job.designer_id === designerId)
     .map((job) => mapJob(job));
 
-  const awaitingDeposit = ((awaitingResult.data ?? []) as Record<string, unknown>[])
+  const awaitingDeposit = ((awaitingResult.data ?? []) as unknown as Record<string, unknown>[])
     .filter((job) => !designerId || job.designer_id === designerId)
     .map((job) => mapJob(job));
 

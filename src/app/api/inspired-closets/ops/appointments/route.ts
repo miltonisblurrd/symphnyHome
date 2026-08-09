@@ -65,7 +65,9 @@ export async function GET(request: Request) {
       .limit(3000),
     supabase
       .from("ic_jobs")
-      .select("id, client_id, designer_id, install_date, stage, lead_id")
+      .select(
+        "id, client_id, designer_id, installer_id, install_date, stage, lead_id, contract_cents, notes",
+      )
       .is("deleted_at", null)
       .not("install_date", "is", null)
       .limit(1000),
@@ -108,11 +110,22 @@ export async function GET(request: Request) {
       if (to && job.install_date && job.install_date > to.slice(0, 10)) return false;
       return true;
     })
-    .map((job) => ({
-      ...job,
-      client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
-      designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
-    }));
+    .map((job) => {
+      const notes = (job.notes ?? "").toLowerCase();
+      const serviceTag =
+        /\b(svc|service)\b/.test(notes) || job.stage === "service"
+          ? "SVC"
+          : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
+            ? "G/B"
+            : null;
+      return {
+        ...job,
+        client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
+        designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
+        installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
+        serviceTag,
+      };
+    });
 
   return NextResponse.json({
     ok: true,

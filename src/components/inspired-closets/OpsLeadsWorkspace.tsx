@@ -130,6 +130,20 @@ function formatStamp(value: string | null | undefined): string {
   });
 }
 
+/** Community-style list dates: 8/7/2026 5:14 PM */
+function formatListDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatRelative(value: string): string {
   const ms = Date.now() - new Date(value).getTime();
   const hours = Math.floor(ms / 3_600_000);
@@ -1111,7 +1125,8 @@ export default function OpsLeadsWorkspace() {
                 <th>Form Type</th>
                 <th>Source</th>
                 <th>Designer</th>
-                <th>Updated</th>
+                <th>Created Date</th>
+                <th>Last Modified</th>
               </tr>
             </thead>
             <tbody>
@@ -1132,7 +1147,8 @@ export default function OpsLeadsWorkspace() {
                   </td>
                   <td>{sourceLabel(lead.source)}</td>
                   <td>{lead.designer?.name ?? "—"}</td>
-                  <td>{formatStamp(lead.updated_at)}</td>
+                  <td>{formatListDate(lead.created_at)}</td>
+                  <td>{formatListDate(lead.updated_at)}</td>
                 </tr>
               ))}
             </tbody>

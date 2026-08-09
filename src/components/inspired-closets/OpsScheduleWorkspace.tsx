@@ -32,8 +32,12 @@ type InstallJob = {
   id: string;
   install_date: string | null;
   stage: string;
+  contract_cents?: number;
+  notes?: string | null;
+  serviceTag?: "SVC" | "G/B" | null;
   client: Client | null;
   designer: Staff | null;
+  installer?: Staff | null;
 };
 
 type Closing = {
@@ -78,12 +82,6 @@ function startOfWeek(d = new Date()): string {
   return date.toISOString();
 }
 
-function endOfWeek(d = new Date()): string {
-  const start = new Date(startOfWeek(d));
-  start.setDate(start.getDate() + 7);
-  return start.toISOString();
-}
-
 function formatStamp(value: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -94,6 +92,31 @@ function formatStamp(value: string | null): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+  });
+}
+
+function addDays(iso: string, days: number): Date {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function lastName(full: string | null | undefined): string {
+  if (!full) return "CLIENT";
+  const parts = full.trim().split(/\s+/);
+  return (parts[parts.length - 1] ?? full).toUpperCase();
+}
+
+function dollars(cents: number | undefined): string {
+  if (!cents) return "$0";
+  return (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
   });
 }
 
@@ -121,6 +144,11 @@ export default function OpsScheduleWorkspace({
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [calendarStatus, setCalendarStatus] = useState<ApiResponse["googleCalendar"] | null>(null);
   const [reschedule, setReschedule] = useState<Record<string, { at: string; reason: string }>>({});
+  const [weekStart, setWeekStart] = useState(() => startOfWeek());
+  const [installView, setInstallView] = useState<"calendar" | "list">("calendar");
+  const [showAssigned, setShowAssigned] = useState(true);
+  const [showUnassigned, setShowUnassigned] = useState(true);
+  const [showService, setShowService] = useState(true);
   const [form, setForm] = useState({
     lead_id: presetLeadId ?? "",
     client_id: "",
@@ -142,6 +170,77 @@ export default function OpsScheduleWorkspace({
     [appointments],
   );
 
+  const weekDays = useMemo(() => {
+    return [0, 1, 2, 3, 4].map((offset) => {
+      const d = addDays(weekStart, offset);
+      return { date: d, key: ymd(d), label: d.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }) };
+    });
+  }, [weekStart]);
+
+  type CalCard = {
+    id: string;
+    date: string;
+    title: string;
+    designer: string;
+    amount: string;
+    installer: string;
+    tag: "SVC" | "G/B" | null;
+    assigned: boolean;
+  };
+
+  const installCards = useMemo(() => {
+    const fromJobs: CalCard[] = installJobs.map((job) => {
+      const assigned = Boolean(job.installer);
+      const tag = job.serviceTag ?? null;
+      const base = lastName(job.client?.name);
+      const title = tag ? `${tag} ${base}` : base;
+      return {
+        id: `job-${job.id}`,
+        date: job.install_date ?? "",
+        title,
+        designer: job.designer?.name ?? "—",
+        amount: dollars(job.contract_cents),
+        installer: job.installer?.name?.toUpperCase() ?? "UNASSIGNED",
+        tag,
+        assigned,
+      };
+    });
+    const fromAppts: CalCard[] = installAppts.map((a) => {
+      const notes = (a.notes ?? "").toLowerCase();
+      const tag = /\b(svc|service)\b/.test(notes)
+        ? ("SVC" as const)
+        : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
+          ? ("G/B" as const)
+          : null;
+      const base = lastName(a.client?.name);
+      return {
+        id: `appt-${a.id}`,
+        date: a.scheduled_at.slice(0, 10),
+        title: tag ? `${tag} ${base}` : base,
+        designer: a.designer?.name ?? "—",
+        amount: "$—",
+        installer: "—",
+        tag,
+        assigned: Boolean(a.designer_id),
+      };
+    });
+    // Prefer job cards when both exist for same client/day
+    const jobKeys = new Set(fromJobs.map((j) => `${j.date}|${j.title}`));
+    const merged = [
+      ...fromJobs,
+      ...fromAppts.filter((a) => !jobKeys.has(`${a.date}|${a.title}`)),
+    ];
+    return merged.filter((card) => {
+      if (card.tag === "SVC" || card.tag === "G/B") return showService;
+      if (card.assigned) return showAssigned;
+      return showUnassigned;
+    });
+  }, [installJobs, installAppts, showAssigned, showUnassigned, showService]);
+
   useEffect(() => {
     if (presetLeadId) {
       setForm((f) => ({ ...f, lead_id: presetLeadId, kind: "consultation" }));
@@ -156,10 +255,9 @@ export default function OpsScheduleWorkspace({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        from: startOfWeek(),
-        to: endOfWeek(),
-      });
+      const from = weekStart;
+      const to = addDays(weekStart, 7).toISOString();
+      const params = new URLSearchParams({ from, to });
       if (designerFilter) params.set("designerId", designerFilter);
       const response = await fetch(`/api/inspired-closets/ops/appointments?${params.toString()}`);
       const payload = (await response.json()) as ApiResponse;
@@ -180,7 +278,7 @@ export default function OpsScheduleWorkspace({
     } finally {
       setLoading(false);
     }
-  }, [designerFilter]);
+  }, [designerFilter, weekStart]);
 
   useEffect(() => {
     void load();
@@ -596,58 +694,143 @@ export default function OpsScheduleWorkspace({
           </>
         ) : (
           <>
-            <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-              Install events this week
-            </p>
-            {installAppts.length === 0 ? (
-              <p className={styles.empty}>No install events this week.</p>
-            ) : (
-              <table className={styles.table} style={{ minWidth: "40rem" }}>
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Client</th>
-                    <th>Designer</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {installAppts.map((row) => (
-                    <tr key={row.id}>
-                      <td>{formatStamp(row.scheduled_at)}</td>
-                      <td>{row.client?.name ?? "—"}</td>
-                      <td>{row.designer?.name ?? "—"}</td>
-                      <td>{row.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <div className={styles.calToolbar}>
+              <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setWeekStart(addDays(weekStart, -7).toISOString())}
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setWeekStart(startOfWeek())}
+                >
+                  This week
+                </button>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setWeekStart(addDays(weekStart, 7).toISOString())}
+                >
+                  Next →
+                </button>
+                <span className={styles.summaryStrong} style={{ marginLeft: "0.35rem" }}>
+                  {weekDays[0]?.label} – {weekDays[4]?.label}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: "0.35rem" }}>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${installView === "calendar" ? styles.tabActive : ""}`}
+                  onClick={() => setInstallView("calendar")}
+                >
+                  Calendar
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${installView === "list" ? styles.tabActive : ""}`}
+                  onClick={() => setInstallView("list")}
+                >
+                  List
+                </button>
+              </div>
+            </div>
 
-            <p className={styles.subtitle} style={{ margin: "1.25rem 0 0.75rem" }}>
-              Jobs with install dates
-            </p>
-            {installJobs.length === 0 ? (
-              <p className={styles.empty}>No install dates set this week.</p>
+            <div className={styles.calFilters}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showAssigned}
+                  onChange={(e) => setShowAssigned(e.target.checked)}
+                />
+                Assigned installs
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showUnassigned}
+                  onChange={(e) => setShowUnassigned(e.target.checked)}
+                />
+                Unassigned installs
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showService}
+                  onChange={(e) => setShowService(e.target.checked)}
+                />
+                Service / G/B
+              </label>
+            </div>
+
+            {installView === "calendar" ? (
+              installCards.length === 0 ? (
+                <p className={styles.empty}>
+                  No installs this week. Schedule an Install Event from a converted lead/job —
+                  blocks show last name, designer, $, and installer like Community.
+                </p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <div className={styles.weekGrid}>
+                    {weekDays.map((day) => {
+                      const cards = installCards.filter((c) => c.date === day.key);
+                      return (
+                        <div key={day.key} className={styles.weekDay}>
+                          <p className={styles.weekDayHead}>{day.label}</p>
+                          {cards.length === 0 ? (
+                            <p className={styles.calEventMeta}>—</p>
+                          ) : (
+                            cards.map((card) => (
+                              <div
+                                key={card.id}
+                                className={`${styles.calEvent} ${
+                                  card.tag ? styles.calEventSvc : ""
+                                } ${!card.assigned && !card.tag ? styles.calEventUnassigned : ""}`}
+                              >
+                                <p className={styles.calEventName}>{card.title}</p>
+                                <p className={styles.calEventMeta}>{card.designer}</p>
+                                <p className={styles.calEventMeta}>{card.amount}</p>
+                                <p className={styles.calEventMeta}>{card.installer}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )
+            ) : installCards.length === 0 ? (
+              <p className={styles.empty}>No installs this week.</p>
             ) : (
-              <table className={styles.table} style={{ minWidth: "36rem" }}>
+              <table className={styles.table} style={{ minWidth: "44rem" }}>
                 <thead>
                   <tr>
-                    <th>Install date</th>
+                    <th>Date</th>
                     <th>Client</th>
                     <th>Designer</th>
-                    <th>Stage</th>
+                    <th>Amount</th>
+                    <th>Installer</th>
+                    <th>Tag</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {installJobs.map((job) => (
-                    <tr key={job.id}>
-                      <td>{job.install_date}</td>
-                      <td>{job.client?.name ?? "—"}</td>
-                      <td>{job.designer?.name ?? "—"}</td>
-                      <td>{job.stage.replace(/_/g, " ")}</td>
-                    </tr>
-                  ))}
+                  {installCards
+                    .slice()
+                    .sort((a, b) => a.date.localeCompare(b.date))
+                    .map((card) => (
+                      <tr key={card.id}>
+                        <td>{card.date}</td>
+                        <td>{card.title}</td>
+                        <td>{card.designer}</td>
+                        <td>{card.amount}</td>
+                        <td>{card.installer}</td>
+                        <td>{card.tag ?? "Install"}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             )}

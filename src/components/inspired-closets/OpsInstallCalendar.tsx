@@ -126,6 +126,7 @@ export default function OpsInstallCalendar({
 }) {
   const weekStart = useMemo(() => new Date(weekStartIso), [weekStartIso]);
   const [view, setView] = useState<"calendar" | "list">("calendar");
+  const [showQueues, setShowQueues] = useState(false);
   const [showAssigned, setShowAssigned] = useState(true);
   const [showUnassigned, setShowUnassigned] = useState(true);
   const [showService, setShowService] = useState(true);
@@ -213,125 +214,17 @@ export default function OpsInstallCalendar({
 
   return (
     <div className={styles.glueWrap}>
-      {awaitingDeposit.length > 0 ? (
-        <section className={styles.strip}>
-          <div className={styles.stripHead}>
-            <h3 className={styles.stripTitle}>Sold / awaiting deposit</h3>
-            <span className={styles.stripCount}>{awaitingDeposit.length}</span>
-          </div>
-          <ul className={styles.stripList}>
-            {awaitingDeposit.map((job) => (
-              <li key={job.id} className={styles.stripItem}>
-                <div>
-                  <strong>{job.client?.name ?? "Client"}</strong>
-                  <span>
-                    {dollars(job.contract_cents)} · {job.designer?.name ?? "—"} ·{" "}
-                    {(job.deposit_intake_status ?? "pending").replace(/_/g, " ")}
-                  </span>
-                </div>
-                <a className={styles.stripLink} href="/inspired-closets/ops/billing">
-                  Open Billing
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section className={styles.strip}>
-        <div className={styles.stripHead}>
-          <h3 className={styles.stripTitle}>Ready to schedule</h3>
-          <span className={styles.stripCount}>{readyToSchedule.length}</span>
-        </div>
-        {readyToSchedule.length === 0 ? (
-          <p className={styles.stripEmpty}>
-            No deposit-paid jobs waiting. After Billing marks 50% paid, they land here.
-          </p>
-        ) : (
-          <ul className={styles.stripList}>
-            {readyToSchedule.map((job) => (
-              <li key={job.id} className={styles.stripItemReady}>
-                <div>
-                  <strong>{job.client?.name ?? "Client"}</strong>
-                  <span>
-                    {dollars(job.contract_cents)} · {job.designer?.name ?? "—"} ·{" "}
-                    {job.jobCheckOwner?.name ?? "No job-check owner"}
-                    {job.tentative_install_notes
-                      ? ` · ${job.tentative_install_notes}`
-                      : ""}
-                  </span>
-                  <span className={styles.stripMeta}>
-                    Stage: {job.stage.replace(/_/g, " ")}
-                    {job.receive_date ? ` · Receive ${shortDate(job.receive_date)}` : ""}
-                    {job.studio_ref ? ` · Studio ${job.studio_ref}` : ""}
-                  </span>
-                </div>
-                <div className={styles.stripActions}>
-                  {job.stage === "deposit_received" ? (
-                    <button
-                      type="button"
-                      className={styles.navBtn}
-                      disabled={busy}
-                      onClick={() =>
-                        void onAdvanceStage(job.id, { stage: "job_check" })
-                      }
-                    >
-                      Job check
-                    </button>
-                  ) : null}
-                  {job.stage === "job_check" ? (
-                    <button
-                      type="button"
-                      className={styles.navBtn}
-                      disabled={busy}
-                      onClick={() => void onAdvanceStage(job.id, { stage: "ordered" })}
-                    >
-                      Ordered
-                    </button>
-                  ) : null}
-                  <input
-                    className={styles.receiveInput}
-                    type="date"
-                    value={receiveDraft[job.id] ?? job.receive_date ?? ""}
-                    onChange={(e) =>
-                      setReceiveDraft((m) => ({ ...m, [job.id]: e.target.value }))
-                    }
-                    aria-label="Receive date"
-                  />
-                  <button
-                    type="button"
-                    className={styles.navBtn}
-                    disabled={busy || !(receiveDraft[job.id] ?? job.receive_date)}
-                    onClick={() =>
-                      void onAdvanceStage(job.id, {
-                        receive_date: receiveDraft[job.id] ?? job.receive_date,
-                        stage: job.stage === "deposit_received" ? "ordered" : job.stage,
-                      })
-                    }
-                  >
-                    Save receive
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.assignBtn}
-                    disabled={busy}
-                    onClick={() => {
-                      setScheduleJob(job);
-                      setScheduleInstaller("");
-                      setScheduleAt("");
-                    }}
-                  >
-                    Schedule install
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
       <div className={styles.shell}>
         <aside className={styles.sidebar}>
+          <p className={styles.sideGroup}>Queues</p>
+          <button
+            type="button"
+            className={styles.queueToggle}
+            onClick={() => setShowQueues((v) => !v)}
+          >
+            {showQueues ? "Hide" : "Show"} sold / ready ({awaitingDeposit.length + readyToSchedule.length})
+          </button>
+
           <p className={styles.sideGroup}>All calendars</p>
           <label className={styles.check}>
             <input
@@ -526,6 +419,132 @@ export default function OpsInstallCalendar({
           )}
         </div>
       </div>
+
+      {showQueues ? (
+        <>
+          {awaitingDeposit.length > 0 ? (
+            <section className={styles.strip}>
+              <div className={styles.stripHead}>
+                <h3 className={styles.stripTitle}>Sold / awaiting deposit</h3>
+                <span className={styles.stripCount}>{awaitingDeposit.length}</span>
+              </div>
+              <ul className={styles.stripList}>
+                {awaitingDeposit.slice(0, 8).map((job) => (
+                  <li key={job.id} className={styles.stripItem}>
+                    <div>
+                      <strong>{job.client?.name ?? "Client"}</strong>
+                      <span>
+                        {dollars(job.contract_cents)} · {job.designer?.name ?? "—"} ·{" "}
+                        {(job.deposit_intake_status ?? "pending").replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <a className={styles.stripLink} href="/inspired-closets/ops/billing">
+                      Open Billing
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className={styles.strip}>
+            <div className={styles.stripHead}>
+              <h3 className={styles.stripTitle}>Ready to schedule</h3>
+              <span className={styles.stripCount}>{readyToSchedule.length}</span>
+            </div>
+            {readyToSchedule.length === 0 ? (
+              <p className={styles.stripEmpty}>
+                No deposit-paid jobs waiting. After Billing marks 50% paid, they land here.
+              </p>
+            ) : (
+              <ul className={styles.stripList}>
+                {readyToSchedule.slice(0, 8).map((job) => (
+                  <li key={job.id} className={styles.stripItemReady}>
+                    <div>
+                      <strong>{job.client?.name ?? "Client"}</strong>
+                      <span>
+                        {dollars(job.contract_cents)} · {job.designer?.name ?? "—"} ·{" "}
+                        {job.jobCheckOwner?.name ?? "No job-check owner"}
+                        {job.tentative_install_notes
+                          ? ` · ${job.tentative_install_notes}`
+                          : ""}
+                      </span>
+                      <span className={styles.stripMeta}>
+                        Stage: {(job.stage ?? "").replace(/_/g, " ")}
+                        {job.receive_date ? ` · Receive ${shortDate(job.receive_date)}` : ""}
+                        {job.studio_ref ? ` · Studio ${job.studio_ref}` : ""}
+                      </span>
+                    </div>
+                    <div className={styles.stripActions}>
+                      {job.stage === "deposit_received" ? (
+                        <button
+                          type="button"
+                          className={styles.navBtn}
+                          disabled={busy}
+                          onClick={() =>
+                            void onAdvanceStage(job.id, { stage: "job_check" })
+                          }
+                        >
+                          Job check
+                        </button>
+                      ) : null}
+                      {job.stage === "job_check" ? (
+                        <button
+                          type="button"
+                          className={styles.navBtn}
+                          disabled={busy}
+                          onClick={() => void onAdvanceStage(job.id, { stage: "ordered" })}
+                        >
+                          Ordered
+                        </button>
+                      ) : null}
+                      <input
+                        className={styles.receiveInput}
+                        type="date"
+                        value={receiveDraft[job.id] ?? job.receive_date ?? ""}
+                        onChange={(e) =>
+                          setReceiveDraft((m) => ({ ...m, [job.id]: e.target.value }))
+                        }
+                        aria-label="Receive date"
+                      />
+                      <button
+                        type="button"
+                        className={styles.navBtn}
+                        disabled={busy || !(receiveDraft[job.id] ?? job.receive_date)}
+                        onClick={() =>
+                          void onAdvanceStage(job.id, {
+                            receive_date: receiveDraft[job.id] ?? job.receive_date,
+                            stage: job.stage === "deposit_received" ? "ordered" : job.stage,
+                          })
+                        }
+                      >
+                        Save receive
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.assignBtn}
+                        disabled={busy}
+                        onClick={() => {
+                          setScheduleJob(job);
+                          setScheduleInstaller("");
+                          setScheduleAt("");
+                        }}
+                      >
+                        Schedule install
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {readyToSchedule.length > 8 ? (
+              <p className={styles.stripEmpty}>
+                Showing 8 of {readyToSchedule.length}. Schedule from Billing-paid jobs above.
+              </p>
+            ) : null}
+          </section>
+        </>
+      ) : null}
 
       {selected ? (
         <div

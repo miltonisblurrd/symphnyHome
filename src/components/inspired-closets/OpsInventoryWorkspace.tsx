@@ -149,6 +149,10 @@ export default function OpsInventoryWorkspace() {
   const [jobMaterialTotal, setJobMaterialTotal] = useState<number | null>(null);
   const [importCsv, setImportCsv] = useState("");
   const [importing, setImporting] = useState(false);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  const [showAttention, setShowAttention] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -323,10 +327,16 @@ export default function OpsInventoryWorkspace() {
         throw new Error(raw.slice(0, 160) || "Movement failed.");
       }
       if (!payload.ok) throw new Error(payload.error ?? "Movement failed.");
-      setMoveForm({ type: moveForm.type, qty: "", job_id: moveForm.job_id, note: "" });
+      setMoveForm({ type: moveForm.type, qty: "", job_id: "", note: "" });
+      setMoveModalOpen(false);
       setNotice({
         kind: "info",
-        text: `${moveForm.type} recorded for ${selectedPart?.sku ?? "part"}.`,
+        text:
+          moveForm.type === "receive"
+            ? `Received ${qty} × ${selectedPart?.sku ?? "part"}. Stock is up to date.`
+            : moveForm.type === "allocate"
+              ? `${qty} × ${selectedPart?.sku ?? "part"} put on the job. Materials cost updated.`
+              : `${moveForm.type} recorded for ${selectedPart?.sku ?? "part"}.`,
       });
       await load();
       if (selectedPartId) {
@@ -452,7 +462,7 @@ export default function OpsInventoryWorkspace() {
   return (
     <OpsShell
       title="Inventory"
-      subtitle="Frank’s warehouse · stop over-ordering · allocate parts to jobs"
+      subtitle="What’s on the shelf, what’s promised to jobs, what to reorder"
       actions={
         <button
           type="button"
@@ -470,39 +480,102 @@ export default function OpsInventoryWorkspace() {
         </p>
       ) : null}
 
-      <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.5rem" }}>
-          One-time warehouse upload — then only receive and allocate
-        </p>
-        <p className={styles.empty} style={{ marginTop: 0 }}>
-          Brian counts the shelf, pastes the CSV. Size is required so 18&quot; and 21&quot; slides
-          cannot get mixed up.{" "}
-          <a href="/api/inspired-closets/ops/inventory/import">Download count sheet</a>.
-        </p>
-        <textarea
-          className={styles.input}
-          rows={5}
-          value={importCsv}
-          onChange={(e) => setImportCsv(e.target.value)}
-          placeholder="sku,name,size,category,location,qty,unit_cost,reorder_point,vendor"
-          style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
-        />
-        <div className={styles.formActions}>
-          <button
-            type="button"
-            className={styles.buttonPrimary}
-            disabled={importing || !importCsv.trim()}
-            onClick={() => void runImport()}
+      {!loading && parts.length === 0 && !query.trim() && filter === "all" ? (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.15rem" }}>
+            Start here: load what’s in the warehouse
+          </h2>
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            One time only. Count the shelves, fill the sheet, paste it below. After this, the
+            only daily work is <strong>Receive</strong> when stock arrives and{" "}
+            <strong>To job</strong> when parts are pulled.
+          </p>
+          <ol style={{ margin: "0 0 0.85rem", paddingLeft: "1.25rem", fontSize: "0.9rem" }}>
+            <li style={{ marginBottom: "0.3rem" }}>
+              <a href="/api/inspired-closets/ops/inventory/import">
+                Download the count sheet
+              </a>{" "}
+              (opens in Excel / Numbers / Google Sheets)
+            </li>
+            <li style={{ marginBottom: "0.3rem" }}>
+              Walk the warehouse — one row per part <strong>per size</strong> (18&quot; and
+              21&quot; slides are two rows)
+            </li>
+            <li>Copy the rows and paste them here, then hit Import</li>
+          </ol>
+          <textarea
+            className={styles.input}
+            rows={6}
+            value={importCsv}
+            onChange={(e) => setImportCsv(e.target.value)}
+            placeholder={"sku,name,size,category,location,qty,unit_cost,reorder_point,vendor\nUM-21,Undermount slide,21 in,drawer_slides,A12,12,8.50,4,Stow"}
+            style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
+          />
+          <div className={styles.formActions}>
+            <button
+              type="button"
+              className={styles.buttonPrimary}
+              disabled={importing || !importCsv.trim()}
+              onClick={() => void runImport()}
+            >
+              {importing ? "Importing…" : "Import count"}
+            </button>
+            <button
+              type="button"
+              className={styles.buttonGhost}
+              onClick={() => setShowSetup((v) => !v)}
+            >
+              {showSetup ? "Hide single-part form" : "Or add one part by hand"}
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.75rem",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
           >
-            {importing ? "Importing…" : "Import count"}
-          </button>
-        </div>
-      </section>
+            <p style={{ margin: 0, fontSize: "0.95rem" }}>
+              <strong>Two jobs on this page:</strong> stock arrives →{" "}
+              <strong>Receive</strong>. Parts pulled for a client →{" "}
+              <strong>To job</strong>. Find the part, hit the button on its row.
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setShowAttention((v) => !v)}
+              >
+                {showAttention ? "Hide" : "Needs attention"}
+                {attention
+                  ? ` (${
+                      attention.lowStock.length +
+                      attention.missingMaterials.length +
+                      (attention.unstagedInstalls ?? []).length
+                    })`
+                  : ""}
+              </button>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setShowSetup((v) => !v)}
+              >
+                {showSetup ? "Hide setup" : "Add parts / upload count"}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
-      {attention ? (
+      {showAttention && attention ? (
         <section className={styles.panel} style={{ marginBottom: "1rem" }}>
           <p className={styles.subtitle} style={{ marginBottom: "0.65rem" }}>
-            Gavin / Frank · money leaks
+            Needs attention · what’s leaking money
           </p>
           <div className={styles.summaryRow}>
             <span>
@@ -596,6 +669,36 @@ export default function OpsInventoryWorkspace() {
         </section>
       ) : null}
 
+      {showSetup && !(parts.length === 0 && !query.trim() && filter === "all") ? (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <p className={styles.subtitle} style={{ marginBottom: "0.5rem" }}>
+            Upload more counts (same sheet as the first upload)
+          </p>
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            <a href="/api/inspired-closets/ops/inventory/import">Download count sheet</a> ·
+            re-uploading a SKU trues up its count, it never duplicates.
+          </p>
+          <textarea
+            className={styles.input}
+            rows={4}
+            value={importCsv}
+            onChange={(e) => setImportCsv(e.target.value)}
+            placeholder="sku,name,size,category,location,qty,unit_cost,reorder_point,vendor"
+            style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
+          />
+          <div className={styles.formActions}>
+            <button
+              type="button"
+              className={styles.buttonPrimary}
+              disabled={importing || !importCsv.trim()}
+              onClick={() => void runImport()}
+            >
+              {importing ? "Importing…" : "Import count"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <nav className={styles.tabs}>
         {(
           [
@@ -633,12 +736,12 @@ export default function OpsInventoryWorkspace() {
         </div>
 
         <label className={styles.field} style={{ marginBottom: "0.85rem", maxWidth: "24rem" }}>
-          <span className={styles.fieldLabel}>Search SKU / name / bin / barcode</span>
+          <span className={styles.fieldLabel}>Find a part</span>
           <input
             className={styles.input}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="e.g. drawer slide, A12, STOW-"
+            placeholder="Type the name, size, or bin — e.g. undermount 21"
           />
         </label>
 
@@ -646,74 +749,96 @@ export default function OpsInventoryWorkspace() {
           <p className={styles.empty}>Loading inventory…</p>
         ) : parts.length === 0 ? (
           <p className={styles.empty}>
-            No parts yet. Add the first SKU below — receive stock, then allocate to jobs so you
-            stop reordering what’s already here.
+            {query.trim()
+              ? "No parts match that search."
+              : "Nothing here yet — use the Start here box above to load the warehouse count."}
           </p>
         ) : (
           <table className={styles.table}>
             <thead>
               <tr>
-                <th></th>
-                <th>SKU</th>
-                <th>Name</th>
+                <th>Part</th>
                 <th>Size</th>
-                <th>Category</th>
                 <th>Bin</th>
+                <th>Available</th>
                 <th>On hand</th>
-                <th>Reserved</th>
-                <th>Avail</th>
-                <th>Reorder @</th>
-                <th>Unit cost</th>
-                <th>Value</th>
-                <th>Flags</th>
-                <th></th>
+                <th>On jobs</th>
+                <th>Status</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {parts.map((part) => {
                 const low = part.qty_on_hand <= part.reorder_point;
+                const avail = Math.max(0, part.qty_on_hand - part.qty_reserved);
                 return (
                   <tr
                     key={part.id}
                     className={low || part.is_excess ? styles.rowHeld : undefined}
                   >
                     <td>
-                      <input
-                        type="radio"
-                        name="selectedPart"
-                        checked={selectedPartId === part.id}
-                        onChange={() => setSelectedPartId(part.id)}
-                        aria-label={`Select ${part.sku}`}
-                      />
+                      <strong>{part.sku}</strong>
+                      <div style={{ fontSize: "0.8rem", opacity: 0.75 }}>{part.name}</div>
                     </td>
-                    <td>{part.sku}</td>
-                    <td>{part.name}</td>
                     <td>{part.size ?? "—"}</td>
-                    <td>{part.category}</td>
                     <td>{part.location ?? "—"}</td>
+                    <td>
+                      <strong>{avail}</strong>
+                    </td>
                     <td className={low ? styles.marginBelow : undefined}>{part.qty_on_hand}</td>
                     <td>{part.qty_reserved}</td>
-                    <td>{Math.max(0, part.qty_on_hand - part.qty_reserved)}</td>
-                    <td>{part.reorder_point}</td>
-                    <td>{centsToDisplay(part.unit_cost_cents)}</td>
-                    <td>{centsToDisplay(part.qty_on_hand * part.unit_cost_cents)}</td>
                     <td>
                       {low ? (
-                        <span className={`${styles.statusBadge} ${styles.statusHeld}`}>low</span>
+                        <span className={`${styles.statusBadge} ${styles.statusHeld}`}>
+                          order more
+                        </span>
                       ) : null}{" "}
                       {part.is_excess ? (
                         <span className={`${styles.statusBadge} ${styles.statusPayable}`}>
                           excess
                         </span>
                       ) : null}
+                      {!low && !part.is_excess ? (
+                        <span style={{ fontSize: "0.8rem", opacity: 0.6 }}>ok</span>
+                      ) : null}
                     </td>
-                    <td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        type="button"
+                        className={styles.buttonPrimary}
+                        style={{ marginRight: "0.35rem" }}
+                        onClick={() => {
+                          setSelectedPartId(part.id);
+                          setMoveForm({ type: "receive", qty: "", job_id: "", note: "" });
+                          setMoveModalOpen(true);
+                          setDetailOpen(false);
+                        }}
+                      >
+                        + Receive
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.buttonPrimary}
+                        style={{ marginRight: "0.35rem" }}
+                        onClick={() => {
+                          setSelectedPartId(part.id);
+                          setMoveForm({ type: "allocate", qty: "", job_id: "", note: "" });
+                          setMoveModalOpen(true);
+                          setDetailOpen(false);
+                        }}
+                      >
+                        → To job
+                      </button>
                       <button
                         type="button"
                         className={styles.buttonGhost}
-                        onClick={() => void toggleExcess(part)}
+                        onClick={() => {
+                          setSelectedPartId(part.id);
+                          setDetailOpen(selectedPartId === part.id ? !detailOpen : true);
+                          setMoveModalOpen(false);
+                        }}
                       >
-                        {part.is_excess ? "Clear excess" : "Mark excess"}
+                        Details
                       </button>
                     </td>
                   </tr>
@@ -723,85 +848,111 @@ export default function OpsInventoryWorkspace() {
           </table>
         )}
 
-        <form className={styles.formGrid} onSubmit={runMovement}>
-          <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-            Stock movement {selectedPart ? `· ${selectedPart.sku}` : "· select a part above"}
-          </p>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Action</span>
-            <select
-              className={styles.input}
-              value={moveForm.type}
-              onChange={(event) =>
-                setMoveForm({
-                  ...moveForm,
-                  type: event.target.value as typeof moveForm.type,
-                })
-              }
+        {moveModalOpen && selectedPart ? (
+          <form
+            className={styles.formGrid}
+            onSubmit={runMovement}
+            style={{
+              marginTop: "1rem",
+              padding: "1rem",
+              border: "2px solid currentColor",
+              borderRadius: "0.75rem",
+            }}
+          >
+            <p
+              className={styles.fieldLabel}
+              style={{ gridColumn: "1 / -1", margin: 0, fontSize: "0.95rem" }}
             >
-              <option value="receive">Receive (stock in)</option>
-              <option value="allocate">Allocate to job</option>
-              <option value="return">Return from job</option>
-              <option value="adjust">Adjust count (+/-)</option>
-              <option value="scrap">Scrap / damaged</option>
-              <option value="sell_excess">Sell excess</option>
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Qty</span>
-            <input
-              className={styles.input}
-              value={moveForm.qty}
-              onChange={(event) => setMoveForm({ ...moveForm, qty: event.target.value })}
-              placeholder={moveForm.type === "adjust" ? "+5 or -2" : "1"}
-              required
-            />
-          </label>
-          {(moveForm.type === "allocate" || moveForm.type === "return") && (
+              {moveForm.type === "receive"
+                ? `Receiving stock · ${selectedPart.sku}`
+                : moveForm.type === "allocate"
+                  ? `Sending to a job · ${selectedPart.sku} (${Math.max(
+                      0,
+                      selectedPart.qty_on_hand - selectedPart.qty_reserved,
+                    )} available)`
+                  : `${moveForm.type} · ${selectedPart.sku}`}
+              {selectedPart.size ? ` · ${selectedPart.size}` : ""}
+            </p>
             <label className={styles.field}>
-              <span className={styles.fieldLabel}>Job</span>
+              <span className={styles.fieldLabel}>What happened?</span>
               <select
                 className={styles.input}
-                value={moveForm.job_id}
-                onChange={(event) => setMoveForm({ ...moveForm, job_id: event.target.value })}
-                required
+                value={moveForm.type}
+                onChange={(event) =>
+                  setMoveForm({
+                    ...moveForm,
+                    type: event.target.value as typeof moveForm.type,
+                  })
+                }
               >
-                <option value="">Select open job…</option>
-                {jobs.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {job.client?.name ?? "Client"} · {job.stage}
-                  </option>
-                ))}
+                <option value="receive">Stock arrived (receive)</option>
+                <option value="allocate">Pulled for a job (allocate)</option>
+                <option value="return">Came back from a job (return)</option>
+                <option value="adjust">Fix the count (+/-)</option>
+                <option value="scrap">Damaged / scrap</option>
+                <option value="sell_excess">Sold excess</option>
               </select>
             </label>
-          )}
-          {jobMaterialTotal != null ? (
-            <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-              Materials on this job so far:{" "}
-              <span className={styles.summaryStrong}>{centsToDisplay(jobMaterialTotal)}</span>
-            </p>
-          ) : null}
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Note</span>
-            <input
-              className={styles.input}
-              value={moveForm.note}
-              onChange={(event) => setMoveForm({ ...moveForm, note: event.target.value })}
-              placeholder="Pallet #, Stow invoice, staging note…"
-            />
-          </label>
-          <div className={styles.formActions}>
-            <button
-              type="submit"
-              className={styles.buttonPrimary}
-              disabled={saving || !selectedPartId}
-            >
-              {saving ? "Saving…" : "Record movement"}
-            </button>
-          </div>
-        </form>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>How many?</span>
+              <input
+                className={styles.input}
+                value={moveForm.qty}
+                onChange={(event) => setMoveForm({ ...moveForm, qty: event.target.value })}
+                placeholder={moveForm.type === "adjust" ? "+5 or -2" : "1"}
+                autoFocus
+                required
+              />
+            </label>
+            {(moveForm.type === "allocate" || moveForm.type === "return") && (
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Which job?</span>
+                <select
+                  className={styles.input}
+                  value={moveForm.job_id}
+                  onChange={(event) => setMoveForm({ ...moveForm, job_id: event.target.value })}
+                  required
+                >
+                  <option value="">Select open job…</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.client?.name ?? "Client"} · {job.stage}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {jobMaterialTotal != null ? (
+              <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                Materials on this job so far:{" "}
+                <span className={styles.summaryStrong}>{centsToDisplay(jobMaterialTotal)}</span>
+              </p>
+            ) : null}
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Note (optional)</span>
+              <input
+                className={styles.input}
+                value={moveForm.note}
+                onChange={(event) => setMoveForm({ ...moveForm, note: event.target.value })}
+                placeholder="Pallet #, Stow invoice…"
+              />
+            </label>
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.buttonPrimary} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setMoveModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
 
-        {selectedPart ? (
+        {detailOpen && selectedPart ? (
           <>
             <form className={styles.formGrid} onSubmit={savePartEdit}>
               <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
@@ -872,6 +1023,20 @@ export default function OpsInventoryWorkspace() {
                 <button type="submit" className={styles.buttonPrimary} disabled={saving}>
                   Save part
                 </button>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => void toggleExcess(selectedPart)}
+                >
+                  {selectedPart.is_excess ? "Clear excess flag" : "Mark as excess / dead stock"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setDetailOpen(false)}
+                >
+                  Close details
+                </button>
               </div>
             </form>
 
@@ -907,10 +1072,11 @@ export default function OpsInventoryWorkspace() {
           </>
         ) : null}
 
-        <form className={styles.formGrid} onSubmit={addPart}>
-          <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-            Add part to catalog
-          </p>
+        {showSetup ? (
+          <form className={styles.formGrid} onSubmit={addPart}>
+            <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+              Add one part by hand
+            </p>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>SKU</span>
             <input
@@ -1028,7 +1194,8 @@ export default function OpsInventoryWorkspace() {
               {saving ? "Saving…" : "Add part"}
             </button>
           </div>
-        </form>
+          </form>
+        ) : null}
       </section>
     </OpsShell>
   );

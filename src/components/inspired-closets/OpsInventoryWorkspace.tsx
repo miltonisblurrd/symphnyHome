@@ -218,6 +218,15 @@ export default function OpsInventoryWorkspace() {
   }, [selectedPart]);
 
   useEffect(() => {
+    if (!detailOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailOpen]);
+
+  useEffect(() => {
     if (!selectedPartId) {
       setMovements([]);
       return;
@@ -976,15 +985,40 @@ export default function OpsInventoryWorkspace() {
         ) : null}
 
         {detailOpen && selectedPart ? (
-          <>
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setDetailOpen(false)}
+          >
+            <div
+              className={styles.modal}
+              role="dialog"
+              aria-label={`Details ${selectedPart.sku}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className={styles.modalHead}>
+                <div>
+                  <h3 className={styles.modalTitle}>
+                    {selectedPart.sku}
+                    {selectedPart.size ? ` · ${selectedPart.size}` : ""}
+                  </h3>
+                  <p className={styles.modalSub}>
+                    {selectedPart.name} · available{" "}
+                    {Math.max(0, selectedPart.qty_on_hand - selectedPart.qty_reserved)} · on
+                    hand {selectedPart.qty_on_hand} · on jobs {selectedPart.qty_reserved} ·{" "}
+                    {centsToDisplay(selectedPart.qty_on_hand * selectedPart.unit_cost_cents)} on
+                    shelf
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setDetailOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
             <form className={styles.formGrid} onSubmit={savePartEdit}>
-              <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-                Edit part · {selectedPart.sku}
-                {selectedPart.size ? ` · ${selectedPart.size}` : ""} · reserved{" "}
-                {selectedPart.qty_reserved} · available{" "}
-                {Math.max(0, selectedPart.qty_on_hand - selectedPart.qty_reserved)} · on-hand
-                value {centsToDisplay(selectedPart.qty_on_hand * selectedPart.unit_cost_cents)}
-              </p>
               <label className={styles.field}>
                 <span className={styles.fieldLabel}>Size</span>
                 <input
@@ -1053,13 +1087,6 @@ export default function OpsInventoryWorkspace() {
                 >
                   {selectedPart.is_excess ? "Clear excess flag" : "Mark as excess / dead stock"}
                 </button>
-                <button
-                  type="button"
-                  className={styles.buttonGhost}
-                  onClick={() => setDetailOpen(false)}
-                >
-                  Close details
-                </button>
               </div>
             </form>
 
@@ -1092,7 +1119,8 @@ export default function OpsInventoryWorkspace() {
                 </table>
               )}
             </div>
-          </>
+            </div>
+          </div>
         ) : null}
 
         {showSetup ? (

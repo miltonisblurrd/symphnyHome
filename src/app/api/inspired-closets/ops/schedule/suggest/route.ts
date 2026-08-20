@@ -85,15 +85,15 @@ export async function POST(request: Request) {
         estimatedInstallDays: Number(job.estimated_install_days) || 1,
         serviceTag,
         contractCents: Number(job.contract_cents) || 0,
-        include:
-          inWindow ||
-          (!installDate &&
-            (["deposit_received", "job_check", "ordered"].includes(String(job.stage)) ||
-              Boolean(serviceTag))),
       };
     })
-    .filter((job) => job.include)
-    .map(({ include: _include, ...job }) => job);
+    .filter((job) => {
+      if (job.installDate) return true;
+      return (
+        ["deposit_received", "job_check", "ordered"].includes(job.stage) ||
+        Boolean(job.serviceTag)
+      );
+    });
 
   const result = suggestInstallSchedule({
     from,

@@ -315,7 +315,7 @@ export async function POST(request: Request) {
       })
       .eq("id", jobId);
 
-    const [{ data: jobRow }, { data: installerRow }, { data: clientRow }] = await Promise.all([
+    const [{ data: jobRow }, { data: installerRow }] = await Promise.all([
       supabase
         .from("ic_jobs")
         .select("contract_cents, client_id")
@@ -324,7 +324,6 @@ export async function POST(request: Request) {
       installerId
         ? supabase.from("ic_staff").select("name").eq("id", installerId).maybeSingle()
         : Promise.resolve({ data: null }),
-      Promise.resolve({ data: null as { name: string } | null }),
     ]);
     let clientName = "Client";
     const clientLookupId = resolvedClientId ?? jobRow?.client_id ?? null;

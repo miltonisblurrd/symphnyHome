@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
+import { isDbConfigured } from "@/db/client";
 import {
   IMPORT_TEMPLATE_CSV,
   importParts,

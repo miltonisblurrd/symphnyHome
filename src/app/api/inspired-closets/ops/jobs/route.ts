@@ -243,11 +243,9 @@ export async function PATCH(request: Request) {
     .single();
   if (updateError) {
     if (/column|schema cache/i.test(updateError.message)) {
-      const {
-        crew_size: _c,
-        estimated_install_days: _d,
-        ...base
-      } = update;
+      const base = { ...update };
+      delete base.crew_size;
+      delete base.estimated_install_days;
       const retry = await supabase.from("ic_jobs").update(base).eq("id", id).select("*").single();
       if (retry.error) {
         return NextResponse.json({ ok: false, error: retry.error.message }, { status: 500 });

@@ -257,7 +257,8 @@ export async function importParts(
         const { error } = await supabase.from("ic_parts").update(patch).eq("id", existing.id);
         if (error) {
           if (/column.*size/i.test(error.message)) {
-            const { size: _size, ...withoutSize } = patch;
+            const { size, ...withoutSize } = patch;
+            void size;
             const retry = await supabase.from("ic_parts").update(withoutSize).eq("id", existing.id);
             if (retry.error) throw retry.error;
           } else {

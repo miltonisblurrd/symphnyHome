@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import styles from "./ops-payroll.module.css";
 
@@ -149,6 +149,7 @@ export default function OpsInventoryWorkspace() {
   const [jobMaterialTotal, setJobMaterialTotal] = useState<number | null>(null);
   const [importCsv, setImportCsv] = useState("");
   const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
@@ -424,23 +425,47 @@ export default function OpsInventoryWorkspace() {
     }
   }
 
-  async function runImport() {
-    if (!importCsv.trim()) return;
+  async function runImport(source?: { text?: string; file?: File }) {
+    const file = source?.file;
+    const text = (source?.text ?? importCsv).trim();
+    if (!file && !text) {
+      setNotice({
+        kind: "error",
+        text: "Choose the Excel file, or copy the Warehouse count tab and paste it first.",
+      });
+      return;
+    }
     setImporting(true);
     setNotice(null);
     try {
-      const response = await fetch("/api/inspired-closets/ops/inventory/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: importCsv }),
-      });
-      const payload = (await response.json()) as {
+      let response: Response;
+      if (file) {
+        const body = new FormData();
+        body.append("file", file);
+        response = await fetch("/api/inspired-closets/ops/inventory/import", {
+          method: "POST",
+          body,
+        });
+      } else {
+        response = await fetch("/api/inspired-closets/ops/inventory/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv: text }),
+        });
+      }
+      const raw = await response.text();
+      let payload: {
         ok: boolean;
         error?: string;
         created?: number;
         updated?: number;
         errors?: string[];
       };
+      try {
+        payload = JSON.parse(raw) as typeof payload;
+      } catch {
+        throw new Error(raw.slice(0, 180) || "Import failed.");
+      }
       if (!payload.ok) throw new Error(payload.error ?? "Import failed.");
       const extra = payload.errors?.length ? ` · ${payload.errors.length} row errors` : "";
       setNotice({
@@ -457,6 +482,50 @@ export default function OpsInventoryWorkspace() {
     } finally {
       setImporting(false);
     }
+  }
+
+  function importControls() {
+    return (
+      <>
+        <input
+          ref={importFileRef}
+          type="file"
+          accept=".xlsx,.xls,.xlsm,.csv,text/csv"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void runImport({ file });
+          }}
+        />
+        <textarea
+          className={styles.input}
+          rows={5}
+          value={importCsv}
+          onChange={(e) => setImportCsv(e.target.value)}
+          placeholder="Or paste here from Excel — copy the Warehouse count tab, including the header row"
+          style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
+        />
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={importing}
+            onClick={() => importFileRef.current?.click()}
+          >
+            {importing ? "Importing…" : "Choose Excel / CSV"}
+          </button>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={importing}
+            onClick={() => void runImport()}
+          >
+            {importing ? "Importing…" : "Import pasted rows"}
+          </button>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -486,40 +555,12 @@ export default function OpsInventoryWorkspace() {
             Start here: load what’s in the warehouse
           </h2>
           <p className={styles.empty} style={{ marginTop: 0 }}>
-            One time only. Count the shelves, fill the sheet, paste it below. After this, the
-            only daily work is <strong>Receive</strong> when stock arrives and{" "}
+            Hit <strong>Choose Excel / CSV</strong> and pick the warehouse count file. After
+            this, the only daily work is <strong>Receive</strong> when stock arrives and{" "}
             <strong>To job</strong> when parts are pulled.
           </p>
-          <ol style={{ margin: "0 0 0.85rem", paddingLeft: "1.25rem", fontSize: "0.9rem" }}>
-            <li style={{ marginBottom: "0.3rem" }}>
-              <a href="/api/inspired-closets/ops/inventory/import">
-                Download the count sheet
-              </a>{" "}
-              (opens in Excel / Numbers / Google Sheets)
-            </li>
-            <li style={{ marginBottom: "0.3rem" }}>
-              Walk the warehouse — one row per part <strong>per size</strong> (18&quot; and
-              21&quot; slides are two rows)
-            </li>
-            <li>Copy the rows and paste them here, then hit Import</li>
-          </ol>
-          <textarea
-            className={styles.input}
-            rows={6}
-            value={importCsv}
-            onChange={(e) => setImportCsv(e.target.value)}
-            placeholder={"sku,name,size,category,location,qty,unit_cost,reorder_point,vendor\nUM-21,Undermount slide,21 in,drawer_slides,A12,12,8.50,4,Stow"}
-            style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
-          />
+          {importControls()}
           <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={importing || !importCsv.trim()}
-              onClick={() => void runImport()}
-            >
-              {importing ? "Importing…" : "Import count"}
-            </button>
             <button
               type="button"
               className={styles.buttonGhost}
@@ -675,27 +716,9 @@ export default function OpsInventoryWorkspace() {
             Upload more counts (same sheet as the first upload)
           </p>
           <p className={styles.empty} style={{ marginTop: 0 }}>
-            <a href="/api/inspired-closets/ops/inventory/import">Download count sheet</a> ·
-            re-uploading a SKU trues up its count, it never duplicates.
+            Re-uploading a SKU trues up its count — it never duplicates.
           </p>
-          <textarea
-            className={styles.input}
-            rows={4}
-            value={importCsv}
-            onChange={(e) => setImportCsv(e.target.value)}
-            placeholder="sku,name,size,category,location,qty,unit_cost,reorder_point,vendor"
-            style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
-          />
-          <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={importing || !importCsv.trim()}
-              onClick={() => void runImport()}
-            >
-              {importing ? "Importing…" : "Import count"}
-            </button>
-          </div>
+          {importControls()}
         </section>
       ) : null}
 

@@ -198,8 +198,8 @@ export async function importParts(
   const errors: string[] = [];
 
   for (const raw of rows) {
-    const sku = raw.sku.trim().toUpperCase();
-    const name = raw.name.trim();
+    const sku = String(raw.sku ?? "").trim().toUpperCase();
+    const name = String(raw.name ?? "").trim();
     if (!sku || !name) {
       errors.push(`Skipped a row without sku/name.`);
       continue;
@@ -228,18 +228,27 @@ export async function importParts(
       };
 
       if (!existing) {
-        const { data: part, error } = await supabase
+        const insertPayload = {
+          sku,
+          ...patch,
+          qty_on_hand: qty,
+          qty_reserved: 0,
+          created_by: actorId ?? null,
+        };
+        let { data: part, error } = await supabase
           .from("ic_parts")
-          .insert({
-            sku,
-            ...patch,
-            qty_on_hand: qty,
-            qty_reserved: 0,
-            created_by: actorId ?? null,
-          })
+          .insert(insertPayload)
           .select("*")
           .single();
+        if (error && /column.*size/i.test(error.message)) {
+          const { size: _size, ...withoutSize } = insertPayload;
+          void _size;
+          const retry = await supabase.from("ic_parts").insert(withoutSize).select("*").single();
+          part = retry.data;
+          error = retry.error;
+        }
         if (error) throw error;
+        if (!part) throw new Error("Insert returned no part.");
         if (qty > 0) {
           await supabase.from("ic_stock_movements").insert({
             part_id: part.id,

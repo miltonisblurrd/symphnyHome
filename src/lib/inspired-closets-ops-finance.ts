@@ -50,6 +50,17 @@ export type JobProfitRow = {
   laborSource: "override" | "time" | "none";
   laborMinutes: number;
   otherFeesCents: number;
+  /** Manual other_fees on ic_job_financials (before cost lines). */
+  otherFeesBaseCents: number;
+  costLinesCents: number;
+  costLines: Array<{
+    id: string;
+    costType: string;
+    amountCents: number;
+    vendorRef: string | null;
+    note: string | null;
+    createdAt: string;
+  }>;
   commissionCents: number;
   spiffCents: number;
   spiffRecipient: string | null;
@@ -63,6 +74,15 @@ export type JobProfitRow = {
   payrollMarginFinalBp: number | null;
   notes: string | null;
 };
+
+export const JOB_COST_LINE_TYPES = [
+  "stow_invoice",
+  "pallet_fee",
+  "freight",
+  "other",
+] as const;
+
+export type JobCostLineType = (typeof JOB_COST_LINE_TYPES)[number];
 
 function cents(n: number | null | undefined): number {
   return Number.isFinite(n) ? Math.round(n as number) : 0;
@@ -104,6 +124,7 @@ export async function buildFinanceSnapshot(): Promise<{
     { data: timeEntries },
     { data: payroll },
     { data: clients },
+    costLinesResult,
   ] = await Promise.all([
     supabase
       .from("ic_jobs")
@@ -132,7 +153,18 @@ export async function buildFinanceSnapshot(): Promise<{
       .is("deleted_at", null)
       .limit(3000),
     supabase.from("ic_clients").select("id, name").is("deleted_at", null),
+    supabase
+      .from("ic_job_cost_lines")
+      .select("id, job_id, cost_type, amount_cents, vendor_ref, note, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5000),
   ]);
+
+  // Migration 0011 may not be applied yet — ignore missing table.
+  const costLines =
+    costLinesResult.error && /relation|schema cache|does not exist/i.test(costLinesResult.error.message)
+      ? []
+      : costLinesResult.data ?? [];
 
   const clientsById = new Map((clients ?? []).map((c) => [c.id, c.name as string]));
   const finByJob = new Map((financials ?? []).map((f) => [f.job_id as string, f]));
@@ -162,6 +194,31 @@ export async function buildFinanceSnapshot(): Promise<{
     } else if (m.movement_type === "return") {
       materialByJob.set(m.job_id, (materialByJob.get(m.job_id) ?? 0) - Math.abs(qty) * unit);
     }
+  }
+
+  const costLinesByJob = new Map<
+    string,
+    Array<{
+      id: string;
+      costType: string;
+      amountCents: number;
+      vendorRef: string | null;
+      note: string | null;
+      createdAt: string;
+    }>
+  >();
+  for (const line of costLines) {
+    if (!line.job_id) continue;
+    const list = costLinesByJob.get(line.job_id) ?? [];
+    list.push({
+      id: line.id,
+      costType: line.cost_type,
+      amountCents: cents(line.amount_cents),
+      vendorRef: line.vendor_ref ?? null,
+      note: line.note ?? null,
+      createdAt: line.created_at,
+    });
+    costLinesByJob.set(line.job_id, list);
   }
 
   const laborMinutesByJob = new Map<string, number>();
@@ -219,7 +276,10 @@ export async function buildFinanceSnapshot(): Promise<{
       laborSource = "time";
     }
 
-    const otherFeesCents = cents(fin?.other_fees_cents);
+    const jobCostLines = costLinesByJob.get(job.id) ?? [];
+    const costLinesCents = jobCostLines.reduce((sum, line) => sum + line.amountCents, 0);
+    const otherFeesBaseCents = cents(fin?.other_fees_cents);
+    const otherFeesCents = otherFeesBaseCents + costLinesCents;
     const spiffCents = cents(fin?.spiff_cents);
     const commissionCents = cents(pr?.check_cents);
     const contractCents = cents(job.contract_cents);
@@ -252,6 +312,9 @@ export async function buildFinanceSnapshot(): Promise<{
       laborSource,
       laborMinutes,
       otherFeesCents,
+      otherFeesBaseCents,
+      costLinesCents,
+      costLines: jobCostLines,
       commissionCents,
       spiffCents,
       spiffRecipient: fin?.spiff_recipient ?? null,
@@ -475,6 +538,57 @@ export async function upsertJobFinancials(
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function addJobCostLine(input: {
+  jobId: string;
+  costType: string;
+  amountCents: number;
+  vendorRef?: string | null;
+  note?: string | null;
+  actorId?: string | null;
+}) {
+  if (!JOB_COST_LINE_TYPES.includes(input.costType as JobCostLineType)) {
+    throw new Error("cost_type must be stow_invoice, pallet_fee, freight, or other.");
+  }
+  if (!Number.isFinite(input.amountCents) || input.amountCents === 0) {
+    throw new Error("amount_cents must be a non-zero number.");
+  }
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("ic_job_cost_lines")
+    .insert({
+      job_id: input.jobId,
+      cost_type: input.costType,
+      amount_cents: Math.round(input.amountCents),
+      vendor_ref: input.vendorRef ?? null,
+      note: input.note ?? null,
+      created_by: input.actorId ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    if (/relation|schema cache|does not exist/i.test(error.message)) {
+      throw new Error(
+        "Job cost lines table missing — run drizzle/0011_ic_job_cost_lines.sql in Supabase.",
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  await supabase.from("ic_activity_log").insert({
+    entity_type: "job",
+    entity_id: input.jobId,
+    action: "job_cost_line_added",
+    actor_id: input.actorId ?? null,
+    changes: {
+      cost_type: input.costType,
+      amount_cents: input.amountCents,
+      vendor_ref: input.vendorRef ?? null,
+    },
+  });
+
   return data;
 }
 

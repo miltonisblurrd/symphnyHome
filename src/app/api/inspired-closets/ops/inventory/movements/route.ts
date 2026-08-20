@@ -15,6 +15,8 @@ const VALID_TYPES = new Set<IcStockMovementType>([
   "adjust",
   "scrap",
   "sell_excess",
+  "reserve",
+  "unreserve",
 ]);
 
 export async function GET(request: Request) {
@@ -41,7 +43,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, movements: data ?? [] });
+  let movements = data ?? [];
+  if (jobId && movements.length > 0) {
+    const partIds = [...new Set(movements.map((m) => m.part_id).filter(Boolean))];
+    const { data: parts } = await supabase
+      .from("ic_parts")
+      .select("id, sku, name, unit_cost_cents")
+      .in("id", partIds);
+    const byId = new Map((parts ?? []).map((p) => [p.id, p]));
+    movements = movements.map((m) => ({
+      ...m,
+      part: byId.get(m.part_id) ?? null,
+    }));
+  }
+
+  return NextResponse.json({ ok: true, movements });
 }
 
 export async function POST(request: Request) {

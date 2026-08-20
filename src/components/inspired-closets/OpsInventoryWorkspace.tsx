@@ -8,6 +8,7 @@ type Part = {
   id: string;
   sku: string;
   name: string;
+  size: string | null;
   category: string;
   location: string | null;
   barcode: string | null;
@@ -27,6 +28,50 @@ type JobOption = {
   stage: string;
 };
 
+type Movement = {
+  id: string;
+  part_id: string;
+  job_id: string | null;
+  movement_type: string;
+  qty: number;
+  unit_cost_cents: number | null;
+  note: string | null;
+  created_at: string;
+};
+
+type Attention = {
+  lowStock: Array<{
+    id: string;
+    sku: string;
+    name: string;
+    qty_on_hand: number;
+    reorder_point: number;
+    value_cents: number;
+  }>;
+  excessCount: number;
+  excessValueCents: number;
+  unallocatedReceives: Array<{
+    part_id: string;
+    sku: string;
+    name: string;
+    qty: number;
+    created_at: string;
+  }>;
+  missingMaterials: Array<{
+    id: string;
+    stage: string;
+    install_date: string | null;
+    contract_cents: number;
+    client_name: string;
+  }>;
+  unstagedInstalls?: Array<{
+    id: string;
+    client_name: string;
+    install_date: string | null;
+    unstaged: number;
+  }>;
+};
+
 type ApiResponse = {
   ok: boolean;
   error?: string;
@@ -40,6 +85,8 @@ type ApiResponse = {
     valueCents: number;
   };
   jobs?: JobOption[];
+  movements?: Movement[];
+  attention?: Attention;
 };
 
 function centsToDisplay(cents: number): string {
@@ -54,6 +101,7 @@ function dollarsInputToCents(value: string): number {
 const EMPTY_PART = {
   sku: "",
   name: "",
+  size: "",
   category: "hardware",
   location: "",
   qty: "",
@@ -87,6 +135,20 @@ export default function OpsInventoryWorkspace() {
     note: "",
   });
   const [saving, setSaving] = useState(false);
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [attention, setAttention] = useState<Attention | null>(null);
+  const [editForm, setEditForm] = useState({
+    location: "",
+    barcode: "",
+    unit_cost: "",
+    reorder_point: "",
+    vendor: "",
+    notes: "",
+    size: "",
+  });
+  const [jobMaterialTotal, setJobMaterialTotal] = useState<number | null>(null);
+  const [importCsv, setImportCsv] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,12 +157,14 @@ export default function OpsInventoryWorkspace() {
       if (filter !== "all") params.set("filter", filter);
       if (query.trim()) params.set("q", query.trim());
 
-      const [partsRes, jobsRes] = await Promise.all([
+      const [partsRes, jobsRes, attentionRes] = await Promise.all([
         fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`),
         fetch("/api/inspired-closets/ops/jobs"),
+        fetch("/api/inspired-closets/ops/inventory/attention"),
       ]);
       const partsPayload = (await partsRes.json()) as ApiResponse;
       const jobsPayload = (await jobsRes.json()) as ApiResponse;
+      const attentionPayload = (await attentionRes.json()) as ApiResponse;
       if (!partsPayload.ok) throw new Error(partsPayload.error ?? "Failed to load parts.");
       setParts(partsPayload.parts ?? []);
       setCategories(partsPayload.categories ?? []);
@@ -114,6 +178,7 @@ export default function OpsInventoryWorkspace() {
           ),
         );
       }
+      if (attentionPayload.ok) setAttention(attentionPayload.attention ?? null);
       setSelectedPartId((current) => current || partsPayload.parts?.[0]?.id || "");
     } catch (error) {
       setNotice({
@@ -134,6 +199,66 @@ export default function OpsInventoryWorkspace() {
     [parts, selectedPartId],
   );
 
+  useEffect(() => {
+    if (!selectedPart) return;
+    setEditForm({
+      location: selectedPart.location ?? "",
+      barcode: selectedPart.barcode ?? "",
+      unit_cost: (selectedPart.unit_cost_cents / 100).toFixed(2),
+      reorder_point: String(selectedPart.reorder_point),
+      vendor: selectedPart.vendor ?? "",
+      notes: selectedPart.notes ?? "",
+      size: selectedPart.size ?? "",
+    });
+  }, [selectedPart]);
+
+  useEffect(() => {
+    if (!selectedPartId) {
+      setMovements([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/inspired-closets/ops/inventory/movements?partId=${selectedPartId}`,
+        );
+        const payload = (await response.json()) as ApiResponse;
+        if (payload.ok) setMovements(payload.movements ?? []);
+      } catch {
+        setMovements([]);
+      }
+    })();
+  }, [selectedPartId]);
+
+  useEffect(() => {
+    if (!moveForm.job_id || (moveForm.type !== "allocate" && moveForm.type !== "return")) {
+      setJobMaterialTotal(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/inspired-closets/ops/inventory/movements?jobId=${moveForm.job_id}`,
+        );
+        const payload = (await response.json()) as ApiResponse;
+        if (!payload.ok) {
+          setJobMaterialTotal(null);
+          return;
+        }
+        let total = 0;
+        for (const m of payload.movements ?? []) {
+          const unit = m.unit_cost_cents ?? 0;
+          const qty = Math.abs(m.qty);
+          if (m.movement_type === "allocate") total += qty * unit;
+          if (m.movement_type === "return") total -= qty * unit;
+        }
+        setJobMaterialTotal(total);
+      } catch {
+        setJobMaterialTotal(null);
+      }
+    })();
+  }, [moveForm.job_id, moveForm.type]);
+
   async function addPart(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -145,6 +270,7 @@ export default function OpsInventoryWorkspace() {
         body: JSON.stringify({
           sku: partForm.sku,
           name: partForm.name,
+          size: partForm.size || null,
           category: partForm.category,
           location: partForm.location || null,
           qty_on_hand: Number(partForm.qty) || 0,
@@ -203,6 +329,29 @@ export default function OpsInventoryWorkspace() {
         text: `${moveForm.type} recorded for ${selectedPart?.sku ?? "part"}.`,
       });
       await load();
+      if (selectedPartId) {
+        const hist = await fetch(
+          `/api/inspired-closets/ops/inventory/movements?partId=${selectedPartId}`,
+        );
+        const histPayload = (await hist.json()) as ApiResponse;
+        if (histPayload.ok) setMovements(histPayload.movements ?? []);
+      }
+      if (moveForm.job_id && (moveForm.type === "allocate" || moveForm.type === "return")) {
+        const jobHist = await fetch(
+          `/api/inspired-closets/ops/inventory/movements?jobId=${moveForm.job_id}`,
+        );
+        const jobPayload = (await jobHist.json()) as ApiResponse;
+        if (jobPayload.ok) {
+          let total = 0;
+          for (const m of jobPayload.movements ?? []) {
+            const unit = m.unit_cost_cents ?? 0;
+            const qty = Math.abs(m.qty);
+            if (m.movement_type === "allocate") total += qty * unit;
+            if (m.movement_type === "return") total -= qty * unit;
+          }
+          setJobMaterialTotal(total);
+        }
+      }
     } catch (error) {
       setNotice({
         kind: "error",
@@ -231,6 +380,75 @@ export default function OpsInventoryWorkspace() {
     }
   }
 
+  async function savePartEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedPartId) return;
+    setSaving(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/inventory/parts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedPartId,
+          location: editForm.location || null,
+          barcode: editForm.barcode || null,
+          unit_cost_cents: dollarsInputToCents(editForm.unit_cost),
+          reorder_point: Number(editForm.reorder_point) || 0,
+          vendor: editForm.vendor || null,
+          notes: editForm.notes || null,
+          size: editForm.size || null,
+        }),
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok) throw new Error(payload.error ?? "Failed to update part.");
+      setNotice({ kind: "info", text: "Part details saved." });
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Failed to update part.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runImport() {
+    if (!importCsv.trim()) return;
+    setImporting(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/inventory/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: importCsv }),
+      });
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        created?: number;
+        updated?: number;
+        errors?: string[];
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Import failed.");
+      const extra = payload.errors?.length ? ` · ${payload.errors.length} row errors` : "";
+      setNotice({
+        kind: payload.errors?.length ? "error" : "info",
+        text: `Imported — ${payload.created ?? 0} new, ${payload.updated ?? 0} updated${extra}.`,
+      });
+      setImportCsv("");
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Import failed.",
+      });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <OpsShell
       title="Inventory"
@@ -250,6 +468,132 @@ export default function OpsInventoryWorkspace() {
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
           {notice.text}
         </p>
+      ) : null}
+
+      <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+        <p className={styles.subtitle} style={{ marginBottom: "0.5rem" }}>
+          One-time warehouse upload — then only receive and allocate
+        </p>
+        <p className={styles.empty} style={{ marginTop: 0 }}>
+          Brian counts the shelf, pastes the CSV. Size is required so 18&quot; and 21&quot; slides
+          cannot get mixed up.{" "}
+          <a href="/api/inspired-closets/ops/inventory/import">Download count sheet</a>.
+        </p>
+        <textarea
+          className={styles.input}
+          rows={5}
+          value={importCsv}
+          onChange={(e) => setImportCsv(e.target.value)}
+          placeholder="sku,name,size,category,location,qty,unit_cost,reorder_point,vendor"
+          style={{ fontFamily: "monospace", fontSize: "0.8rem", width: "100%" }}
+        />
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={importing || !importCsv.trim()}
+            onClick={() => void runImport()}
+          >
+            {importing ? "Importing…" : "Import count"}
+          </button>
+        </div>
+      </section>
+
+      {attention ? (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <p className={styles.subtitle} style={{ marginBottom: "0.65rem" }}>
+            Gavin / Frank · money leaks
+          </p>
+          <div className={styles.summaryRow}>
+            <span>
+              Low stock{" "}
+              <span className={styles.summaryStrong}>{attention.lowStock.length}</span>
+            </span>
+            <span>
+              Excess value{" "}
+              <span className={styles.summaryStrong}>
+                {centsToDisplay(attention.excessValueCents)}
+              </span>{" "}
+              ({attention.excessCount} parts)
+            </span>
+            <span>
+              Receives w/o allocate{" "}
+              <span className={styles.summaryStrong}>
+                {attention.unallocatedReceives.length}
+              </span>
+            </span>
+            <span>
+              Installs missing materials{" "}
+              <span className={styles.summaryStrong}>
+                {attention.missingMaterials.length}
+              </span>
+            </span>
+            <span>
+              Unstaged next 3 days{" "}
+              <span className={styles.summaryStrong}>
+                {(attention.unstagedInstalls ?? []).length}
+              </span>
+            </span>
+          </div>
+          {attention.missingMaterials.length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>Jobs with $0 materials (likely missing allocate)</p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {attention.missingMaterials.slice(0, 8).map((job) => (
+                  <li key={job.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+                    {job.client_name} · {job.stage.replace(/_/g, " ")} ·{" "}
+                    {centsToDisplay(job.contract_cents)}
+                    {job.install_date ? ` · install ${job.install_date}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {attention.lowStock.length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>Low stock (below reorder)</p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {attention.lowStock.slice(0, 6).map((part) => (
+                  <li key={part.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+                    {part.sku} · {part.name} · on hand {part.qty_on_hand} / reorder{" "}
+                    {part.reorder_point} · {centsToDisplay(part.value_cents)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {attention.unallocatedReceives.length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>Receives this week still unallocated</p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {attention.unallocatedReceives.slice(0, 6).map((row, idx) => (
+                  <li
+                    key={`${row.part_id}-${idx}`}
+                    style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}
+                  >
+                    {row.sku} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(attention.unstagedInstalls ?? []).length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>
+                Installs in the next 3 days with parts not staged/packed
+              </p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {(attention.unstagedInstalls ?? []).slice(0, 8).map((job) => (
+                  <li key={job.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+                    {job.client_name}
+                    {job.install_date ? ` · ${job.install_date}` : ""} · {job.unstaged}{" "}
+                    unstaged
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <nav className={styles.tabs}>
@@ -312,9 +656,12 @@ export default function OpsInventoryWorkspace() {
                 <th></th>
                 <th>SKU</th>
                 <th>Name</th>
+                <th>Size</th>
                 <th>Category</th>
                 <th>Bin</th>
                 <th>On hand</th>
+                <th>Reserved</th>
+                <th>Avail</th>
                 <th>Reorder @</th>
                 <th>Unit cost</th>
                 <th>Value</th>
@@ -341,9 +688,12 @@ export default function OpsInventoryWorkspace() {
                     </td>
                     <td>{part.sku}</td>
                     <td>{part.name}</td>
+                    <td>{part.size ?? "—"}</td>
                     <td>{part.category}</td>
                     <td>{part.location ?? "—"}</td>
                     <td className={low ? styles.marginBelow : undefined}>{part.qty_on_hand}</td>
+                    <td>{part.qty_reserved}</td>
+                    <td>{Math.max(0, part.qty_on_hand - part.qty_reserved)}</td>
                     <td>{part.reorder_point}</td>
                     <td>{centsToDisplay(part.unit_cost_cents)}</td>
                     <td>{centsToDisplay(part.qty_on_hand * part.unit_cost_cents)}</td>
@@ -425,6 +775,12 @@ export default function OpsInventoryWorkspace() {
               </select>
             </label>
           )}
+          {jobMaterialTotal != null ? (
+            <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+              Materials on this job so far:{" "}
+              <span className={styles.summaryStrong}>{centsToDisplay(jobMaterialTotal)}</span>
+            </p>
+          ) : null}
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Note</span>
             <input
@@ -444,6 +800,112 @@ export default function OpsInventoryWorkspace() {
             </button>
           </div>
         </form>
+
+        {selectedPart ? (
+          <>
+            <form className={styles.formGrid} onSubmit={savePartEdit}>
+              <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                Edit part · {selectedPart.sku}
+                {selectedPart.size ? ` · ${selectedPart.size}` : ""} · reserved{" "}
+                {selectedPart.qty_reserved} · available{" "}
+                {Math.max(0, selectedPart.qty_on_hand - selectedPart.qty_reserved)} · on-hand
+                value {centsToDisplay(selectedPart.qty_on_hand * selectedPart.unit_cost_cents)}
+              </p>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Size</span>
+                <input
+                  className={styles.input}
+                  value={editForm.size}
+                  onChange={(e) => setEditForm({ ...editForm, size: e.target.value })}
+                  placeholder="21 in"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Bin / location</span>
+                <input
+                  className={styles.input}
+                  value={editForm.location}
+                  onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Barcode</span>
+                <input
+                  className={styles.input}
+                  value={editForm.barcode}
+                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Unit cost</span>
+                <input
+                  className={styles.input}
+                  value={editForm.unit_cost}
+                  onChange={(e) => setEditForm({ ...editForm, unit_cost: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Reorder point</span>
+                <input
+                  className={styles.input}
+                  value={editForm.reorder_point}
+                  onChange={(e) => setEditForm({ ...editForm, reorder_point: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Vendor</span>
+                <input
+                  className={styles.input}
+                  value={editForm.vendor}
+                  onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Notes</span>
+                <input
+                  className={styles.input}
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                />
+              </label>
+              <div className={styles.formActions}>
+                <button type="submit" className={styles.buttonPrimary} disabled={saving}>
+                  Save part
+                </button>
+              </div>
+            </form>
+
+            <div style={{ marginTop: "1rem" }}>
+              <p className={styles.fieldLabel}>Movement history · {selectedPart.sku}</p>
+              {movements.length === 0 ? (
+                <p className={styles.empty}>No movements yet for this part.</p>
+              ) : (
+                <table className={styles.table} style={{ minWidth: "36rem" }}>
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Type</th>
+                      <th>Qty</th>
+                      <th>Job</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.slice(0, 40).map((m) => (
+                      <tr key={m.id}>
+                        <td>{new Date(m.created_at).toLocaleString()}</td>
+                        <td>{m.movement_type}</td>
+                        <td>{m.qty}</td>
+                        <td>{m.job_id ? m.job_id.slice(0, 8) : "—"}</td>
+                        <td>{m.note ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        ) : null}
 
         <form className={styles.formGrid} onSubmit={addPart}>
           <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
@@ -467,6 +929,15 @@ export default function OpsInventoryWorkspace() {
               onChange={(event) => setPartForm({ ...partForm, name: event.target.value })}
               placeholder="18in soft-close drawer slide"
               required
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Size</span>
+            <input
+              className={styles.input}
+              value={partForm.size}
+              onChange={(event) => setPartForm({ ...partForm, size: event.target.value })}
+              placeholder="21 in"
             />
           </label>
           <label className={styles.field}>

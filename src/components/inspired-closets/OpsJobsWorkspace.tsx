@@ -79,6 +79,28 @@ export default function OpsJobsWorkspace() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [jobMaterials, setJobMaterials] = useState<
+    Array<{
+      id: string;
+      movement_type: string;
+      qty: number;
+      unit_cost_cents: number | null;
+      created_at: string;
+      part: { sku: string; name: string } | null;
+    }>
+  >([]);
+  const [materialsTotal, setMaterialsTotal] = useState(0);
+  const [jobLines, setJobLines] = useState<
+    Array<{
+      id: string;
+      qty: number;
+      status: string;
+      ext_cents?: number;
+      part: { sku: string; name: string; size?: string | null } | null;
+    }>
+  >([]);
+  const [matTick, setMatTick] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +129,70 @@ export default function OpsJobsWorkspace() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!selectedJobId) {
+      setJobMaterials([]);
+      setMaterialsTotal(0);
+      return;
+    }
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/inspired-closets/ops/inventory/movements?jobId=${selectedJobId}`,
+        );
+        const payload = (await response.json()) as {
+          ok: boolean;
+          movements?: Array<{
+            id: string;
+            movement_type: string;
+            qty: number;
+            unit_cost_cents: number | null;
+            created_at: string;
+            part: { sku: string; name: string } | null;
+          }>;
+        };
+        if (!payload.ok) return;
+        const rows = payload.movements ?? [];
+        setJobMaterials(rows);
+        let total = 0;
+        for (const m of rows) {
+          const unit = m.unit_cost_cents ?? 0;
+          const qty = Math.abs(m.qty);
+          if (m.movement_type === "allocate") total += qty * unit;
+          if (m.movement_type === "return") total -= qty * unit;
+        }
+        setMaterialsTotal(total);
+      } catch {
+        setJobMaterials([]);
+        setMaterialsTotal(0);
+      }
+      try {
+        const matRes = await fetch(
+          `/api/inspired-closets/ops/inventory/job-materials?jobId=${selectedJobId}`,
+        );
+        const matPayload = (await matRes.json()) as {
+          ok: boolean;
+          lines?: Array<{
+            id: string;
+            qty: number;
+            status: string;
+            ext_cents?: number;
+            part: { sku: string; name: string; size?: string | null } | null;
+          }>;
+          materialsCents?: number;
+        };
+        if (matPayload.ok) {
+          setJobLines(matPayload.lines ?? []);
+          if ((matPayload.materialsCents ?? 0) > 0) {
+            setMaterialsTotal(matPayload.materialsCents ?? 0);
+          }
+        }
+      } catch {
+        setJobLines([]);
+      }
+    })();
+  }, [selectedJobId, matTick]);
 
   const designers = useMemo(
     () => staff.filter((member) => member.role === "designer" && member.active),
@@ -323,6 +409,7 @@ export default function OpsJobsWorkspace() {
           <table className={styles.table}>
             <thead>
               <tr>
+                <th></th>
                 <th>Client</th>
                 <th>Designer</th>
                 <th>Stage</th>
@@ -336,7 +423,21 @@ export default function OpsJobsWorkspace() {
             </thead>
             <tbody>
               {visibleJobs.map((job) => (
-                <tr key={job.id} className={job.risk_flag ? styles.rowHeld : undefined}>
+                <tr
+                  key={job.id}
+                  className={job.risk_flag ? styles.rowHeld : undefined}
+                  onClick={() => setSelectedJobId(job.id)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <td>
+                    <input
+                      type="radio"
+                      name="selectedJob"
+                      checked={selectedJobId === job.id}
+                      onChange={() => setSelectedJobId(job.id)}
+                      aria-label={`Select ${job.client?.name ?? "job"}`}
+                    />
+                  </td>
                   <td>{job.client?.name ?? "—"}</td>
                   <td>{job.designer?.name ?? "—"}</td>
                   <td>
@@ -375,6 +476,127 @@ export default function OpsJobsWorkspace() {
             </tbody>
           </table>
         )}
+
+        {selectedJobId ? (
+          <div style={{ marginTop: "1rem" }}>
+            <p className={styles.fieldLabel}>
+              Materials on this job ·{" "}
+              <span className={styles.summaryStrong}>{centsToDisplay(materialsTotal)}</span>
+              <a
+                href="/inspired-closets/ops/inventory"
+                style={{ marginLeft: "0.75rem", fontSize: "0.8rem" }}
+              >
+                Open Inventory
+              </a>
+            </p>
+            {jobLines.length > 0 ? (
+              <table className={styles.table} style={{ minWidth: "32rem", marginBottom: "1rem" }}>
+                <thead>
+                  <tr>
+                    <th>Part</th>
+                    <th>Qty</th>
+                    <th>Status</th>
+                    <th>Ext</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobLines.map((line) => (
+                    <tr key={line.id}>
+                      <td>
+                        {line.part
+                          ? `${line.part.sku}${line.part.size ? ` · ${line.part.size}` : ""} · ${line.part.name}`
+                          : "—"}
+                      </td>
+                      <td>{line.qty}</td>
+                      <td>{line.status}</td>
+                      <td>{centsToDisplay(line.ext_cents ?? 0)}</td>
+                      <td>
+                        {line.status === "reserved" ? (
+                          <button
+                            type="button"
+                            className={styles.buttonGhost}
+                            onClick={() =>
+                              void (async () => {
+                                await fetch("/api/inspired-closets/ops/inventory/job-materials", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    action: "stage",
+                                    job_id: selectedJobId,
+                                    line_id: line.id,
+                                  }),
+                                });
+                                setMatTick((n) => n + 1);
+                              })()
+                            }
+                          >
+                            Staged
+                          </button>
+                        ) : null}
+                        {line.status === "reserved" ? (
+                          <button
+                            type="button"
+                            className={styles.buttonGhost}
+                            onClick={() =>
+                              void (async () => {
+                                await fetch("/api/inspired-closets/ops/inventory/job-materials", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    action: "damage",
+                                    job_id: selectedJobId,
+                                    line_id: line.id,
+                                  }),
+                                });
+                                setMatTick((n) => n + 1);
+                              })()
+                            }
+                          >
+                            Damaged
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className={styles.empty}>
+                No reserved parts yet — Frank should job-check this job so stock vs. order is
+                locked.
+              </p>
+            )}
+            {jobMaterials.length > 0 ? (
+              <table className={styles.table} style={{ minWidth: "32rem" }}>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Type</th>
+                    <th>Part</th>
+                    <th>Qty</th>
+                    <th>Ext</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobMaterials.map((m) => (
+                    <tr key={m.id}>
+                      <td>{new Date(m.created_at).toLocaleDateString()}</td>
+                      <td>{m.movement_type}</td>
+                      <td>
+                        {m.part ? `${m.part.sku} · ${m.part.name}` : "—"}
+                      </td>
+                      <td>{m.qty}</td>
+                      <td>
+                        {centsToDisplay(Math.abs(m.qty) * (m.unit_cost_cents ?? 0))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+          </div>
+        ) : null}
 
         <form className={styles.formGrid} onSubmit={addJob}>
           <label className={styles.field}>

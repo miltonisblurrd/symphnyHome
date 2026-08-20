@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Inspired Closets OS — What’s Built &amp; How It Runs</title>
+  <style>
+    @page { size: Letter; margin: 0; }
+    * { box-sizing: border-box; }
+    :root {
+      --black: #000000;
+      --bone: #efe9e5;
+      --white: #ffffff;
+      --red: #821f2d;
+      --blush: #fdeae6;
+      --muted: rgba(0,0,0,.55);
+      --line: rgba(0,0,0,.12);
+    }
+    html, body { margin: 0; padding: 0; background: #d8d4d0; }
+    body {
+      font-family: Lato, "Helvetica Neue", Arial, sans-serif;
+      color: var(--black);
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page {
+      width: 8.5in;
+      height: 11in;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+      background: var(--bone);
+      padding: 0.7in 0.7in 0.65in;
+    }
+    .page:last-child { page-break-after: auto; }
+    .dark { background: var(--black); color: var(--white); }
+    .white { background: var(--white); }
+    .footer {
+      position: absolute;
+      left: 0.7in;
+      right: 0.7in;
+      bottom: 0.38in;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5pt;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: rgba(0,0,0,.42);
+    }
+    .dark .footer { color: rgba(255,255,255,.38); }
+    .kicker {
+      margin: 0 0 10px;
+      font-size: 9pt;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--red);
+      font-weight: 700;
+    }
+    .dark .kicker { color: #f3b7b0; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin: 0 0 14px;
+      font-size: 32pt;
+      line-height: 1.08;
+      font-weight: 600;
+      letter-spacing: -.03em;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 24pt;
+      line-height: 1.12;
+      font-weight: 600;
+      letter-spacing: -.02em;
+    }
+    h3 {
+      margin: 0 0 6px;
+      font-size: 12pt;
+      font-weight: 700;
+    }
+    p, li {
+      font-size: 11pt;
+      line-height: 1.42;
+      color: rgba(0,0,0,.78);
+    }
+    .dark p, .dark li { color: rgba(255,255,255,.82); }
+    .lead {
+      font-size: 14pt;
+      line-height: 1.4;
+      max-width: 6.6in;
+      color: rgba(0,0,0,.72);
+    }
+    .dark .lead { color: rgba(255,255,255,.8); }
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px 22px;
+    }
+    .card {
+      background: var(--white);
+      border: 1px solid var(--line);
+      padding: 14px 16px 12px;
+    }
+    .dark .card {
+      background: #111;
+      border-color: rgba(255,255,255,.12);
+    }
+    .rail {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 16px 0 8px;
+    }
+    .chip {
+      background: var(--white);
+      border: 1px solid var(--line);
+      padding: 6px 10px;
+      font-size: 9.5pt;
+      font-weight: 700;
+    }
+    .chip span { color: var(--red); margin-left: 6px; }
+    .arrow { align-self: center; color: var(--red); font-weight: 700; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10pt;
+    }
+    th {
+      text-align: left;
+      font-size: 8.5pt;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 8px 8px 8px 0;
+      border-bottom: 1.5px solid var(--black);
+    }
+    td {
+      padding: 9px 10px 9px 0;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      line-height: 1.35;
+    }
+    .ask {
+      background: var(--blush);
+      border-left: 4px solid var(--red);
+      padding: 12px 14px;
+      margin: 10px 0;
+    }
+    .ask p { margin: 0; color: var(--black); }
+    .num {
+      font-weight: 800;
+      color: var(--red);
+      margin-right: 6px;
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .logo-row img { height: 52px; width: auto; }
+    .cover-meta {
+      position: absolute;
+      left: 0.7in;
+      bottom: 0.85in;
+      color: rgba(255,255,255,.7);
+      font-size: 10.5pt;
+      line-height: 1.5;
+    }
+    ul { margin: 0; padding-left: 1.1em; }
+    li { margin-bottom: 4px; }
+    .person { color: var(--red); font-weight: 800; letter-spacing: .04em; font-size: 9pt; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <!-- 1 COVER -->
+  <section class="page dark">
+    <div class="logo-row">
+      <img src="InspiredClosets_Logo_RGB-300x277.png" alt="Inspired Closets" />
+    </div>
+    <p class="kicker">Operating system walkthrough · August 2026</p>
+    <h1>What’s built,<br>how it runs,<br>and what’s next.</h1>
+    <p class="lead" style="color:rgba(255,255,255,.8);max-width:6.4in">
+      One system for Inspired Closets Las Vegas — from the first lead to the last dollar —
+      so the shop doesn’t run on memory, Excel, or “Brian thought we had those.”
+    </p>
+    <div class="cover-meta">
+      Prepared for Gavin<br>
+      Inspired Closets OS · Symphony
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>01</span></div>
+  </section>
+
+  <!-- 2 BIG PICTURE -->
+  <section class="page">
+    <p class="kicker">01 · The big picture</p>
+    <h2>Everything hangs off the job.</h2>
+    <p class="lead">
+      This is not another spreadsheet. It is a parallel operating system for the shop.
+      Community, Studio, and Podium can stay. The OS is where Inspired Closets actually
+      runs the work — and it can push Slack, notes, and later feeds into other tools.
+    </p>
+    <div class="rail">
+      <div class="chip">Lead</div>
+      <span class="arrow">→</span>
+      <div class="chip">Sold</div>
+      <span class="arrow">→</span>
+      <div class="chip">50% deposit</div>
+      <span class="arrow">→</span>
+      <div class="chip">Job check / order</div>
+      <span class="arrow">→</span>
+      <div class="chip">Receive</div>
+      <span class="arrow">→</span>
+      <div class="chip">Install</div>
+      <span class="arrow">→</span>
+      <div class="chip">Collect / close</div>
+    </div>
+    <div class="grid2" style="margin-top:22px">
+      <div class="card">
+        <h3>Who touches the same job</h3>
+        <p><strong>Des</strong> creates and schedules it.</p>
+        <p><strong>Frank</strong> checks it against real stock and orders what’s missing.</p>
+        <p><strong>Brian</strong> receives, stages, and packs what’s on that job.</p>
+        <p><strong>Lulu</strong> collects and costs it.</p>
+        <p><strong>Craig</strong> sees it on payroll / sales.</p>
+        <p><strong>Gavin</strong> sees money, leaks, and what’s stuck — without Excel.</p>
+      </div>
+      <div class="card">
+        <h3>What this replaces</h3>
+        <p>Asking around for “do we have slides?”</p>
+        <p>Craig’s red workbook as the only source of truth.</p>
+        <p>Des hunting Community, Excel, and a calendar at once.</p>
+        <p>Lulu reconstructing job cost from memory and invoices.</p>
+        <p>Gavin finding out about a missed part when the customer is already paid in full.</p>
+      </div>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>02</span></div>
+  </section>
+
+  <!-- 3 DES -->
+  <section class="page">
+    <p class="kicker">02 · Des · Front desk</p>
+    <h2>Lead in once. Schedule from one calendar.</h2>
+    <p class="person">Des</p>
+    <div class="grid2">
+      <div>
+        <h3>Lead intake</h3>
+        <ul>
+          <li>One place to enter the lead — name, source, Community-style status, designer.</li>
+          <li>New Event for the design appointment. No second copy of the same consult.</li>
+          <li>Notes / chatter stay on the lead so the next person is not guessing.</li>
+        </ul>
+        <h3 style="margin-top:16px">When it sells</h3>
+        <ul>
+          <li>Sold intake captures contract $, deposit, Studio/Community refs, job-check owner.</li>
+          <li>That creates the <strong>job</strong> — the record everyone else will hang work on.</li>
+          <li>Clear next step: mark the 50% in Billing, then it shows in Ready to Schedule.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Installs (her daily desk)</h3>
+        <ul>
+          <li><strong>Today strip:</strong> awaiting deposit · ready to schedule · unassigned this week.</li>
+          <li>Week calendar is first. Sold/ready queues sit behind a toggle so they don’t bury the grid.</li>
+          <li>50% deposit is required before an install can be saved.</li>
+          <li>Job check → Ordered → receive date is the path; the OS warns if receive date is empty (does not trap her).</li>
+          <li>When she schedules: Slack fires. She logs “install confirm sent” after she texts/calls the client.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h3>Her path, in one line</h3>
+      <p style="margin:0">Lead → design appointment → sold intake → deposit in Billing → Ready → job check / receive → drop on the Install Calendar → confirm the client.</p>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>03</span></div>
+  </section>
+
+  <!-- 4 CRAIG -->
+  <section class="page">
+    <p class="kicker">03 · Craig · Payroll &amp; sales</p>
+    <h2>The red workbook, without living in Excel.</h2>
+    <p class="person">Craig</p>
+    <p class="lead">
+      Craig’s muscle memory stays. Contract, deposit, starting margin, after-spiff, final margin,
+      commission %, check, pay date — same columns, now rows in the OS.
+    </p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Payroll desk</h3>
+        <ul>
+          <li>Sync from the imported workbook creates jobs + clients so the rest of the OS isn’t empty.</li>
+          <li>He can still work a row the way he always did — the OS just stops being a sidecar to Excel.</li>
+          <li>45% gate is visible before a check / spiff is treated as payable.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Leads vs Sales</h3>
+        <ul>
+          <li>Designer board: who was assigned vs who actually converted.</li>
+          <li>Closing ratio per designer, on the same jobs Des is scheduling.</li>
+          <li>No separate “Craig spreadsheet vs Des calendar” version of the truth.</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top:22px">
+      Once a workbook row is a job, Des can schedule it, Frank can hang parts on it,
+      and Lulu can cost it. That is the point of bringing Excel in — not prettier cells.
+    </p>
+    <div class="footer"><span>Inspired Closets OS</span><span>04</span></div>
+  </section>
+
+  <!-- 5 LULU -->
+  <section class="page">
+    <p class="kicker">04 · Lulu · Billing &amp; finance</p>
+    <h2>50 / 40 / 10, then the real job cost.</h2>
+    <p class="person">Lulu</p>
+    <div class="grid2">
+      <div>
+        <h3>Billing</h3>
+        <ul>
+          <li>Every sold job gets deposit / 40% at install / 10% final.</li>
+          <li>Des records that the customer paid (Podium / check). Lulu owns the books.</li>
+          <li>QuickBooks stays the books. The OS never writes into QB.</li>
+          <li>After she enters it in QB, she taps <strong>Marked in QB</strong> — same idea as checking it off in Excel.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>One job cost card</h3>
+        <ul>
+          <li><strong>Materials</strong> — pulled from parts allocated to that job (not a guess).</li>
+          <li><strong>Labor</strong> — from installer clock-ins, or an override.</li>
+          <li><strong>Fees</strong> — plus Stow / pallet / freight lines (the hidden $200 pallet).</li>
+          <li>Commission + spiff. Margin vs the 45% gate. Mark costs verified when the Stow invoice is itemized.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h3>What lights up for her</h3>
+      <p style="margin:0">Who still owes · payments not yet entered in QB · jobs below the spiff gate · costs still unverified. That’s the daily list — not a hunt through tabs.</p>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>05</span></div>
+  </section>
+
+  <!-- 6 FRANK / BRIAN -->
+  <section class="page">
+    <p class="kicker">05 · Frank &amp; Brian · Inventory</p>
+    <h2>Know what’s on the shelf before you delete it off the order.</h2>
+    <p class="person">Frank · Brian</p>
+    <p>
+      The undermounted-slides job is the problem this desk exists to stop: Brian thought we had them
+      (wrong size). Frank deleted them off the Stow order. Customer paid in full. A week later, still waiting.
+    </p>
+    <div class="grid2">
+      <div class="card">
+        <h3>What’s already live</h3>
+        <ul>
+          <li>Parts catalog: SKU, name, bin, on-hand, reserved, reorder point, $ value.</li>
+          <li>Movement history on every part — receive, allocate, return, adjust, scrap.</li>
+          <li>Allocate a part <strong>to a job</strong> so materials $ shows on Jobs, Ready, and Finance.</li>
+          <li>Attention strip: low stock · excess $ · receives with no allocate · installs with $0 materials.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>The two habits after the count</h3>
+        <p><strong>1. Receive</strong> when a pallet / Stow order lands. Stock goes up.</p>
+        <p><strong>2. Allocate</strong> (or reserve at job check) when parts are promised to a job. Available stock goes down.</p>
+        <p>That’s it. Counts, value, low-stock flags, and job cost fall out of those two buttons.</p>
+      </div>
+    </div>
+    <div class="ask" style="margin-top:16px">
+      <p><strong>The deal for this meeting:</strong> Brian/Frank do a one-time upload of what’s actually in the warehouse. After that they only log receives and allocates. A ledger nobody keeps current is just Brian’s memory with a login.</p>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>06</span></div>
+  </section>
+
+  <!-- 7 FIELD + GAVIN -->
+  <section class="page">
+    <p class="kicker">06 · Installers &amp; Gavin</p>
+    <h2>Field feeds labor. Gavin sees the shop.</h2>
+    <div class="grid2">
+      <div>
+        <p class="person">Installers</p>
+        <h3>Field app</h3>
+        <ul>
+          <li>Clock in / out on the job. Those hours flow into Lulu’s labor cost — no extra timesheet.</li>
+          <li>Photos and issue flags (missing part, damage, site not ready) sit on the same job Des scheduled.</li>
+        </ul>
+      </div>
+      <div>
+        <p class="person">Gavin</p>
+        <h3>Visibility without Excel</h3>
+        <ul>
+          <li>Dashboard: today’s attention, margins, cash, who still owes.</li>
+          <li>Cubby: ask in plain language — “what’s leaking?”, “who’s below the gate?”</li>
+          <li>Inventory attention is the warehouse version of the same idea: low stock, excess dollars, jobs that went to install with no materials tied on.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="margin-top:22px">
+      <h3>Why this is one system, not six apps</h3>
+      <p style="margin:0">
+        Des’s calendar, Frank’s parts, Lulu’s margin, and Gavin’s attention are looking at the <em>same job</em>.
+        If inventory isn’t on the job, the schedule is guessing and the margin is lying. That’s why the next
+        slice is not “more screens” — it’s making stock and schedule talk to each other.
+      </p>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>07</span></div>
+  </section>
+
+  <!-- 8 EFFICIENCY -->
+  <section class="page">
+    <p class="kicker">07 · Efficiency</p>
+    <h2>Before vs now.</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:18%">Person</th>
+          <th>Before</th>
+          <th>With the OS</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Des</strong></td>
+          <td>Community + calendar + memory for deposit, receive, and who to call.</td>
+          <td>Lead once. Deposit gate. Ready queue. Week calendar. Slack on schedule. Confirm log.</td>
+        </tr>
+        <tr>
+          <td><strong>Craig</strong></td>
+          <td>Red Excel is the company. Everyone else copies from it.</td>
+          <td>Same columns, in the OS. Rows become jobs the rest of the shop can actually use.</td>
+        </tr>
+        <tr>
+          <td><strong>Lulu</strong></td>
+          <td>Podium vs QB vs a pile of Stow invoices. Hidden pallet fees.</td>
+          <td>Milestones on the job. Marked-in-QB checklist. Materials + fees + labor on one card.</td>
+        </tr>
+        <tr>
+          <td><strong>Frank</strong></td>
+          <td>Ask Brian if we have it. Delete it off the order. Find out on install day.</td>
+          <td>Look at on-hand vs reserved. Hang parts on the job. OS says “not enough — order it.”</td>
+        </tr>
+        <tr>
+          <td><strong>Brian</strong></td>
+          <td>The warehouse is in his head. Wrong size. Unpacked. Damaged and still “in stock.”</td>
+          <td>Bins + counts + history. Receive what lands. Stage what’s on the truck. Scrap what’s dead.</td>
+        </tr>
+        <tr>
+          <td><strong>Gavin</strong></td>
+          <td>Finds the leak after the customer has waited a week.</td>
+          <td>Attention lists: low stock, excess $, jobs with $0 materials, unverified costs, who owes.</td>
+        </tr>
+        <tr>
+          <td><strong>Installers</strong></td>
+          <td>Hours and missing parts live in a text thread.</td>
+          <td>Clock the job. Flag the issue. Labor and “missing part” hit the same record.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:16px;font-size:10pt">
+      None of this works if the warehouse count is still a conversation. That’s the only operating agreement the next page asks for.
+    </p>
+    <div class="footer"><span>Inspired Closets OS</span><span>08</span></div>
+  </section>
+
+  <!-- 9 WHAT'S NEXT -->
+  <section class="page">
+    <p class="kicker">08 · What’s next — decisions for this meeting</p>
+    <h2>Make stock real. Then let the calendar think.</h2>
+    <p>
+      Built next, in this order. Each one is useless without the one before it.
+    </p>
+
+    <h3><span class="num">1</span> One-time warehouse upload</h3>
+    <p>Brian (or Frank) counts what’s on the shelf. We import it — SKU, size, bin, qty, cost. Size is its own field so “undermount slide” cannot silently mean the wrong length.</p>
+
+    <h3><span class="num">2</span> Reserve at job check</h3>
+    <p>When Frank checks a job, he picks what comes from stock vs. what must be ordered. If available qty is short, the OS stops him from pretending we have it. That’s the slides story, caught at order time — not install day.</p>
+
+    <h3><span class="num">3</span> Stage / pack / damaged</h3>
+    <p>Brian ticks each reserved part as pulled and loaded. Damaged → scrap + “need a replacement?” Installs in the next 3 days with unstaged parts light up on attention.</p>
+
+    <h3><span class="num">4</span> Crew size + how long the job takes</h3>
+    <p>Frank/Des enter guys needed and estimated days on the same job-check screen. Receive date already exists. Without these, no scheduler has anything to work with.</p>
+
+    <h3><span class="num">5</span> Suggest the calendar — Des confirms</h3>
+    <p>The OS drafts installs, services, and go-backs around arrival dates and crew capacity. Nothing auto-books. Des reviews, adjusts, then calls every client on the list — exactly as she described.</p>
+
+    <div class="ask" style="margin-top:14px">
+      <p><strong>Questions for Gavin</strong></p>
+      <p style="margin-top:8px">1. Will Frank and Brian own a one-time count + upload, then receive/allocate as the only daily inventory habit?</p>
+      <p style="margin-top:6px">2. Is job check the moment we freeze “from stock vs. order” — even if it adds 2 minutes per job?</p>
+      <p style="margin-top:6px">3. Does Des stay the human who confirms clients, with the OS only proposing days — not texting customers itself yet?</p>
+    </div>
+    <div class="footer"><span>Inspired Closets OS</span><span>09</span></div>
+  </section>
+
+</body>
+</html>

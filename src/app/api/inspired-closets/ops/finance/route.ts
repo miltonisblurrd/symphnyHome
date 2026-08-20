@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isDbConfigured, getSupabaseAdmin } from "@/db/client";
 import {
+  addJobCostLine,
   buildFinanceSnapshot,
   upsertJobFinancials,
   MARGIN_GATE_PCT,
@@ -167,6 +168,37 @@ export async function PATCH(request: Request) {
       return NextResponse.json(
         { ok: false, error: error instanceof Error ? error.message : "Save failed." },
         { status: 500 },
+      );
+    }
+  }
+
+  if (action === "add_job_cost_line") {
+    const jobId = typeof body.job_id === "string" ? body.job_id : null;
+    const costType = typeof body.cost_type === "string" ? body.cost_type : "";
+    const amountCents =
+      typeof body.amount_cents === "number"
+        ? Math.round(body.amount_cents)
+        : dollarsToCents(body.amount);
+    if (!jobId || !costType || amountCents == null) {
+      return NextResponse.json(
+        { ok: false, error: "job_id, cost_type, and amount are required." },
+        { status: 400 },
+      );
+    }
+    try {
+      const line = await addJobCostLine({
+        jobId,
+        costType,
+        amountCents,
+        vendorRef: typeof body.vendor_ref === "string" ? body.vendor_ref : null,
+        note: typeof body.note === "string" ? body.note : null,
+        actorId: actor,
+      });
+      return NextResponse.json({ ok: true, costLine: line });
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Cost line failed." },
+        { status: 400 },
       );
     }
   }

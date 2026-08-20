@@ -453,7 +453,7 @@ export default function OpsLeadsWorkspace() {
         text:
           soldForm.deposit_intake_status === "paid"
             ? "Sold intake saved — deposit marked paid. Job is in Ready to Schedule."
-            : "Sold intake saved — job is awaiting deposit. Mark paid in Billing when cleared.",
+            : "Sold intake saved — mark the 50% deposit paid in Billing, then it appears under Ready to Schedule on Installs.",
       });
       await loadList();
       await loadDetail(selectedId);

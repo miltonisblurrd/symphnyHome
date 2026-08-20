@@ -15,6 +15,7 @@ import {
   pushAppointmentById,
 } from "@/lib/inspired-closets-google-calendar";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 
 export const runtime = "nodejs";
 
@@ -123,6 +124,25 @@ export async function GET(request: Request) {
     };
   });
 
+  const readyIds = (readyResult.data ?? []).map((j) => j.id);
+  const installIds = (jobsResult.data ?? []).map((j) => j.id);
+  const materialJobIds = [...new Set([...readyIds, ...installIds])];
+  const materialsByJob = new Map<string, number>();
+  if (materialJobIds.length > 0) {
+    const { data: stockMoves } = await supabase
+      .from("ic_stock_movements")
+      .select("job_id, movement_type, qty, unit_cost_cents")
+      .in("job_id", materialJobIds.slice(0, 400))
+      .in("movement_type", ["allocate", "return"]);
+    for (const m of stockMoves ?? []) {
+      if (!m.job_id) continue;
+      const unit = m.unit_cost_cents ?? 0;
+      const qty = Math.abs(m.qty ?? 0);
+      const delta = m.movement_type === "allocate" ? qty * unit : -(qty * unit);
+      materialsByJob.set(m.job_id, (materialsByJob.get(m.job_id) ?? 0) + delta);
+    }
+  }
+
   function mapJob(job: Record<string, unknown>) {
     const notes = String(job.notes ?? "").toLowerCase();
     const serviceTag =
@@ -135,8 +155,10 @@ export async function GET(request: Request) {
     const designerIdVal = job.designer_id as string | null;
     const installerIdVal = job.installer_id as string | null;
     const ownerId = job.job_check_owner_id as string | null;
+    const jobId = job.id as string;
     return {
       ...job,
+      materials_cents: Math.max(0, materialsByJob.get(jobId) ?? 0),
       client: clientId ? clientsById.get(clientId) ?? null : null,
       designer: designerIdVal ? staffById.get(designerIdVal) ?? null : null,
       installer: installerIdVal ? staffById.get(installerIdVal) ?? null : null,
@@ -292,6 +314,63 @@ export async function POST(request: Request) {
         updated_by: actor,
       })
       .eq("id", jobId);
+
+    const [{ data: jobRow }, { data: installerRow }, { data: clientRow }] = await Promise.all([
+      supabase
+        .from("ic_jobs")
+        .select("contract_cents, client_id")
+        .eq("id", jobId)
+        .maybeSingle(),
+      installerId
+        ? supabase.from("ic_staff").select("name").eq("id", installerId).maybeSingle()
+        : Promise.resolve({ data: null }),
+      Promise.resolve({ data: null as { name: string } | null }),
+    ]);
+    let clientName = "Client";
+    const clientLookupId = resolvedClientId ?? jobRow?.client_id ?? null;
+    if (clientLookupId) {
+      const { data: client } = await supabase
+        .from("ic_clients")
+        .select("name")
+        .eq("id", clientLookupId)
+        .maybeSingle();
+      if (client?.name) clientName = client.name;
+    }
+    const dollars = ((jobRow?.contract_cents ?? 0) / 100).toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    });
+    const whenLabel = new Date(scheduledAt).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    try {
+      await postInspiredClosetsSlackNotification({
+        assignee: "Des",
+        title: `Install scheduled — ${clientName}`,
+        severity: "info",
+        todoLabel: `${whenLabel} · ${dollars} · ${installerRow?.name ?? "Unassigned"}`,
+        notifyMessage:
+          "Install is on the calendar. Confirm the customer (Podium/text), then log confirm in the Install Event modal.",
+        requestedBy: "Ops",
+      });
+      if (installerRow?.name) {
+        await postInspiredClosetsSlackNotification({
+          assignee: installerRow.name.split(" ")[0] ?? installerRow.name,
+          title: `You're on install — ${clientName}`,
+          severity: "info",
+          todoLabel: whenLabel,
+          notifyMessage: "Check the Install Calendar for address and notes.",
+          requestedBy: "Des",
+        });
+      }
+    } catch {
+      // Slack optional
+    }
   }
 
   await supabase.from("ic_activity_log").insert({
@@ -329,13 +408,61 @@ export async function PATCH(request: Request) {
   }
 
   const id = typeof body.id === "string" ? body.id : null;
-  if (!id) {
-    return NextResponse.json({ ok: false, error: "id is required." }, { status: 400 });
-  }
+  const jobId = typeof body.job_id === "string" ? body.job_id : null;
+  const action = typeof body.action === "string" ? body.action : "update";
 
   const supabase = getSupabaseAdmin();
   const actor = await actorId();
   const nowIso = new Date().toISOString();
+
+  // Install confirm from calendar event (job-scoped, not appointment id).
+  if (action === "confirm_install" && jobId) {
+    const { data: appt } = await supabase
+      .from("ic_appointments")
+      .select("id")
+      .eq("job_id", jobId)
+      .eq("kind", "install")
+      .is("deleted_at", null)
+      .order("scheduled_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!appt) {
+      return NextResponse.json(
+        { ok: false, error: "No install appointment found for this job." },
+        { status: 404 },
+      );
+    }
+    const { data: updated, error } = await supabase
+      .from("ic_appointments")
+      .update({
+        confirmation_sent_at: nowIso,
+        confirmation_note:
+          typeof body.confirmation_note === "string"
+            ? body.confirmation_note
+            : "Logged install confirm (Podium/text sent manually)",
+        status: "confirmed",
+        updated_at: nowIso,
+        updated_by: actor,
+      })
+      .eq("id", appt.id)
+      .select("*")
+      .single();
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+    await supabase.from("ic_activity_log").insert({
+      entity_type: "appointment",
+      entity_id: appt.id,
+      action: "install_confirm_logged",
+      actor_id: actor,
+      changes: { job_id: jobId },
+    });
+    return NextResponse.json({ ok: true, appointment: updated });
+  }
+
+  if (!id) {
+    return NextResponse.json({ ok: false, error: "id is required." }, { status: 400 });
+  }
 
   const { data: current, error: findError } = await supabase
     .from("ic_appointments")
@@ -354,8 +481,6 @@ export async function PATCH(request: Request) {
     updated_at: nowIso,
     updated_by: actor,
   };
-
-  const action = typeof body.action === "string" ? body.action : "update";
 
   if (action === "confirm_podium") {
     updates.confirmation_sent_at = nowIso;

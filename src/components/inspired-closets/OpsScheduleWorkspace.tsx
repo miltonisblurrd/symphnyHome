@@ -319,6 +319,7 @@ export default function OpsScheduleWorkspace({
     leadId: string | null;
     scheduledAt: string;
     installerId: string | null;
+    acknowledgeNoReceiveDate?: boolean;
   }) {
     setBusy(true);
     setNotice(null);
@@ -333,19 +334,50 @@ export default function OpsScheduleWorkspace({
           scheduled_at: input.scheduledAt,
           installer_id: input.installerId,
           location_type: "on_site",
+          notes: input.acknowledgeNoReceiveDate
+            ? "Scheduled without Studio receive date (Des acknowledged)."
+            : null,
         }),
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Could not schedule install.");
       setNotice({
         kind: "info",
-        text: "Install scheduled — card is on the calendar. Deposit gate cleared.",
+        text: "Install scheduled — Slack notified. Log customer confirm from the event card when sent.",
       });
       await load();
     } catch (error) {
       setNotice({
         kind: "error",
         text: error instanceof Error ? error.message : "Could not schedule install.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logInstallConfirm(jobId: string) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/appointments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: jobId,
+          kind: "install",
+          action: "confirm_install",
+          confirmation_note: "Logged install confirm (Podium/text sent manually)",
+        }),
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok) throw new Error(payload.error ?? "Could not log confirm.");
+      setNotice({ kind: "info", text: "Install confirm logged." });
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not log confirm.",
       });
     } finally {
       setBusy(false);
@@ -738,6 +770,7 @@ export default function OpsScheduleWorkspace({
             onAssignInstaller={assignInstaller}
             onScheduleInstall={scheduleInstall}
             onAdvanceStage={advanceJobStage}
+            onLogInstallConfirm={logInstallConfirm}
           />
         )}
       </div>

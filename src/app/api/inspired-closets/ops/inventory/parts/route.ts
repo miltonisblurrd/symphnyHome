@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 const EDITABLE = new Set([
   "sku",
   "name",
+  "size",
   "category",
   "location",
   "barcode",
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
   let parts = data ?? [];
   if (q) {
     parts = parts.filter((part) => {
-      const hay = `${part.sku} ${part.name} ${part.location ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
+      const hay = `${part.sku} ${part.name} ${part.size ?? ""} ${part.location ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
   }
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
   const insert: Record<string, unknown> = {
     sku,
     name,
+    size: typeof body.size === "string" ? body.size.trim() || null : null,
     category: typeof body.category === "string" ? body.category : "hardware",
     location: typeof body.location === "string" ? body.location.trim() || null : null,
     barcode: typeof body.barcode === "string" ? body.barcode.trim() || null : null,

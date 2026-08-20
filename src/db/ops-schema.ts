@@ -260,6 +260,10 @@ export const icJobs = pgTable("ic_jobs", {
   siteReadyNotes: text("site_ready_notes"),
   /** Des intake hint: pending | link_sent | check_pending | paid */
   depositIntakeStatus: text("deposit_intake_status"),
+  /** Guys needed on site — feeds the schedule suggester. */
+  crewSize: integer("crew_size").default(2),
+  /** Whole days on the calendar. */
+  estimatedInstallDays: integer("estimated_install_days").default(1),
   notes: text("notes"),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
@@ -357,6 +361,20 @@ export const icJobFinancials = pgTable("ic_job_financials", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Manual Stow / pallet / freight lines (parallel OS — no Stow API). */
+export const icJobCostLines = pgTable("ic_job_cost_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  costType: text("cost_type").notNull(),
+  amountCents: integer("amount_cents").notNull().default(0),
+  vendorRef: text("vendor_ref"),
+  note: text("note"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /**
  * Payroll entries mirror the red 2026 workbook rows one-to-one so Craig's
  * muscle memory transfers: contract, deposit, margins (starting / after spiff
@@ -429,11 +447,13 @@ export const icActivityLog = pgTable("ic_activity_log", {
 
 export const icStockMovementTypeEnum = pgEnum("ic_stock_movement_type", [
   "receive", // stock in (Stow / order / purchase)
-  "allocate", // pulled to a job
+  "allocate", // pulled to a job (leaves the shelf)
   "return", // unused parts back from job
   "adjust", // cycle count correction
   "scrap", // damaged / unusable
   "sell_excess", // reclaim capital on dead stock
+  "reserve", // promised to a job, still on the shelf
+  "unreserve", // release a promise
 ]);
 
 /** Parts catalog + live qty. Source of truth for Frank's warehouse. */
@@ -441,6 +461,8 @@ export const icParts = pgTable("ic_parts", {
   id: uuid("id").primaryKey().defaultRandom(),
   sku: text("sku").notNull().unique(),
   name: text("name").notNull(),
+  /** Size / variant so "undermount slide" is never the wrong length. */
+  size: text("size"),
   category: text("category").notNull().default("hardware"),
   /** Bin / aisle / shelf label in the warehouse. */
   location: text("location"),
@@ -479,6 +501,25 @@ export const icStockMovements = pgTable("ic_stock_movements", {
   note: text("note"),
   createdBy: uuid("created_by").references(() => icStaff.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Parts promised / staged / pulled for a specific job. */
+export const icJobMaterials = pgTable("ic_job_materials", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  partId: uuid("part_id")
+    .notNull()
+    .references(() => icParts.id),
+  qty: integer("qty").notNull().default(1),
+  status: text("status").notNull().default("reserved"),
+  note: text("note"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  stagedBy: uuid("staged_by").references(() => icStaff.id),
+  stagedAt: timestamp("staged_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const icMediaKindEnum = pgEnum("ic_media_kind", [
@@ -562,11 +603,13 @@ export type IcJob = typeof icJobs.$inferSelect;
 export type IcAppointment = typeof icAppointments.$inferSelect;
 export type IcPayment = typeof icPayments.$inferSelect;
 export type IcJobFinancials = typeof icJobFinancials.$inferSelect;
+export type IcJobCostLine = typeof icJobCostLines.$inferSelect;
 export type IcReconciliationException = typeof icReconciliationExceptions.$inferSelect;
 export type IcPayrollEntry = typeof icPayrollEntries.$inferSelect;
 export type IcActivityLog = typeof icActivityLog.$inferSelect;
 export type IcPart = typeof icParts.$inferSelect;
 export type IcStockMovement = typeof icStockMovements.$inferSelect;
+export type IcJobMaterial = typeof icJobMaterials.$inferSelect;
 export type IcTimeEntry = typeof icTimeEntries.$inferSelect;
 export type IcJobMedia = typeof icJobMedia.$inferSelect;
 export type IcFieldIssue = typeof icFieldIssues.$inferSelect;

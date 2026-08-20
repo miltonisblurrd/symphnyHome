@@ -31,6 +31,16 @@ type JobProfit = {
   laborSource: string;
   laborMinutes: number;
   otherFeesCents: number;
+  otherFeesBaseCents?: number;
+  costLinesCents?: number;
+  costLines?: Array<{
+    id: string;
+    costType: string;
+    amountCents: number;
+    vendorRef: string | null;
+    note: string | null;
+    createdAt: string;
+  }>;
   commissionCents: number;
   spiffCents: number;
   spiffRecipient: string | null;
@@ -101,6 +111,9 @@ export default function OpsFinanceWorkspace() {
     >
   >({});
   const [qbRefDraft, setQbRefDraft] = useState<Record<string, string>>({});
+  const [costLineDraft, setCostLineDraft] = useState<
+    Record<string, { cost_type: string; amount: string; vendor_ref: string; note: string }>
+  >({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -493,7 +506,14 @@ export default function OpsFinanceWorkspace() {
                   const draft = costDraft[job.jobId] ?? {
                     material: job.materialCents ? String(job.materialCents / 100) : "",
                     labor: job.laborCents ? String(job.laborCents / 100) : "",
-                    fees: job.otherFeesCents ? String(job.otherFeesCents / 100) : "",
+                    fees:
+                      (job.otherFeesBaseCents ??
+                        job.otherFeesCents - (job.costLinesCents ?? 0)) > 0
+                        ? String(
+                            (job.otherFeesBaseCents ??
+                              job.otherFeesCents - (job.costLinesCents ?? 0)) / 100,
+                          )
+                        : "",
                     spiff: job.spiffCents ? String(job.spiffCents / 100) : "",
                     recipient: job.spiffRecipient ?? "",
                     stow: job.stowInvoiceRef ?? "",
@@ -585,7 +605,12 @@ export default function OpsFinanceWorkspace() {
                                 />
                               </label>
                               <label className={styles.field}>
-                                <span className={styles.fieldLabel}>Other fees $</span>
+                                <span className={styles.fieldLabel}>
+                                  Other fees $
+                                  {job.costLinesCents
+                                    ? ` (incl. ${money(job.costLinesCents)} lines)`
+                                    : ""}
+                                </span>
                                 <input
                                   className={styles.input}
                                   value={draft.fees}
@@ -637,6 +662,197 @@ export default function OpsFinanceWorkspace() {
                                   }
                                 />
                               </label>
+                              <div
+                                style={{
+                                  gridColumn: "1 / -1",
+                                  borderTop: "1px solid #e5e5e5",
+                                  paddingTop: "0.65rem",
+                                  marginTop: "0.25rem",
+                                }}
+                              >
+                                <p className={styles.fieldLabel} style={{ marginBottom: "0.4rem" }}>
+                                  Add job cost line (Stow / pallet / freight) · rolls into other fees
+                                  {job.costLinesCents
+                                    ? ` · lines ${money(job.costLinesCents)}`
+                                    : ""}
+                                </p>
+                                {(job.costLines ?? []).length > 0 ? (
+                                  <ul
+                                    style={{
+                                      margin: "0 0 0.5rem",
+                                      paddingLeft: "1.1rem",
+                                      fontSize: "0.82rem",
+                                    }}
+                                  >
+                                    {(job.costLines ?? []).map((line) => (
+                                      <li key={line.id}>
+                                        {line.costType.replace(/_/g, " ")} ·{" "}
+                                        {money(line.amountCents)}
+                                        {line.vendorRef ? ` · ${line.vendorRef}` : ""}
+                                        {line.note ? ` · ${line.note}` : ""}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                {(() => {
+                                  const lineDraft = costLineDraft[job.jobId] ?? {
+                                    cost_type: "pallet_fee",
+                                    amount: "",
+                                    vendor_ref: "",
+                                    note: "",
+                                  };
+                                  return (
+                                    <div
+                                      style={{
+                                        display: "grid",
+                                        gap: "0.45rem",
+                                        gridTemplateColumns:
+                                          "repeat(auto-fit, minmax(8rem, 1fr))",
+                                      }}
+                                    >
+                                      <label className={styles.field}>
+                                        <span className={styles.fieldLabel}>Type</span>
+                                        <select
+                                          className={styles.input}
+                                          value={lineDraft.cost_type}
+                                          onChange={(e) =>
+                                            setCostLineDraft((m) => ({
+                                              ...m,
+                                              [job.jobId]: {
+                                                ...lineDraft,
+                                                cost_type: e.target.value,
+                                              },
+                                            }))
+                                          }
+                                        >
+                                          <option value="stow_invoice">Stow invoice</option>
+                                          <option value="pallet_fee">Pallet fee</option>
+                                          <option value="freight">Freight</option>
+                                          <option value="other">Other</option>
+                                        </select>
+                                      </label>
+                                      <label className={styles.field}>
+                                        <span className={styles.fieldLabel}>Amount $</span>
+                                        <input
+                                          className={styles.input}
+                                          value={lineDraft.amount}
+                                          onChange={(e) =>
+                                            setCostLineDraft((m) => ({
+                                              ...m,
+                                              [job.jobId]: {
+                                                ...lineDraft,
+                                                amount: e.target.value,
+                                              },
+                                            }))
+                                          }
+                                          placeholder="200"
+                                        />
+                                      </label>
+                                      <label className={styles.field}>
+                                        <span className={styles.fieldLabel}>Vendor ref</span>
+                                        <input
+                                          className={styles.input}
+                                          value={lineDraft.vendor_ref}
+                                          onChange={(e) =>
+                                            setCostLineDraft((m) => ({
+                                              ...m,
+                                              [job.jobId]: {
+                                                ...lineDraft,
+                                                vendor_ref: e.target.value,
+                                              },
+                                            }))
+                                          }
+                                          placeholder="Stow # / PO"
+                                        />
+                                      </label>
+                                      <label className={styles.field}>
+                                        <span className={styles.fieldLabel}>Note</span>
+                                        <input
+                                          className={styles.input}
+                                          value={lineDraft.note}
+                                          onChange={(e) =>
+                                            setCostLineDraft((m) => ({
+                                              ...m,
+                                              [job.jobId]: {
+                                                ...lineDraft,
+                                                note: e.target.value,
+                                              },
+                                            }))
+                                          }
+                                        />
+                                      </label>
+                                      <div style={{ alignSelf: "end" }}>
+                                        <button
+                                          type="button"
+                                          className={styles.buttonGhost}
+                                          disabled={busy || !lineDraft.amount}
+                                          onClick={() => {
+                                            const amount = lineDraft.amount;
+                                            const costType = lineDraft.cost_type;
+                                            const vendorRef = lineDraft.vendor_ref;
+                                            const note = lineDraft.note;
+                                            setBusy(true);
+                                            setNotice(null);
+                                            void (async () => {
+                                              try {
+                                                const response = await fetch(
+                                                  "/api/inspired-closets/ops/finance",
+                                                  {
+                                                    method: "PATCH",
+                                                    headers: {
+                                                      "Content-Type": "application/json",
+                                                    },
+                                                    body: JSON.stringify({
+                                                      action: "add_job_cost_line",
+                                                      job_id: job.jobId,
+                                                      cost_type: costType,
+                                                      amount,
+                                                      vendor_ref: vendorRef || null,
+                                                      note: note || null,
+                                                    }),
+                                                  },
+                                                );
+                                                const payload = (await response.json()) as {
+                                                  ok: boolean;
+                                                  error?: string;
+                                                };
+                                                if (!payload.ok) {
+                                                  throw new Error(
+                                                    payload.error ?? "Cost line failed.",
+                                                  );
+                                                }
+                                                setCostLineDraft((m) => ({
+                                                  ...m,
+                                                  [job.jobId]: {
+                                                    cost_type: costType,
+                                                    amount: "",
+                                                    vendor_ref: "",
+                                                    note: "",
+                                                  },
+                                                }));
+                                                setNotice({ kind: "info", text: "Cost line added." });
+                                                await load();
+                                              } catch (error) {
+                                                setNotice({
+                                                  kind: "error",
+                                                  text:
+                                                    error instanceof Error
+                                                      ? error.message
+                                                      : "Cost line failed.",
+                                                });
+                                              } finally {
+                                                setBusy(false);
+                                              }
+                                            })();
+                                          }}
+                                        >
+                                          Add cost line
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                               <div
                                 style={{
                                   display: "flex",

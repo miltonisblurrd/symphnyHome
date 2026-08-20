@@ -26,6 +26,8 @@ const EDITABLE = new Set([
   "tentative_install_notes",
   "site_ready_notes",
   "deposit_intake_status",
+  "crew_size",
+  "estimated_install_days",
   "notes",
   "risk_flag",
   "lead_id",
@@ -240,6 +242,22 @@ export async function PATCH(request: Request) {
     .select("*")
     .single();
   if (updateError) {
+    if (/column|schema cache/i.test(updateError.message)) {
+      const {
+        crew_size: _c,
+        estimated_install_days: _d,
+        ...base
+      } = update;
+      const retry = await supabase.from("ic_jobs").update(base).eq("id", id).select("*").single();
+      if (retry.error) {
+        return NextResponse.json({ ok: false, error: retry.error.message }, { status: 500 });
+      }
+      return NextResponse.json({
+        ok: true,
+        job: retry.data,
+        hint: "Run drizzle/0012_ic_inventory_schedule.sql for crew size / duration fields.",
+      });
+    }
     return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });
   }
 

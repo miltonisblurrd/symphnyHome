@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import styles from "./install-calendar.module.css";
+import OpsJobCheckModal from "@/components/inspired-closets/OpsJobCheckModal";
 
 export type CalStaff = { id: string; name: string; role: string };
 export type CalClient = {
@@ -26,6 +27,9 @@ export type CalInstallJob = {
   tentative_install_notes?: string | null;
   site_ready_notes?: string | null;
   deposit_intake_status?: string | null;
+  materials_cents?: number;
+  crew_size?: number | null;
+  estimated_install_days?: number | null;
   client: CalClient | null;
   designer: CalStaff | null;
   installer?: CalStaff | null;
@@ -103,6 +107,7 @@ export default function OpsInstallCalendar({
   onAssignInstaller,
   onScheduleInstall,
   onAdvanceStage,
+  onLogInstallConfirm,
   onRefresh,
   weekStartIso,
   onWeekChange,
@@ -118,8 +123,10 @@ export default function OpsInstallCalendar({
     leadId: string | null;
     scheduledAt: string;
     installerId: string | null;
+    acknowledgeNoReceiveDate?: boolean;
   }) => Promise<void>;
   onAdvanceStage: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
+  onLogInstallConfirm?: (jobId: string) => Promise<void>;
   onRefresh: () => void;
   weekStartIso: string;
   onWeekChange: (iso: string) => void;
@@ -137,6 +144,22 @@ export default function OpsInstallCalendar({
   const [scheduleAt, setScheduleAt] = useState("");
   const [scheduleInstaller, setScheduleInstaller] = useState("");
   const [receiveDraft, setReceiveDraft] = useState<Record<string, string>>({});
+  const [scheduleWarn, setScheduleWarn] = useState<string | null>(null);
+  const [jobCheckJob, setJobCheckJob] = useState<CalInstallJob | null>(null);
+  const [suggestions, setSuggestions] = useState<{
+    placements: Array<{
+      jobId: string;
+      clientName: string;
+      startDate: string;
+      endDate: string;
+      days: number;
+      crewSize: number;
+      reason: string;
+      kind: string;
+    }>;
+    unplaced: Array<{ jobId: string; clientName: string; reason: string }>;
+  } | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
 
   const days = useMemo(
     () =>
@@ -188,6 +211,11 @@ export default function OpsInstallCalendar({
     });
   }, [jobs, showAssigned, showUnassigned, showService]);
 
+  const unassignedThisWeek = useMemo(
+    () => events.filter((e) => !e.assigned).length,
+    [events],
+  );
+
   const rangeLabel = `${days[0]?.label ?? ""} – ${days[6]?.label ?? ""}`;
 
   async function saveAssign() {
@@ -197,15 +225,25 @@ export default function OpsInstallCalendar({
     setAssignId("");
   }
 
-  async function saveSchedule() {
+  async function saveSchedule(acknowledgeNoReceiveDate = false) {
     if (!scheduleJob || !scheduleAt) return;
     const when = new Date(scheduleAt);
     if (Number.isNaN(when.getTime())) return;
+    const receive =
+      receiveDraft[scheduleJob.id] ?? scheduleJob.receive_date ?? null;
+    if (!receive && !acknowledgeNoReceiveDate) {
+      setScheduleWarn(
+        "No Studio receive date on this job. You can still schedule — confirm to continue.",
+      );
+      return;
+    }
+    setScheduleWarn(null);
     await onScheduleInstall({
       jobId: scheduleJob.id,
       leadId: scheduleJob.lead_id ?? null,
       scheduledAt: when.toISOString(),
       installerId: scheduleInstaller || null,
+      acknowledgeNoReceiveDate: !receive,
     });
     setScheduleJob(null);
     setScheduleAt("");
@@ -214,6 +252,31 @@ export default function OpsInstallCalendar({
 
   return (
     <div className={styles.glueWrap}>
+      <section className={styles.todayStrip}>
+        <div className={styles.todayHead}>
+          <h3 className={styles.stripTitle}>Des · Today</h3>
+          <span className={styles.sideHint}>Sold → deposit → ready → install</span>
+        </div>
+        <div className={styles.todayStats}>
+          <a className={styles.todayStat} href="/inspired-closets/ops/billing">
+            <strong>{awaitingDeposit.length}</strong>
+            <span>Awaiting deposit</span>
+          </a>
+          <button
+            type="button"
+            className={styles.todayStat}
+            onClick={() => setShowQueues(true)}
+          >
+            <strong>{readyToSchedule.length}</strong>
+            <span>Ready to schedule</span>
+          </button>
+          <div className={styles.todayStat}>
+            <strong>{unassignedThisWeek}</strong>
+            <span>Unassigned this week</span>
+          </div>
+        </div>
+      </section>
+
       <div className={styles.shell}>
         <aside className={styles.sidebar}>
           <p className={styles.sideGroup}>Queues</p>
@@ -319,8 +382,121 @@ export default function OpsInstallCalendar({
               <button type="button" className={styles.navBtn} onClick={onRefresh}>
                 Refresh
               </button>
+              <button
+                type="button"
+                className={styles.assignBtn}
+                disabled={busy || suggesting}
+                onClick={() => {
+                  setSuggesting(true);
+                  const from = ymd(weekStart);
+                  const to = ymd(addDays(weekStart, 14));
+                  void (async () => {
+                    try {
+                      const response = await fetch(
+                        "/api/inspired-closets/ops/schedule/suggest",
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ from, to }),
+                        },
+                      );
+                      const payload = (await response.json()) as {
+                        ok: boolean;
+                        error?: string;
+                        placements?: Array<{
+                          jobId: string;
+                          clientName: string;
+                          startDate: string;
+                          endDate: string;
+                          days: number;
+                          crewSize: number;
+                          reason: string;
+                          kind: string;
+                        }>;
+                        unplaced?: Array<{ jobId: string; clientName: string; reason: string }>;
+                      };
+                      if (!payload.ok) throw new Error(payload.error ?? "Suggest failed.");
+                      setSuggestions({
+                        placements: payload.placements ?? [],
+                        unplaced: payload.unplaced ?? [],
+                      });
+                    } catch {
+                      setSuggestions({
+                        placements: [],
+                        unplaced: [{ jobId: "", clientName: "Could not draft", reason: "Try again" }],
+                      });
+                    } finally {
+                      setSuggesting(false);
+                    }
+                  })();
+                }}
+              >
+                {suggesting ? "Drafting…" : "Suggest schedule"}
+              </button>
             </div>
           </div>
+
+          {suggestions ? (
+            <section className={styles.strip}>
+              <div className={styles.stripHead}>
+                <h3 className={styles.stripTitle}>Draft — review then accept</h3>
+                <button
+                  type="button"
+                  className={styles.navBtn}
+                  onClick={() => setSuggestions(null)}
+                >
+                  Hide
+                </button>
+              </div>
+              <p className={styles.stripEmpty}>
+                Nothing books until you accept. Then Des calls each client to confirm.
+              </p>
+              {suggestions.placements.length === 0 ? (
+                <p className={styles.stripEmpty}>No placements this window.</p>
+              ) : (
+                <ul className={styles.stripList}>
+                  {suggestions.placements.map((row) => (
+                    <li key={row.jobId} className={styles.stripItemReady}>
+                      <div>
+                        <strong>
+                          {row.clientName} · {shortDate(row.startDate)}
+                          {row.endDate !== row.startDate ? `–${shortDate(row.endDate)}` : ""}
+                        </strong>
+                        <span className={styles.stripMeta}>{row.reason}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.assignBtn}
+                        disabled={busy}
+                        onClick={() =>
+                          void onScheduleInstall({
+                            jobId: row.jobId,
+                            leadId: null,
+                            scheduledAt: `${row.startDate}T08:00:00`,
+                            installerId: null,
+                          })
+                        }
+                      >
+                        Accept
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {suggestions.unplaced.length > 0 ? (
+                <ul className={styles.stripList}>
+                  {suggestions.unplaced.map((row) => (
+                    <li key={row.jobId || row.clientName} className={styles.stripItem}>
+                      <div>
+                        <strong>{row.clientName}</strong>
+                        <span className={styles.stripMeta}>{row.reason}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
 
           {view === "calendar" ? (
             <div className={styles.weekScroll}>
@@ -473,6 +649,12 @@ export default function OpsInstallCalendar({
                         Stage: {(job.stage ?? "").replace(/_/g, " ")}
                         {job.receive_date ? ` · Receive ${shortDate(job.receive_date)}` : ""}
                         {job.studio_ref ? ` · Studio ${job.studio_ref}` : ""}
+                        {` · Materials ${dollars(job.materials_cents ?? 0)}`}
+                        {(job.materials_cents ?? 0) <= 0 ? " · no allocate yet" : ""}
+                        {job.crew_size ? ` · ${job.crew_size} guys` : ""}
+                        {job.estimated_install_days
+                          ? ` · ${job.estimated_install_days}d`
+                          : ""}
                       </span>
                     </div>
                     <div className={styles.stripActions}>
@@ -481,11 +663,19 @@ export default function OpsInstallCalendar({
                           type="button"
                           className={styles.navBtn}
                           disabled={busy}
-                          onClick={() =>
-                            void onAdvanceStage(job.id, { stage: "job_check" })
-                          }
+                          onClick={() => setJobCheckJob(job)}
                         >
                           Job check
+                        </button>
+                      ) : null}
+                      {job.stage === "job_check" || job.stage === "ordered" ? (
+                        <button
+                          type="button"
+                          className={styles.navBtn}
+                          disabled={busy}
+                          onClick={() => setJobCheckJob(job)}
+                        >
+                          Stock / crew
                         </button>
                       ) : null}
                       {job.stage === "job_check" ? (
@@ -632,6 +822,17 @@ export default function OpsInstallCalendar({
                   </button>
                 </div>
                 <p className={styles.sideHint}>Current: {selected.installerName}</p>
+                {onLogInstallConfirm ? (
+                  <button
+                    type="button"
+                    className={styles.navBtn}
+                    style={{ marginTop: "0.65rem" }}
+                    disabled={busy}
+                    onClick={() => void onLogInstallConfirm(selected.jobId)}
+                  >
+                    Log install confirm sent
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -642,7 +843,10 @@ export default function OpsInstallCalendar({
         <div
           className={styles.modalBackdrop}
           role="presentation"
-          onClick={() => setScheduleJob(null)}
+          onClick={() => {
+            setScheduleJob(null);
+            setScheduleWarn(null);
+          }}
         >
           <div
             className={styles.modal}
@@ -660,7 +864,10 @@ export default function OpsInstallCalendar({
               <button
                 type="button"
                 className={styles.navBtn}
-                onClick={() => setScheduleJob(null)}
+                onClick={() => {
+                  setScheduleJob(null);
+                  setScheduleWarn(null);
+                }}
               >
                 ✕
               </button>
@@ -669,6 +876,12 @@ export default function OpsInstallCalendar({
               <p>
                 <span className={styles.fieldLabel}>Contract</span>
                 {dollars(scheduleJob.contract_cents)}
+              </p>
+              <p>
+                <span className={styles.fieldLabel}>Receive date</span>
+                {scheduleJob.receive_date
+                  ? shortDate(scheduleJob.receive_date)
+                  : "Not set — Studio receive still open"}
               </p>
               <label className={styles.fieldBlock}>
                 <span className={styles.fieldLabel}>Install date & time</span>
@@ -694,17 +907,40 @@ export default function OpsInstallCalendar({
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
-                className={styles.assignBtn}
-                disabled={busy || !scheduleAt}
-                onClick={() => void saveSchedule()}
-              >
-                Save on Install Calendar
-              </button>
+              {scheduleWarn ? (
+                <p className={styles.stripEmpty} style={{ color: "#821f2d" }}>
+                  {scheduleWarn}
+                </p>
+              ) : null}
+              <div className={styles.assignRow}>
+                <button
+                  type="button"
+                  className={styles.assignBtn}
+                  disabled={busy || !scheduleAt}
+                  onClick={() => void saveSchedule(Boolean(scheduleWarn))}
+                >
+                  {scheduleWarn ? "Schedule anyway" : "Save on Install Calendar"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
+      ) : null}
+
+      {jobCheckJob ? (
+        <OpsJobCheckModal
+          jobId={jobCheckJob.id}
+          clientName={jobCheckJob.client?.name ?? "Client"}
+          contractCents={jobCheckJob.contract_cents}
+          initialCrew={jobCheckJob.crew_size}
+          initialDays={jobCheckJob.estimated_install_days}
+          busy={busy}
+          onClose={() => setJobCheckJob(null)}
+          onSaved={async (patch) => {
+            await onAdvanceStage(jobCheckJob.id, patch);
+            setJobCheckJob(null);
+          }}
+        />
       ) : null}
     </div>
   );

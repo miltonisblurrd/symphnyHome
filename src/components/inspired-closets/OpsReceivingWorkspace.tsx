@@ -40,6 +40,7 @@ export default function OpsReceivingWorkspace() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [loadingDemo, setLoadingDemo] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const [missing, setMissing] = useState<
@@ -139,10 +140,41 @@ export default function OpsReceivingWorkspace() {
     }
   }
 
+  async function loadDemo() {
+    setLoadingDemo(true);
+    setNotice(null);
+    try {
+      window.open("/inspired-closets/ops/inventory/receiving/demo-slip", "_blank");
+      const response = await fetch("/api/inspired-closets/ops/receiving/demo", { method: "POST" });
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        reused?: boolean;
+        imported?: number;
+        scan_url?: string;
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not load demo truck.");
+      await load();
+      setNotice({
+        kind: "info",
+        text: payload.reused
+          ? "Demo truck already in the OS. Keep the slip tab on this computer. On your phone, tap Scan on notice 80129999."
+          : `Demo truck loaded (${payload.imported ?? 0} lines, 8 pieces). Keep the slip tab on this computer. On your phone, tap Scan on notice 80129999.`,
+      });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not load demo truck.",
+      });
+    } finally {
+      setLoadingDemo(false);
+    }
+  }
+
   return (
     <OpsShell
       title="Receiving"
-      subtitle="Upload the packing slip, scan labels, write stock and job % into the OS"
+      subtitle="Office loads the packing slip. Warehouse scans labels. Stock and job % write into the OS."
       actions={
         <button type="button" className={payroll.buttonGhost} onClick={() => void load()} disabled={loading}>
           Refresh
@@ -160,8 +192,9 @@ export default function OpsReceivingWorkspace() {
         <section className={payroll.panel} style={{ marginBottom: "1rem" }}>
           <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.1rem" }}>New truck</h2>
           <p className={payroll.empty} style={{ marginTop: 0 }}>
-            Use the original Stow PDF (the one on the shipment email), not a photo. Harbor / no-barcode
-            lines can be added by hand on the shipment after upload.
+            Real trucks: original Stow PDF from the shipment email, not a photo. Harbor / no-barcode
+            lines can be added by hand after upload. To test on a phone, load the demo truck and
+            point the camera at the numbers on your desktop.
           </p>
           <input
             ref={fileRef}
@@ -202,6 +235,17 @@ export default function OpsReceivingWorkspace() {
             >
               Import parsed JSON
             </button>
+            <button
+              type="button"
+              className={payroll.buttonGhost}
+              disabled={uploading || loadingDemo}
+              onClick={() => void loadDemo()}
+            >
+              {loadingDemo ? "Loading demo…" : "Load demo truck"}
+            </button>
+            <Link href="/inspired-closets/ops/inventory/receiving/demo-slip" className={payroll.buttonGhost}>
+              Open demo slip
+            </Link>
           </div>
         </section>
 

@@ -172,7 +172,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     };
   }, [tab]);
 
-  async function postScan(code: string, qty = 1) {
+  const postScan = useCallback(async (code: string, qty = 1) => {
     try {
       const response = await fetch(
         `/api/inspired-closets/ops/receiving/shipments/${shipmentId}/scan`,
@@ -229,7 +229,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
         warn: true,
       });
     }
-  }
+  }, [load, pallet, shipmentId]);
 
   const loop = useCallback(async () => {
     if (!holdRef.current || !workerRef.current || !videoRef.current || !canvasRef.current) {
@@ -260,7 +260,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       /* keep looping */
     }
     if (holdRef.current) rafRef.current = requestAnimationFrame(() => void loop());
-  }, [pallet, shipmentId]);
+  }, [postScan]);
 
   function startHold() {
     if (!ocrReady) {

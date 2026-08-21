@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import styles from "./ops-payroll.module.css";
 
@@ -549,9 +550,9 @@ export default function OpsInventoryWorkspace() {
       subtitle="What’s on the shelf, what’s promised to jobs, what to reorder"
       actions={
         <>
-          <a href="/inspired-closets/ops/inventory/receiving" className={styles.buttonPrimary}>
+          <Link href="/inspired-closets/ops/inventory/receiving" className={styles.buttonPrimary}>
             Receiving / scan
-          </a>
+          </Link>
           <button
             type="button"
             className={styles.buttonGhost}
@@ -603,7 +604,7 @@ export default function OpsInventoryWorkspace() {
           >
             <p style={{ margin: 0, fontSize: "0.95rem" }}>
               <strong>Two jobs here:</strong> a truck arrives →{" "}
-              <a href="/inspired-closets/ops/inventory/receiving">Receiving / scan</a>
+              <Link href="/inspired-closets/ops/inventory/receiving">Receiving / scan</Link>
               . Parts pulled for a client → <strong>To job</strong>. Find the part, hit the button.
             </p>
             <div style={{ display: "flex", gap: "0.5rem" }}>

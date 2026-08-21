@@ -612,7 +612,106 @@ export type IcStockMovement = typeof icStockMovements.$inferSelect;
 export type IcJobMaterial = typeof icJobMaterials.$inferSelect;
 export type IcTimeEntry = typeof icTimeEntries.$inferSelect;
 export type IcJobMedia = typeof icJobMedia.$inferSelect;
+export const icShipmentStatusEnum = pgEnum("ic_shipment_status", [
+  "parsing",
+  "ready",
+  "in_progress",
+  "complete",
+]);
+
+export const icShipmentItemStatusEnum = pgEnum("ic_shipment_item_status", [
+  "expected",
+  "received",
+  "damaged",
+  "missing",
+]);
+
+export const icShipmentScanResultEnum = pgEnum("ic_shipment_scan_result", [
+  "matched",
+  "already_received",
+  "unknown",
+  "pallet_mismatch",
+]);
+
+/** Packing-slip receive session — ModulusScan clone, owned by the OS. */
+export const icShipments = pgTable("ic_shipments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  notice: text("notice"),
+  shipDate: date("ship_date"),
+  vendor: text("vendor").notNull().default("stow"),
+  status: icShipmentStatusEnum("status").notNull().default("parsing"),
+  sourceFilename: text("source_filename"),
+  storagePath: text("storage_path"),
+  publicUrl: text("public_url"),
+  totalPages: integer("total_pages").notNull().default(0),
+  parseError: text("parse_error"),
+  parseQuality: jsonb("parse_quality"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const icShipmentItems = pgTable("ic_shipment_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shipmentId: uuid("shipment_id")
+    .notNull()
+    .references(() => icShipments.id),
+  itemNumber: text("item_number").notNull(),
+  soNumber: text("so_number"),
+  custRef: text("cust_ref"),
+  jobName: text("job_name"),
+  projectNumber: text("project_number"),
+  description: text("description"),
+  qty: integer("qty").notNull().default(1),
+  receivedQty: integer("received_qty").notNull().default(0),
+  damagedQty: integer("damaged_qty").notNull().default(0),
+  containerId: text("container_id"),
+  sourcePage: integer("source_page"),
+  status: icShipmentItemStatusEnum("status").notNull().default("expected"),
+  vendorSku: text("vendor_sku"),
+  jobId: uuid("job_id").references(() => icJobs.id),
+  partId: uuid("part_id").references(() => icParts.id),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icShipmentScans = pgTable("ic_shipment_scans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shipmentId: uuid("shipment_id")
+    .notNull()
+    .references(() => icShipments.id),
+  itemId: uuid("item_id").references(() => icShipmentItems.id),
+  scannedValue: text("scanned_value").notNull(),
+  result: icShipmentScanResultEnum("result").notNull().default("matched"),
+  qty: integer("qty").notNull().default(1),
+  actorId: uuid("actor_id").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icShipmentClaims = pgTable("ic_shipment_claims", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shipmentId: uuid("shipment_id")
+    .notNull()
+    .references(() => icShipments.id),
+  itemId: uuid("item_id").references(() => icShipmentItems.id),
+  claimType: text("claim_type").notNull().default("DAMAGED"),
+  description: text("description").notNull(),
+  damagedQty: integer("damaged_qty").notNull().default(1),
+  photoUrl: text("photo_url"),
+  status: text("status").notNull().default("draft"),
+  reorder: boolean("reorder").notNull().default(false),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export type IcFieldIssue = typeof icFieldIssues.$inferSelect;
+export type IcShipment = typeof icShipments.$inferSelect;
+export type IcShipmentItem = typeof icShipmentItems.$inferSelect;
+export type IcShipmentScan = typeof icShipmentScans.$inferSelect;
+export type IcShipmentClaim = typeof icShipmentClaims.$inferSelect;
 
 export type IcRole = (typeof icRoleEnum.enumValues)[number];
 export type IcJobStage = (typeof icJobStageEnum.enumValues)[number];
@@ -631,3 +730,6 @@ export type IcStockMovementType = (typeof icStockMovementTypeEnum.enumValues)[nu
 export type IcMediaKind = (typeof icMediaKindEnum.enumValues)[number];
 export type IcFieldIssueType = (typeof icFieldIssueTypeEnum.enumValues)[number];
 export type IcFieldIssueStatus = (typeof icFieldIssueStatusEnum.enumValues)[number];
+export type IcShipmentStatus = (typeof icShipmentStatusEnum.enumValues)[number];
+export type IcShipmentItemStatus = (typeof icShipmentItemStatusEnum.enumValues)[number];
+export type IcShipmentScanResult = (typeof icShipmentScanResultEnum.enumValues)[number];

@@ -70,6 +70,12 @@ type Attention = {
     install_date: string | null;
     unstaged: number;
   }>;
+  receivingShortJobs?: Array<{
+    job_name: string;
+    cust_ref: string;
+    open: number;
+  }>;
+  receivingOpenLines?: number;
 };
 
 type ApiResponse = {
@@ -542,14 +548,19 @@ export default function OpsInventoryWorkspace() {
       title="Inventory"
       subtitle="What’s on the shelf, what’s promised to jobs, what to reorder"
       actions={
-        <button
-          type="button"
-          className={styles.buttonGhost}
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          Refresh
-        </button>
+        <>
+          <a href="/inspired-closets/ops/inventory/receiving" className={styles.buttonPrimary}>
+            Receiving / scan
+          </a>
+          <button
+            type="button"
+            className={styles.buttonGhost}
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            Refresh
+          </button>
+        </>
       }
     >
       {notice ? (
@@ -565,7 +576,7 @@ export default function OpsInventoryWorkspace() {
           </h2>
           <p className={styles.empty} style={{ marginTop: 0 }}>
             Hit <strong>Choose Excel / CSV</strong> and pick the warehouse count file. After
-            this, the only daily work is <strong>Receive</strong> when stock arrives and{" "}
+            this, daily work is <strong>Receiving / scan</strong> when a truck arrives and{" "}
             <strong>To job</strong> when parts are pulled.
           </p>
           {importControls()}
@@ -591,9 +602,9 @@ export default function OpsInventoryWorkspace() {
             }}
           >
             <p style={{ margin: 0, fontSize: "0.95rem" }}>
-              <strong>Two jobs on this page:</strong> stock arrives →{" "}
-              <strong>Receive</strong>. Parts pulled for a client →{" "}
-              <strong>To job</strong>. Find the part, hit the button on its row.
+              <strong>Two jobs here:</strong> a truck arrives →{" "}
+              <a href="/inspired-closets/ops/inventory/receiving">Receiving / scan</a>
+              . Parts pulled for a client → <strong>To job</strong>. Find the part, hit the button.
             </p>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button
@@ -606,7 +617,8 @@ export default function OpsInventoryWorkspace() {
                   ? ` (${
                       attention.lowStock.length +
                       attention.missingMaterials.length +
-                      (attention.unstagedInstalls ?? []).length
+                      (attention.unstagedInstalls ?? []).length +
+                      (attention.receivingOpenLines ?? 0)
                     })`
                   : ""}
               </button>
@@ -656,6 +668,10 @@ export default function OpsInventoryWorkspace() {
               <span className={styles.summaryStrong}>
                 {(attention.unstagedInstalls ?? []).length}
               </span>
+            </span>
+            <span>
+              Slip lines still out{" "}
+              <span className={styles.summaryStrong}>{attention.receivingOpenLines ?? 0}</span>
             </span>
           </div>
           {attention.missingMaterials.length > 0 ? (
@@ -711,6 +727,18 @@ export default function OpsInventoryWorkspace() {
                     {job.client_name}
                     {job.install_date ? ` · ${job.install_date}` : ""} · {job.unstaged}{" "}
                     unstaged
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(attention.receivingShortJobs ?? []).length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>Packing-slip jobs still short</p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {(attention.receivingShortJobs ?? []).slice(0, 8).map((job) => (
+                  <li key={job.cust_ref} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+                    {job.job_name} · {job.open} lines not fully received
                   </li>
                 ))}
               </ul>

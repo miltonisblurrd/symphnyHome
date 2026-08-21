@@ -1,0 +1,307 @@
+.wrap {
+  --ic-black: #000000;
+  --ic-white: #ffffff;
+  --ic-red: #821f2d;
+  --ic-blush: #fdeae6;
+  --ic-bone: #efe9e5;
+  --ok: #1c5c2c;
+  --ok-bg: #e5f4e8;
+  --muted: rgba(0, 0, 0, 0.55);
+  --line: rgba(0, 0, 0, 0.1);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 0.55rem;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: var(--ic-red);
+  border-radius: inherit;
+}
+
+.barOk .barFill {
+  background: var(--ok);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: var(--ic-bone);
+}
+
+.pillReady {
+  background: #e8eef9;
+  color: #1e3a6e;
+}
+
+.pillProgress {
+  background: #e8f1ff;
+  color: #1d4ed8;
+}
+
+.pillDone {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.pillWarn {
+  background: var(--ic-blush);
+  color: var(--ic-red);
+}
+
+.vendor {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jobGrid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+
+.jobCard {
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  padding: 0.85rem;
+}
+
+.jobCard h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.jobCard p {
+  margin: 0.2rem 0 0.55rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.lineRow {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+/* Scan screen — dark, phone-first, like the warehouse app they already use. */
+.scanPage {
+  min-height: 100dvh;
+  background: #0b1220;
+  color: #e2e8f0;
+  font-family: "Lato", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+.scanTop {
+  padding: 0.85rem 1rem 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.scanTop a {
+  color: #93c5fd;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.scanTitle {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.scanMeta {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0 1rem 0.65rem;
+}
+
+.tab {
+  flex: 1;
+  border: 0;
+  border-radius: 0.7rem;
+  padding: 0.55rem;
+  font-weight: 800;
+  font-size: 0.8rem;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.tabOn {
+  background: #334155;
+  color: #fff;
+}
+
+.cameraWrap {
+  position: relative;
+  margin: 0 1rem;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 4 / 3;
+}
+
+.cameraWrap video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scanBand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 36%;
+  height: 28%;
+  border-top: 2px solid #60a5fa;
+  border-bottom: 2px solid #60a5fa;
+  background: rgba(37, 99, 235, 0.12);
+  pointer-events: none;
+}
+
+.holdBtn {
+  margin: 0.85rem 1rem 0;
+  border: 0;
+  border-radius: 1rem;
+  padding: 1rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.holdBtn:active,
+.holdScanning {
+  background: #d97706;
+}
+
+.banner {
+  margin: 0.75rem 1rem;
+  padding: 0.85rem;
+  border-radius: 0.9rem;
+  background: #14532d;
+  border: 1px solid #166534;
+}
+
+.bannerWarn {
+  background: #7c2d12;
+  border-color: #9a3412;
+}
+
+.banner h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.banner p {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.searchBox {
+  margin: 0 1rem 0.65rem;
+  width: calc(100% - 2rem);
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #fff;
+  border-radius: 0.75rem;
+  padding: 0.8rem;
+  font-size: 1rem;
+}
+
+.browseItem {
+  margin: 0 1rem 0.5rem;
+  padding: 0.85rem;
+  border-radius: 0.9rem;
+  background: #111827;
+  border: 1px solid #1f2937;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.qtyBtns {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.qtyBtns button {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.7rem;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.palletBar {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0 1rem 0.65rem;
+}
+
+.palletChip {
+  flex: 0 0 auto;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.palletOn {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+@media print {
+  .noPrint {
+    display: none !important;
+  }
+}

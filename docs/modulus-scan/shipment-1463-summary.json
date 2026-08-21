@@ -1,0 +1,147 @@
+{
+ "id": 1463,
+ "org_id": 47,
+ "shipment_notice": "80129014",
+ "ship_date": "08/20/2026",
+ "sold_to": null,
+ "ship_to": null,
+ "total_items": 196,
+ "received_items": 50,
+ "status": "in_progress",
+ "source_filename": "20260821_171209_80129014.PDF",
+ "total_pages": 6,
+ "pdf_deleted": 0,
+ "created_at": "2026-08-21T17:12:10.245255+00:00",
+ "updated_at": "2026-08-21T19:39:56.983095+00:00",
+ "parse_error": null,
+ "deleted_at": null,
+ "pdf_sha256": "b0103198601b855b95ec7397233c12eac285e7e916679a1a0212eb7b193159ef",
+ "vendor": "stow",
+ "stats": {
+  "total": 196,
+  "total_qty": 479,
+  "total_received_qty": 134,
+  "pending": 146,
+  "received": 50,
+  "damaged": 0,
+  "missing": 0
+ },
+ "by_job": [
+  {
+   "job_name": "FOX",
+   "cust_ref": "FOX_071526",
+   "items": 40,
+   "total_qty": 104,
+   "total_received_qty": 28,
+   "received": 9,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "job_name": "Johnson",
+   "cust_ref": "Johnson_073126",
+   "items": 37,
+   "total_qty": 54,
+   "total_received_qty": 21,
+   "received": 14,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "job_name": "McCaw",
+   "cust_ref": "McCaw_072726",
+   "items": 35,
+   "total_qty": 100,
+   "total_received_qty": 23,
+   "received": 8,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "job_name": "New",
+   "cust_ref": "New_Cart_81947",
+   "items": 2,
+   "total_qty": 8,
+   "total_received_qty": 0,
+   "received": 0,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "job_name": "Wright",
+   "cust_ref": "Wright_072426",
+   "items": 82,
+   "total_qty": 213,
+   "total_received_qty": 62,
+   "received": 19,
+   "damaged": 0,
+   "missing": 0
+  }
+ ],
+ "by_container": [
+  {
+   "container_id": "1712600010727",
+   "items": 40,
+   "total_qty": 120,
+   "total_received_qty": 120,
+   "received": 40,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048806",
+   "items": 58,
+   "total_qty": 127,
+   "total_received_qty": 0,
+   "received": 0,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048807",
+   "items": 57,
+   "total_qty": 161,
+   "total_received_qty": 0,
+   "received": 0,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048808",
+   "items": 31,
+   "total_qty": 52,
+   "total_received_qty": 0,
+   "received": 0,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048809",
+   "items": 2,
+   "total_qty": 2,
+   "total_received_qty": 2,
+   "received": 2,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048810",
+   "items": 7,
+   "total_qty": 16,
+   "total_received_qty": 11,
+   "received": 7,
+   "damaged": 0,
+   "missing": 0
+  },
+  {
+   "container_id": "7000000048811",
+   "items": 1,
+   "total_qty": 1,
+   "total_received_qty": 1,
+   "received": 1,
+   "damaged": 0,
+   "missing": 0
+  }
+ ],
+ "unknown_scans": []
+}

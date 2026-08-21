@@ -28,6 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/inspired-closets/ops/jobs", label: "Jobs", icon: "▤" },
       { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
+      { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▣" },
       { href: "/inspired-closets/ops/crew", label: "Crew", icon: "◎" },
       { href: "/inspired-closets/field", label: "Field app", icon: "◦" },
     ],
@@ -40,6 +41,12 @@ const NAV_GROUPS: NavGroup[] = [
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/inspired-closets/ops") return pathname === href;
+  if (href === "/inspired-closets/ops/inventory") {
+    return (
+      pathname === href ||
+      (pathname.startsWith(`${href}/`) && !pathname.includes("/receiving"))
+    );
+  }
   return pathname.startsWith(href);
 }
 

@@ -164,6 +164,8 @@ export async function GET() {
     }
   }
 
+  const receiving = await receivingAttention(supabase);
+
   return NextResponse.json({
     ok: true,
     attention: {
@@ -173,6 +175,38 @@ export async function GET() {
       unallocatedReceives,
       missingMaterials,
       unstagedInstalls,
+      receivingShortJobs: receiving.shortJobs,
+      receivingOpenLines: receiving.openLines,
     },
   });
+}
+
+async function receivingAttention(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const { data: items, error } = await supabase
+    .from("ic_shipment_items")
+    .select("id, shipment_id, item_number, cust_ref, job_name, qty, received_qty, status, job_id")
+    .in("status", ["expected", "missing"])
+    .limit(2000);
+  if (error) return { shortJobs: [] as Array<Record<string, unknown>>, openLines: 0 };
+
+  const short = (items ?? []).filter((row) => (row.received_qty ?? 0) < (row.qty ?? 1));
+  const byJob = new Map<
+    string,
+    { job_name: string; cust_ref: string; open: number; job_id: string | null }
+  >();
+  for (const row of short) {
+    const key = String(row.cust_ref || row.job_name || "Unassigned");
+    const bucket = byJob.get(key) ?? {
+      job_name: String(row.job_name || key),
+      cust_ref: String(row.cust_ref || key),
+      open: 0,
+      job_id: (row.job_id as string | null) ?? null,
+    };
+    bucket.open += 1;
+    byJob.set(key, bucket);
+  }
+  return {
+    shortJobs: [...byJob.values()].sort((a, b) => b.open - a.open).slice(0, 20),
+    openLines: short.length,
+  };
 }

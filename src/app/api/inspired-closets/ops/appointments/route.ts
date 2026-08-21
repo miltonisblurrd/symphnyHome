@@ -10,6 +10,7 @@ import {
   type IcAppointmentStatus,
 } from "@/lib/inspired-closets-ops-appointments";
 import { isDepositPaid } from "@/lib/inspired-closets-ops-billing";
+import { installBlockedByReceiving } from "@/lib/inspired-closets-ops-receiving";
 import {
   getGoogleCalendarStatus,
   pushAppointmentById,
@@ -251,6 +252,10 @@ export async function POST(request: Request) {
         },
         { status: 409 },
       );
+    }
+    const receiving = await installBlockedByReceiving(jobId);
+    if (receiving.blocked) {
+      return NextResponse.json({ ok: false, error: receiving.message }, { status: 409 });
     }
   }
 

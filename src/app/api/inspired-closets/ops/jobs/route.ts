@@ -5,6 +5,7 @@ import {
   ensurePaymentMilestones,
   markInstallFortyDue,
 } from "@/lib/inspired-closets-ops-billing";
+import { installBlockedByReceiving } from "@/lib/inspired-closets-ops-receiving";
 
 export const runtime = "nodejs";
 
@@ -216,6 +217,17 @@ export async function PATCH(request: Request) {
   }
   if (!current) {
     return NextResponse.json({ ok: false, error: "Job not found." }, { status: 404 });
+  }
+
+  if (
+    typeof body.stage === "string" &&
+    (body.stage === "install_scheduled" || body.stage === "install_in_progress") &&
+    current.stage !== body.stage
+  ) {
+    const receiving = await installBlockedByReceiving(id);
+    if (receiving.blocked) {
+      return NextResponse.json({ ok: false, error: receiving.message }, { status: 409 });
+    }
   }
 
   const update: Record<string, unknown> = {};

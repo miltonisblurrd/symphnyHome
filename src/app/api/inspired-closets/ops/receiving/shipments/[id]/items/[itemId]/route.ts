@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { applyStockMovement } from "@/lib/inspired-closets-ops-inventory";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
-import { lineStatus } from "@/lib/inspired-closets-ops-receiving";
+import { lineStatus, notifyReceiving } from "@/lib/inspired-closets-ops-receiving";
 
 export const runtime = "nodejs";
 
@@ -65,6 +65,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
       .select("*")
       .single();
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    if (action === "missing") {
+      await notifyReceiving({
+        title: `Missing: ${item.item_number}`,
+        message: `${item.job_name || item.cust_ref || "Unassigned"} · ${item.description ?? item.item_number} still not on the truck.`,
+        severity: "warning",
+      });
+    }
     return NextResponse.json({ ok: true, item: data });
   }
 

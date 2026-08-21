@@ -53,6 +53,8 @@ export function normalizeCode(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
+const SKIP_JOB_WORDS = new Set(["demo", "new", "cart", "the", "a", "and"]);
+
 /** FOX_071526 / CAVANAUGH-072126 / CRISOLOGO #2 → searchable client name. */
 export function jobNameFromCustRef(custRef: string | null | undefined): string {
   if (!custRef) return "";
@@ -62,6 +64,15 @@ export function jobNameFromCustRef(custRef: string | null | undefined): string {
     .replace(/#\s*\d+/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Last meaningful name on the slip (Wright from Wright_072426 or DEMO_Wright). */
+export function clientHintFromSlip(custRef?: string | null, jobName?: string | null): string {
+  const words = `${jobNameFromCustRef(custRef)} ${jobName ?? ""}`
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word && !SKIP_JOB_WORDS.has(word.toLowerCase()) && !/^\d+$/.test(word));
+  return words[words.length - 1] || words[0] || "";
 }
 
 export function lineStatus(received: number, qty: number, damaged = 0, forced?: string): string {
@@ -196,54 +207,203 @@ export function matchItem(
   return { item: open[0], result: "matched" };
 }
 
-export async function linkItemToOs(item: ParsedSlipItem): Promise<{
+function partCategoryFromDescription(description?: string | null): string {
+  const prefix = (description ?? "").trim().slice(0, 2).toUpperCase();
+  if (["DF", "SH", "DB", "VT", "DR", "TV", "WD"].includes(prefix)) return "panels";
+  return "hardware";
+}
+
+async function findPartId(codes: string[]): Promise<string | null> {
+  const supabase = getSupabaseAdmin();
+  const unique = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+  for (const code of unique) {
+    const { data } = await supabase
+      .from("ic_parts")
+      .select("id, barcode")
+      .is("deleted_at", null)
+      .or(`sku.eq.${code},sku.ilike.${code},barcode.eq.${code}`)
+      .limit(1)
+      .maybeSingle();
+    if (data?.id) {
+      if (!data.barcode && /^\d{6,}$/.test(code)) {
+        await supabase.from("ic_parts").update({ barcode: code }).eq("id", data.id);
+      }
+      return data.id as string;
+    }
+  }
+  return null;
+}
+
+async function ensurePartForSlipItem(item: ParsedSlipItem): Promise<string | null> {
+  const sku = item.item_number.trim();
+  if (!sku) return null;
+  const existing = await findPartId([sku, item.vendor_sku ?? ""]);
+  if (existing) return existing;
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("ic_parts")
+    .insert({
+      sku,
+      name: (item.description || sku).trim(),
+      category: partCategoryFromDescription(item.description),
+      barcode: sku,
+      vendor: "Stow",
+      qty_on_hand: 0,
+      qty_reserved: 0,
+      notes: `Created from packing slip${item.cust_ref ? ` · ${item.cust_ref}` : ""}.`,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    const raced = await findPartId([sku]);
+    return raced;
+  }
+  return (data?.id as string) ?? null;
+}
+
+async function findJobId(item: ParsedSlipItem): Promise<string | null> {
+  const hint = clientHintFromSlip(item.cust_ref, item.job_name);
+  if (!hint) return null;
+  const supabase = getSupabaseAdmin();
+  const { data: clients } = await supabase
+    .from("ic_clients")
+    .select("id, name")
+    .is("deleted_at", null)
+    .ilike("name", `%${hint}%`)
+    .limit(40);
+  const needle = hint.toLowerCase();
+  const client = (clients ?? []).find((row) => {
+    const tokens = String(row.name ?? "")
+      .toLowerCase()
+      .split(/[\s,/]+/)
+      .filter(Boolean);
+    return tokens.includes(needle) || String(row.name ?? "").toLowerCase() === needle;
+  });
+  if (!client?.id) return null;
+
+  const { data: jobs } = await supabase
+    .from("ic_jobs")
+    .select("id, stage, install_date")
+    .eq("client_id", client.id)
+    .is("deleted_at", null)
+    .order("install_date", { ascending: false, nullsFirst: false })
+    .limit(12);
+  const open = (jobs ?? []).filter((job) => !["closed", "cancelled"].includes(String(job.stage)));
+  const preferred = open.find((job) =>
+    ["ordered", "job_check", "deposit_received", "install_scheduled"].includes(String(job.stage)),
+  );
+  return preferred?.id ?? open[0]?.id ?? null;
+}
+
+export async function linkItemToOs(
+  item: ParsedSlipItem,
+  options: { createPart?: boolean } = {},
+): Promise<{
   job_id: string | null;
   part_id: string | null;
 }> {
+  const partId = options.createPart === false
+    ? await findPartId([item.item_number, item.vendor_sku ?? ""])
+    : await ensurePartForSlipItem(item);
+  const jobId = await findJobId(item);
+  return { job_id: jobId, part_id: partId };
+}
+
+export async function relinkShipmentItems(shipmentId: string): Promise<{
+  linked_parts: number;
+  linked_jobs: number;
+  unassigned: number;
+}> {
   const supabase = getSupabaseAdmin();
-  let partId: string | null = null;
-  let jobId: string | null = null;
+  const { data: items, error } = await supabase
+    .from("ic_shipment_items")
+    .select(
+      "id, item_number, vendor_sku, cust_ref, job_name, description, qty, received_qty, job_id, part_id",
+    )
+    .eq("shipment_id", shipmentId);
+  if (error) throw error;
 
-  const sku = item.item_number.trim();
-  if (sku) {
-    const { data: bySku } = await supabase
-      .from("ic_parts")
-      .select("id")
-      .is("deleted_at", null)
-      .or(`sku.ilike.${sku},barcode.eq.${sku}`)
-      .limit(1)
-      .maybeSingle();
-    if (bySku?.id) partId = bySku.id as string;
-  }
-
-  const hint = jobNameFromCustRef(item.cust_ref) || (item.job_name ?? "").trim();
-  if (hint) {
-    const { data: clients } = await supabase
-      .from("ic_clients")
-      .select("id, name")
-      .is("deleted_at", null)
-      .ilike("name", `%${hint.split(" ")[0]}%`)
-      .limit(20);
-    const client = (clients ?? []).find((c) =>
-      String(c.name ?? "")
-        .toLowerCase()
-        .includes(hint.toLowerCase().split(" ")[0] ?? ""),
-    );
-    if (client?.id) {
-      const { data: jobs } = await supabase
-        .from("ic_jobs")
-        .select("id, stage, install_date")
-        .eq("client_id", client.id)
-        .is("deleted_at", null)
-        .order("install_date", { ascending: false, nullsFirst: false })
-        .limit(8);
-      jobId =
-        (jobs ?? []).find((job) => !["closed", "cancelled"].includes(String(job.stage)))?.id ??
-        null;
+  let linkedParts = 0;
+  let linkedJobs = 0;
+  let unassigned = 0;
+  for (const row of items ?? []) {
+    const links = await linkItemToOs({
+      item_number: String(row.item_number ?? ""),
+      vendor_sku: row.vendor_sku ? String(row.vendor_sku) : null,
+      cust_ref: row.cust_ref ? String(row.cust_ref) : null,
+      job_name: row.job_name ? String(row.job_name) : null,
+      description: row.description ? String(row.description) : null,
+      qty: Number(row.qty) || 1,
+    });
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (links.part_id && links.part_id !== row.part_id) {
+      patch.part_id = links.part_id;
+      linkedParts += 1;
+    }
+    if (links.job_id && links.job_id !== row.job_id) {
+      patch.job_id = links.job_id;
+      linkedJobs += 1;
+    }
+    if (!links.job_id) unassigned += 1;
+    if (Object.keys(patch).length > 1) {
+      await supabase.from("ic_shipment_items").update(patch).eq("id", row.id);
+    }
+    const nextPart = (patch.part_id as string | undefined) ?? (row.part_id as string | null);
+    if (nextPart && !row.part_id && Number(row.received_qty) > 0) {
+      try {
+        await applyScanToInventory({
+          item: {
+            id: String(row.id),
+            shipment_id: shipmentId,
+            item_number: String(row.item_number),
+            so_number: null,
+            cust_ref: row.cust_ref ? String(row.cust_ref) : null,
+            job_name: row.job_name ? String(row.job_name) : null,
+            project_number: null,
+            description: row.description ? String(row.description) : null,
+            qty: Number(row.qty) || 1,
+            received_qty: Number(row.received_qty) || 0,
+            damaged_qty: 0,
+            container_id: null,
+            source_page: null,
+            status: "received",
+            vendor_sku: row.vendor_sku ? String(row.vendor_sku) : null,
+            job_id: (patch.job_id as string | undefined) ?? (row.job_id as string | null),
+            part_id: nextPart,
+            note: null,
+          },
+          qty: Number(row.received_qty) || 0,
+          actorId: null,
+        });
+      } catch {
+        /* best-effort backfill */
+      }
     }
   }
+  return { linked_parts: linkedParts, linked_jobs: linkedJobs, unassigned };
+}
 
-  return { job_id: jobId, part_id: partId };
+export async function installBlockedByReceiving(jobId: string): Promise<{
+  blocked: boolean;
+  message?: string;
+}> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("ic_shipment_items")
+    .select("qty, received_qty, status, cust_ref, job_name")
+    .eq("job_id", jobId)
+    .in("status", ["expected", "missing"]);
+  if (error && missingReceivingTable(error.message)) return { blocked: false };
+  if (error) return { blocked: false };
+  const open = (data ?? []).filter((row) => (row.received_qty ?? 0) < (row.qty ?? 1));
+  if (open.length === 0) return { blocked: false };
+  const pieces = open.reduce((sum, row) => sum + Math.max(0, (row.qty ?? 1) - (row.received_qty ?? 0)), 0);
+  const name = String(open[0]?.job_name || open[0]?.cust_ref || "This job");
+  return {
+    blocked: true,
+    message: `${name} still has ${pieces} piece${pieces === 1 ? "" : "s"} not received. Finish Receiving or mark the line missing before install can be scheduled.`,
+  };
 }
 
 export async function applyScanToInventory(input: {
@@ -271,17 +431,22 @@ export async function notifyReceiving(input: {
   severity?: string;
   assignee?: string;
 }) {
-  try {
-    await postInspiredClosetsSlackNotification({
-      assignee: input.assignee ?? "Craig",
-      title: input.title,
-      severity: input.severity ?? "info",
-      todoLabel: "Receiving",
-      notifyMessage: input.message,
-      requestedBy: "Warehouse",
-    });
-  } catch {
-    // Slack is optional — receiving still succeeds.
+  const assignees = input.assignee
+    ? [input.assignee]
+    : ["Frank", "Bryant", "Craig"];
+  for (const assignee of assignees) {
+    try {
+      await postInspiredClosetsSlackNotification({
+        assignee,
+        title: input.title,
+        severity: input.severity ?? "info",
+        todoLabel: "Receiving",
+        notifyMessage: input.message,
+        requestedBy: "Warehouse",
+      });
+    } catch {
+      // Slack is optional — receiving still succeeds.
+    }
   }
 }
 

@@ -5,6 +5,7 @@ import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
   applyScanToInventory,
   lineStatus,
+  linkItemToOs,
   matchItem,
   notifyReceiving,
   shipmentRollup,
@@ -60,7 +61,7 @@ export async function POST(request: Request, ctx: Ctx) {
   const supabase = getSupabaseAdmin();
   const { data: ship } = await supabase
     .from("ic_shipments")
-    .select("id, notice, status")
+    .select("id, notice, status, parse_quality")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -104,6 +105,21 @@ export async function POST(request: Request, ctx: Ctx) {
         })
         .eq("id", match.item.id);
       if (delta > 0) {
+        if (!match.item.part_id || !match.item.job_id) {
+          const links = await linkItemToOs(match.item, { createPart: true });
+          const repair: Record<string, unknown> = {};
+          if (!match.item.part_id && links.part_id) {
+            match.item.part_id = links.part_id;
+            repair.part_id = links.part_id;
+          }
+          if (!match.item.job_id && links.job_id) {
+            match.item.job_id = links.job_id;
+            repair.job_id = links.job_id;
+          }
+          if (Object.keys(repair).length) {
+            await supabase.from("ic_shipment_items").update(repair).eq("id", match.item.id);
+          }
+        }
         try {
           await applyScanToInventory({
             item: match.item,
@@ -137,6 +153,30 @@ export async function POST(request: Request, ctx: Ctx) {
       .from("ic_shipments")
       .update({ status: nextStatus, updated_at: new Date().toISOString() })
       .eq("id", id);
+  }
+
+  const quality =
+    ship.parse_quality && typeof ship.parse_quality === "object"
+      ? (ship.parse_quality as Record<string, unknown>)
+      : {};
+  if (!stats.waiting_for_pallets && !quality.shortage_notified) {
+    const shortJobs = stats.by_job.filter((job) => job.total_received_qty < job.total_qty);
+    if (shortJobs.length > 0) {
+      await notifyReceiving({
+        title: `Shortage on ${ship.notice ?? "this truck"}`,
+        message: `Most pallets are scanned and these jobs are still short: ${shortJobs
+          .map((job) => `${job.job_name} ${job.total_received_qty}/${job.total_qty}`)
+          .join(", ")}.`,
+        severity: "warning",
+      });
+      await supabase
+        .from("ic_shipments")
+        .update({
+          parse_quality: { ...quality, shortage_notified: true },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+    }
   }
 
   if (nextStatus === "complete" && ship.status !== "complete") {

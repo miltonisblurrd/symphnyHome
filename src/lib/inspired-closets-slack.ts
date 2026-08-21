@@ -15,6 +15,7 @@ const ASSIGNEE_ALIASES: Record<string, string[]> = {
   Des: ["des", "dez"],
   Lulu: ["lulu"],
   Craig: ["craig"],
+  Bryant: ["bryant"],
   Marcus: ["marcus"],
   Gavin: ["gavin"],
 };

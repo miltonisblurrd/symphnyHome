@@ -4,6 +4,7 @@ import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
   missingReceivingTable,
+  relinkShipmentItems,
   shipmentRollup,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
@@ -92,6 +93,18 @@ export async function PATCH(request: Request, ctx: Ctx) {
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
   }
+  if (body.action === "relink") {
+    try {
+      const result = await relinkShipmentItems(id);
+      return NextResponse.json({ ok: true, relinked: result });
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Relink failed." },
+        { status: 400 },
+      );
+    }
+  }
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (typeof body.notice === "string") patch.notice = body.notice.trim() || null;
   if (typeof body.ship_date === "string") patch.ship_date = body.ship_date || null;

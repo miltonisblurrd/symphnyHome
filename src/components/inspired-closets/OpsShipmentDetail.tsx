@@ -70,6 +70,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
   const [claims, setClaims] = useState<Claim[]>([]);
   const [query, setQuery] = useState("");
   const [manual, setManual] = useState({ item_number: "", description: "", qty: "1", cust_ref: "" });
+  const [relinking, setRelinking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +155,38 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
     window.print();
   }
 
+  async function relink() {
+    setRelinking(true);
+    setNotice(null);
+    try {
+      const response = await fetch(
+        `/api/inspired-closets/ops/receiving/shipments/${shipmentId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "relink" }),
+        },
+      );
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        relinked?: { linked_parts: number; linked_jobs: number; unassigned: number };
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Relink failed.");
+      await load();
+      const result = payload.relinked;
+      setNotice(
+        result
+          ? `Linked ${result.linked_parts} parts, ${result.linked_jobs} jobs. ${result.unassigned} still have no OS job.`
+          : "Relinked.",
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Relink failed.");
+    } finally {
+      setRelinking(false);
+    }
+  }
+
   if (loading && !ship) {
     return (
       <OpsShell title="Shipment">
@@ -186,6 +219,14 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
           <button type="button" className={payroll.buttonGhost} onClick={printLabels}>
             Print labels
           </button>
+          <button
+            type="button"
+            className={payroll.buttonGhost}
+            onClick={() => void relink()}
+            disabled={relinking}
+          >
+            {relinking ? "Linking…" : "Link to inventory / jobs"}
+          </button>
           <Link href="/inspired-closets/ops/inventory/receiving" className={payroll.buttonGhost}>
             All trucks
           </Link>
@@ -193,7 +234,11 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
       }
     >
       <div className={styles.wrap}>
-        {notice ? <p className={`${payroll.notice} ${payroll.noticeError}`}>{notice}</p> : null}
+        {notice ? (
+          <p className={`${payroll.notice} ${notice.toLowerCase().includes("fail") ? payroll.noticeError : ""}`}>
+            {notice}
+          </p>
+        ) : null}
         {ship.parse_error ? <p className={`${payroll.notice} ${payroll.noticeError}`}>{ship.parse_error}</p> : null}
 
         <section className={payroll.panel} style={{ marginBottom: "1rem" }}>
@@ -339,7 +384,8 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                 <strong>{item.job_name ?? item.cust_ref ?? "—"}</strong>
                 <div style={{ fontSize: "0.78rem", opacity: 0.75 }}>
                   {item.description ?? "—"}
-                  {item.part_id ? " · stocked part" : ""}
+                  {item.part_id ? " · in inventory" : " · not in inventory yet"}
+                  {item.job_id ? "" : " · no job"}
                 </div>
               </span>
               <span>

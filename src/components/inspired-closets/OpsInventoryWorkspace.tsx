@@ -77,6 +77,7 @@ type Attention = {
     open: number;
   }>;
   receivingOpenLines?: number;
+  receivingUnassigned?: Array<{ label: string; lines: number }>;
 };
 
 type ApiResponse = {
@@ -674,6 +675,12 @@ export default function OpsInventoryWorkspace() {
               Slip lines still out{" "}
               <span className={styles.summaryStrong}>{attention.receivingOpenLines ?? 0}</span>
             </span>
+            <span>
+              Received with no job{" "}
+              <span className={styles.summaryStrong}>
+                {(attention.receivingUnassigned ?? []).reduce((sum, row) => sum + row.lines, 0)}
+              </span>
+            </span>
           </div>
           {attention.missingMaterials.length > 0 ? (
             <div style={{ marginTop: "0.75rem" }}>
@@ -740,6 +747,18 @@ export default function OpsInventoryWorkspace() {
                 {(attention.receivingShortJobs ?? []).slice(0, 8).map((job) => (
                   <li key={job.cust_ref} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
                     {job.job_name} · {job.open} lines not fully received
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(attention.receivingUnassigned ?? []).length > 0 ? (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className={styles.fieldLabel}>On a slip with no OS job</p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {(attention.receivingUnassigned ?? []).slice(0, 8).map((row) => (
+                  <li key={row.label} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+                    {row.label} · {row.lines} lines
                   </li>
                 ))}
               </ul>

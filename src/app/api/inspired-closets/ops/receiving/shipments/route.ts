@@ -6,6 +6,7 @@ import {
   fixtureItemsToParsed,
   linkItemToOs,
   missingReceivingTable,
+  notifyReceiving,
   parsePackingSlip,
   shipmentRollup,
   type ParsedSlipItem,
@@ -34,11 +35,11 @@ function toIsoDate(value: string | null): string | null {
 async function insertItems(
   shipmentId: string,
   items: ParsedSlipItem[],
-): Promise<number> {
+): Promise<{ imported: number; unassigned: string[] }> {
   const supabase = getSupabaseAdmin();
   const rows = [];
   for (const item of items) {
-    const links = await linkItemToOs(item);
+    const links = await linkItemToOs(item, { createPart: true });
     rows.push({
       shipment_id: shipmentId,
       item_number: item.item_number,
@@ -63,7 +64,23 @@ async function insertItems(
     const { error } = await supabase.from("ic_shipment_items").insert(rows.slice(i, i + chunk));
     if (error) throw error;
   }
-  return rows.length;
+  const unassigned = [
+    ...new Set(
+      rows
+        .filter((row) => !row.job_id && (row.cust_ref || row.job_name))
+        .map((row) => String(row.cust_ref || row.job_name)),
+    ),
+  ];
+  return { imported: rows.length, unassigned };
+}
+
+async function warnUnassigned(notice: string | null, unassigned: string[]) {
+  if (unassigned.length === 0) return;
+  await notifyReceiving({
+    title: `Receiving: no job match on ${notice ?? "a truck"}`,
+    message: `Checked in / expected with no OS job: ${unassigned.slice(0, 8).join(", ")}. Attach the client on the shipment before install can go ready.`,
+    severity: "warning",
+  });
 }
 
 export async function GET() {
@@ -149,8 +166,14 @@ export async function POST(request: Request) {
         }
         throw error;
       }
-      await insertItems(ship.id, items);
-      return NextResponse.json({ ok: true, shipment: ship, imported: items.length });
+      const inserted = await insertItems(ship.id, items);
+      await warnUnassigned(ship.notice, inserted.unassigned);
+      return NextResponse.json({
+        ok: true,
+        shipment: ship,
+        imported: inserted.imported,
+        unassigned: inserted.unassigned,
+      });
     }
 
     const form = await request.formData();
@@ -205,7 +228,8 @@ export async function POST(request: Request) {
         mimeType: file.type || (ext === "pdf" ? "application/pdf" : "image/jpeg"),
         bytes,
       });
-      await insertItems(ship.id, parsed.items);
+      const inserted = await insertItems(ship.id, parsed.items);
+      await warnUnassigned(parsed.notice, inserted.unassigned);
       const { data: updated } = await supabase
         .from("ic_shipments")
         .update({
@@ -224,7 +248,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         shipment: updated ?? ship,
-        imported: parsed.items.length,
+        imported: inserted.imported,
+        unassigned: inserted.unassigned,
       });
     } catch (parseError) {
       const message =

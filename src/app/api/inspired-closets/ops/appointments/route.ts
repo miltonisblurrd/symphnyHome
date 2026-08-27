@@ -249,6 +249,12 @@ export async function POST(request: Request) {
   const installerId = typeof body.installer_id === "string" ? body.installer_id : null;
   const notes = typeof body.notes === "string" ? body.notes : null;
   const communityRef = typeof body.community_ref === "string" ? body.community_ref : null;
+  const subject = typeof body.subject === "string" && body.subject.trim() ? body.subject.trim() : null;
+  const locationText =
+    typeof body.location_text === "string" && body.location_text.trim()
+      ? body.location_text.trim()
+      : null;
+  const logConfirmation = body.log_confirmation === true;
   const jobKind = isJobKind(body.job_kind) ? body.job_kind : null;
   const visitWindow =
     typeof body.visit_window === "string" && body.visit_window.trim()
@@ -291,7 +297,7 @@ export async function POST(request: Request) {
     resolvedClientId = lead?.client_id ?? null;
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("ic_appointments")
     .insert({
       lead_id: leadId,
@@ -299,9 +305,15 @@ export async function POST(request: Request) {
       job_id: jobId,
       designer_id: designerId,
       kind,
+      subject,
       scheduled_at: scheduledAt,
       location_type: locationType,
-      status: "scheduled",
+      location_text: locationText,
+      status: logConfirmation ? "confirmed" : "scheduled",
+      confirmation_sent_at: logConfirmation ? new Date().toISOString() : null,
+      confirmation_note: logConfirmation
+        ? "Logged Community confirmation email · CC assigned designer"
+        : null,
       notes,
       community_ref: communityRef,
       created_by: actor,
@@ -309,8 +321,34 @@ export async function POST(request: Request) {
     })
     .select("*")
     .single();
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error && /subject|location_text|column|schema cache/i.test(error.message)) {
+    const retry = await supabase
+      .from("ic_appointments")
+      .insert({
+        lead_id: leadId,
+        client_id: resolvedClientId,
+        job_id: jobId,
+        designer_id: designerId,
+        kind,
+        scheduled_at: scheduledAt,
+        location_type: locationType,
+        status: logConfirmation ? "confirmed" : "scheduled",
+        confirmation_sent_at: logConfirmation ? new Date().toISOString() : null,
+        confirmation_note: logConfirmation
+          ? "Logged Community confirmation email · CC assigned designer"
+          : null,
+        notes,
+        community_ref: communityRef,
+        created_by: actor,
+        updated_by: actor,
+      })
+      .select("*")
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error || !data) {
+    return NextResponse.json({ ok: false, error: error?.message ?? "Could not save event." }, { status: 500 });
   }
 
   if (leadId && kind === "consultation") {
@@ -700,6 +738,10 @@ export async function PATCH(request: Request) {
     }
     if (typeof body.delay_reason === "string") updates.delay_reason = body.delay_reason;
     if (typeof body.notes === "string" || body.notes === null) updates.notes = body.notes;
+    if (typeof body.subject === "string" || body.subject === null) updates.subject = body.subject;
+    if (typeof body.location_text === "string" || body.location_text === null) {
+      updates.location_text = body.location_text;
+    }
     if (typeof body.community_ref === "string" || body.community_ref === null) {
       updates.community_ref = body.community_ref;
     }

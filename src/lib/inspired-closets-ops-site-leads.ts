@@ -98,6 +98,8 @@ export async function createWebsiteLead(input: {
       areas_of_home: areas,
       lead_type: "consumer",
       form_type: input.formType,
+      first_name: firstName,
+      last_name: lastName,
       zip,
       state: "NV",
       country: "United States",
@@ -110,6 +112,46 @@ export async function createWebsiteLead(input: {
     .select("id")
     .single();
   if (leadError || !lead) {
+    if (leadError && /first_name|last_name|column|schema cache/i.test(leadError.message)) {
+      const retry = await supabase
+        .from("ic_leads")
+        .insert({
+          client_id: client.id,
+          source: "website",
+          stage: "new",
+          owner_id: ownerId,
+          notes,
+          project_area: areas[0] ?? null,
+          areas_of_home: areas,
+          lead_type: "consumer",
+          form_type: input.formType,
+          zip,
+          state: "NV",
+          country: "United States",
+          showroom_visit: false,
+          show_room: "Las Vegas Showroom",
+          contact_preference: "phone",
+          next_action_at: nowIso,
+          next_action_note: "Call from website form",
+        })
+        .select("id")
+        .single();
+      if (retry.error || !retry.data) {
+        return { ok: false, error: retry.error?.message ?? "Could not save lead.", status: 500 };
+      }
+      await supabase.from("ic_activity_log").insert({
+        entity_type: "lead",
+        entity_id: retry.data.id,
+        action: "created",
+        actor_label: "Website",
+        changes: {
+          source: "website",
+          form_type: input.formType,
+          Lead_Status: { from: null, to: "new" },
+        },
+      });
+      return { ok: true, leadId: retry.data.id };
+    }
     return { ok: false, error: leadError?.message ?? "Could not save lead.", status: 500 };
   }
 

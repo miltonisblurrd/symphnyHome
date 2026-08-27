@@ -18,12 +18,19 @@ import {
   MAX_FOLLOW_UP_ATTEMPTS,
   NURTURING_REASONS,
   PIPELINE_STATUSES,
+  defaultEventSubject,
+  formatLeadAddress,
+  joinPersonName,
   nextAttemptStage,
+  sourceNeedsReferralName,
+  splitPersonName,
   type IcLeadSourceId,
   type IcLeadStageId,
 } from "@/lib/inspired-closets-ops-leads";
 import { IC_STAFF_ID_COOKIE, IC_STAFF_NAME_COOKIE } from "@/lib/inspired-closets-ops-field";
 import { notifySoldHandoff } from "@/lib/inspired-closets-ops-handoffs";
+import { pushAppointmentById } from "@/lib/inspired-closets-google-calendar";
+import { isMissingRelationError } from "@/lib/inspired-closets-ops-accounts";
 
 export const runtime = "nodejs";
 
@@ -42,6 +49,27 @@ async function actor(): Promise<{ id: string | null; name: string | null }> {
     id: cookieStore.get(IC_STAFF_ID_COOKIE)?.value ?? null,
     name: cookieStore.get(IC_STAFF_NAME_COOKIE)?.value ?? null,
   };
+}
+
+type AccountRow = {
+  id: string;
+  name: string;
+  kind: string;
+  partner_type: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+};
+
+async function listAccounts(): Promise<AccountRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("ic_accounts")
+    .select("id, name, kind, partner_type, phone, email, notes")
+    .is("deleted_at", null)
+    .order("name");
+  if (error) return [];
+  return (data ?? []) as AccountRow[];
 }
 
 async function applyDepositIntakeStatus(
@@ -134,7 +162,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: false, error: "Lead not found." }, { status: 404 });
     }
 
-    const [clientRes, staffRes, apptsRes, activityRes, chatterRes] = await Promise.all([
+    const [clientRes, staffRes, apptsRes, activityRes, chatterRes, accounts] = await Promise.all([
       lead.client_id
         ? supabase.from("ic_clients").select("*").eq("id", lead.client_id).maybeSingle()
         : Promise.resolve({ data: null }),
@@ -166,17 +194,22 @@ export async function GET(request: Request) {
             .order("created_at", { ascending: false })
             .limit(100)
         : Promise.resolve({ data: [] }),
+      listAccounts(),
     ]);
 
     const staffById = new Map((staffRes.data ?? []).map((s) => [s.id, s]));
+    const account =
+      lead.account_id ? accounts.find((a) => a.id === lead.account_id) ?? null : null;
     return NextResponse.json({
       ok: true,
       lead: {
         ...lead,
         client: clientRes.data ?? null,
+        account,
         owner: lead.owner_id ? staffById.get(lead.owner_id) ?? null : null,
         designer: lead.designer_id ? staffById.get(lead.designer_id) ?? null : null,
       },
+      accounts,
       appointments: apptsRes.data ?? [],
       activity: activityRes.data ?? [],
       chatter: chatterRes.data ?? [],
@@ -205,7 +238,7 @@ export async function GET(request: Request) {
   if (source && VALID_SOURCES.has(source)) query = query.eq("source", source);
   if (ownerId) query = query.eq("owner_id", ownerId);
 
-  const [leadsResult, staffResult, clientsResult, apptsResult] = await Promise.all([
+  const [leadsResult, staffResult, clientsResult, apptsResult, accounts] = await Promise.all([
     query,
     supabase
       .from("ic_staff")
@@ -224,6 +257,7 @@ export async function GET(request: Request) {
       .select("id, lead_id, scheduled_at, kind, status, designer_id")
       .is("deleted_at", null)
       .limit(3000),
+    listAccounts(),
   ]);
 
   if (leadsResult.error) {
@@ -232,6 +266,7 @@ export async function GET(request: Request) {
 
   const staffById = new Map((staffResult.data ?? []).map((s) => [s.id, s]));
   const clientsById = new Map((clientsResult.data ?? []).map((c) => [c.id, c]));
+  const accountsById = new Map(accounts.map((a) => [a.id, a]));
   type ApptRow = {
     id: string;
     lead_id: string | null;
@@ -265,6 +300,7 @@ export async function GET(request: Request) {
     return {
       ...lead,
       client: lead.client_id ? clientsById.get(lead.client_id) ?? null : null,
+      account: lead.account_id ? accountsById.get(lead.account_id) ?? null : null,
       owner: lead.owner_id ? staffById.get(lead.owner_id) ?? null : null,
       designer: lead.designer_id ? staffById.get(lead.designer_id) ?? null : null,
       appointment,
@@ -303,6 +339,7 @@ export async function GET(request: Request) {
     leads,
     staff: staffResult.data ?? [],
     clients: clientsResult.data ?? [],
+    accounts,
   });
 }
 
@@ -355,7 +392,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, post: data });
   }
 
-  const clientName = typeof body.client_name === "string" ? body.client_name.trim() : "";
+  const firstName =
+    typeof body.first_name === "string" ? body.first_name.trim() : "";
+  const lastName =
+    typeof body.last_name === "string" ? body.last_name.trim() : "";
+  const clientName =
+    typeof body.client_name === "string" && body.client_name.trim()
+      ? body.client_name.trim()
+      : joinPersonName(firstName, lastName);
   const clientId = typeof body.client_id === "string" ? body.client_id : null;
   const phone = typeof body.phone === "string" ? body.phone.trim() || null : null;
   const email = typeof body.email === "string" ? body.email.trim() || null : null;
@@ -368,6 +412,8 @@ export async function POST(request: Request) {
     typeof body.address === "string" && body.address.trim()
       ? body.address.trim()
       : formatAddress({ street, city, state, zip });
+  const referralName =
+    typeof body.referral_name === "string" ? body.referral_name.trim() || null : null;
 
   const source =
     typeof body.source === "string" && VALID_SOURCES.has(body.source)
@@ -377,6 +423,13 @@ export async function POST(request: Request) {
     typeof body.stage === "string" && VALID_STAGES.has(body.stage)
       ? (body.stage as IcLeadStageId)
       : "new";
+
+  if (sourceNeedsReferralName(source) && !referralName) {
+    return NextResponse.json(
+      { ok: false, error: "Referral name is required when the lead source is a referral." },
+      { status: 400 },
+    );
+  }
 
   if (!clientId && !clientName) {
     return NextResponse.json(
@@ -408,48 +461,62 @@ export async function POST(request: Request) {
     ? body.areas_of_home.filter((a): a is string => typeof a === "string")
     : [];
 
-  const { data: lead, error } = await supabase
-    .from("ic_leads")
-    .insert({
-      client_id: resolvedClientId,
-      source,
-      stage,
-      owner_id: typeof body.owner_id === "string" ? body.owner_id : actorId,
-      designer_id: typeof body.designer_id === "string" ? body.designer_id : null,
-      notes: typeof body.notes === "string" ? body.notes : null,
-      project_area: areas[0] ?? (typeof body.project_area === "string" ? body.project_area : null),
-      areas_of_home: areas,
-      lead_type: body.lead_type === "influencer" ? "influencer" : "consumer",
-      influencer_type:
-        typeof body.influencer_type === "string" && VALID_INFLUENCER.has(body.influencer_type)
-          ? body.influencer_type
-          : null,
-      form_type:
-        typeof body.form_type === "string" && VALID_FORM.has(body.form_type)
-          ? body.form_type
-          : null,
-      street,
-      city,
-      state,
-      zip,
-      country,
-      community_name:
-        typeof body.community_name === "string" ? body.community_name.trim() || null : null,
-      community_ref:
-        typeof body.community_name === "string" ? body.community_name.trim() || null : null,
-      showroom_visit: body.showroom_visit === true,
-      show_room:
-        typeof body.show_room === "string" ? body.show_room : "Las Vegas Showroom",
-      contact_preference:
-        typeof body.contact_preference === "string" ? body.contact_preference : null,
-      created_by: actorId,
-      updated_by: actorId,
-    })
-    .select("*")
-    .single();
+  const resolvedFirst = firstName || splitPersonName(clientName).first || null;
+  const resolvedLast = lastName || splitPersonName(clientName).last || null;
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  const leadInsert: Record<string, unknown> = {
+    client_id: resolvedClientId,
+    source,
+    stage,
+    owner_id: typeof body.owner_id === "string" ? body.owner_id : actorId,
+    designer_id: typeof body.designer_id === "string" ? body.designer_id : null,
+    notes: typeof body.notes === "string" ? body.notes : null,
+    project_area: areas[0] ?? (typeof body.project_area === "string" ? body.project_area : null),
+    areas_of_home: areas,
+    lead_type: body.lead_type === "influencer" ? "influencer" : "consumer",
+    influencer_type:
+      typeof body.influencer_type === "string" && VALID_INFLUENCER.has(body.influencer_type)
+        ? body.influencer_type
+        : null,
+    form_type:
+      typeof body.form_type === "string" && VALID_FORM.has(body.form_type)
+        ? body.form_type
+        : null,
+    first_name: resolvedFirst,
+    last_name: resolvedLast,
+    referral_name: referralName,
+    street,
+    city,
+    state,
+    zip,
+    country,
+    community_name:
+      typeof body.community_name === "string" ? body.community_name.trim() || null : null,
+    community_ref:
+      typeof body.community_name === "string" ? body.community_name.trim() || null : null,
+    showroom_visit: body.showroom_visit === true,
+    show_room:
+      typeof body.show_room === "string" ? body.show_room : "Las Vegas Showroom",
+    contact_preference:
+      typeof body.contact_preference === "string" ? body.contact_preference : null,
+    account_id: typeof body.account_id === "string" ? body.account_id : null,
+    created_by: actorId,
+    updated_by: actorId,
+  };
+
+  let { data: lead, error } = await supabase.from("ic_leads").insert(leadInsert).select("*").single();
+  if (error && /first_name|last_name|referral_name|account_id|column|schema cache/i.test(error.message)) {
+    delete leadInsert.first_name;
+    delete leadInsert.last_name;
+    delete leadInsert.referral_name;
+    delete leadInsert.account_id;
+    const retry = await supabase.from("ic_leads").insert(leadInsert).select("*").single();
+    lead = retry.data;
+    error = retry.error;
+  }
+
+  if (error || !lead) {
+    return NextResponse.json({ ok: false, error: error?.message ?? "Could not save lead." }, { status: 500 });
   }
 
   await supabase.from("ic_activity_log").insert({
@@ -535,19 +602,79 @@ export async function PATCH(request: Request) {
   }
 
   if (action === "move_to_studio") {
-    const { data, error } = await supabase
+    const designerId =
+      typeof body.designer_id === "string" ? body.designer_id : existing.designer_id;
+    const mode = body.account_mode === "existing" ? "existing" : "new_customer";
+    let accountId: string | null =
+      typeof body.account_id === "string" && body.account_id
+        ? body.account_id
+        : existing.account_id ?? null;
+
+    if (mode === "existing" && !accountId) {
+      return NextResponse.json(
+        { ok: false, error: "Pick an existing partner account." },
+        { status: 400 },
+      );
+    }
+
+    if (mode === "new_customer") {
+      const { data: client } = existing.client_id
+        ? await supabase
+            .from("ic_clients")
+            .select("name, phone, email")
+            .eq("id", existing.client_id)
+            .maybeSingle()
+        : { data: null };
+      const accountName =
+        (typeof body.account_name === "string" && body.account_name.trim()) ||
+        client?.name ||
+        joinPersonName(String(existing.first_name ?? ""), String(existing.last_name ?? "")) ||
+        "Customer";
+      const created = await supabase
+        .from("ic_accounts")
+        .insert({
+          name: accountName,
+          kind: "customer",
+          phone: client?.phone ?? null,
+          email: client?.email ?? null,
+          created_by: actorId,
+          updated_by: actorId,
+        })
+        .select("id")
+        .single();
+      if (created.data?.id) {
+        accountId = created.data.id;
+      } else if (created.error && !isMissingRelationError(created.error.message)) {
+        return NextResponse.json({ ok: false, error: created.error.message }, { status: 500 });
+      }
+    }
+
+    const studioUpdate: Record<string, unknown> = {
+      stage: "moved_to_studio",
+      converted_at: nowIso,
+      designer_id: designerId,
+      updated_at: nowIso,
+      updated_by: actorId,
+    };
+    if (accountId) studioUpdate.account_id = accountId;
+
+    let { data, error } = await supabase
       .from("ic_leads")
-      .update({
-        stage: "moved_to_studio",
-        converted_at: nowIso,
-        designer_id:
-          typeof body.designer_id === "string" ? body.designer_id : existing.designer_id,
-        updated_at: nowIso,
-        updated_by: actorId,
-      })
+      .update(studioUpdate)
       .eq("id", leadId)
       .select("*")
       .single();
+    if (error && /account_id|column|schema cache/i.test(error.message)) {
+      delete studioUpdate.account_id;
+      const retry = await supabase
+        .from("ic_leads")
+        .update(studioUpdate)
+        .eq("id", leadId)
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
@@ -557,7 +684,11 @@ export async function PATCH(request: Request) {
       action: "moved_to_studio",
       actor_id: actorId,
       actor_label: actorName,
-      changes: { "Lead Status": { from: existing.stage, to: "moved_to_studio" } },
+      changes: {
+        "Lead Status": { from: existing.stage, to: "moved_to_studio" },
+        account_id: accountId,
+        account_mode: mode,
+      },
     });
     return NextResponse.json({ ok: true, lead: data });
   }
@@ -577,6 +708,44 @@ export async function PATCH(request: Request) {
       typeof body.designer_id === "string" ? body.designer_id : existing.designer_id;
     const installerId =
       typeof body.installer_id === "string" ? body.installer_id : null;
+    const lastName =
+      (typeof existing.last_name === "string" && existing.last_name) ||
+      splitPersonName(
+        typeof existing.client_name === "string" ? existing.client_name : null,
+      ).last;
+    let clientNameForSubject = lastName;
+    if (!clientNameForSubject && existing.client_id) {
+      const { data: clientRow } = await supabase
+        .from("ic_clients")
+        .select("name")
+        .eq("id", existing.client_id)
+        .maybeSingle();
+      clientNameForSubject = splitPersonName(clientRow?.name).last;
+    }
+    const subject =
+      typeof body.subject === "string" && body.subject.trim()
+        ? body.subject.trim()
+        : defaultEventSubject(kind, clientNameForSubject);
+    const locationText =
+      typeof body.location_text === "string" && body.location_text.trim()
+        ? body.location_text.trim()
+        : formatLeadAddress({
+            street: existing.street,
+            city: existing.city,
+            state: existing.state,
+            zip: existing.zip,
+          }) || null;
+    const logConfirmation = body.log_confirmation === true;
+
+    let designerName: string | null = null;
+    if (designerId) {
+      const { data: designerRow } = await supabase
+        .from("ic_staff")
+        .select("name")
+        .eq("id", designerId)
+        .maybeSingle();
+      designerName = designerRow?.name ?? null;
+    }
 
     if (kind === "install" && !existing.converted_job_id) {
       return NextResponse.json(
@@ -602,25 +771,43 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const { data: appointment, error: apptError } = await supabase
+    const appointmentInsert: Record<string, unknown> = {
+      lead_id: leadId,
+      client_id: existing.client_id,
+      job_id: existing.converted_job_id,
+      designer_id: kind === "install" ? existing.designer_id ?? designerId : designerId,
+      kind,
+      subject,
+      scheduled_at: scheduledAt,
+      location_type: locationType,
+      location_text: locationText,
+      status: logConfirmation ? "confirmed" : "scheduled",
+      confirmation_sent_at: logConfirmation ? nowIso : null,
+      confirmation_note: logConfirmation
+        ? `Logged Community confirmation email${designerName ? ` · CC ${designerName}` : " · CC assigned designer"}`
+        : null,
+      notes: typeof body.notes === "string" ? body.notes : null,
+      created_by: actorId,
+      updated_by: actorId,
+    };
+
+    let { data: appointment, error: apptError } = await supabase
       .from("ic_appointments")
-      .insert({
-        lead_id: leadId,
-        client_id: existing.client_id,
-        job_id: existing.converted_job_id,
-        designer_id: kind === "install" ? existing.designer_id ?? designerId : designerId,
-        kind,
-        scheduled_at: scheduledAt,
-        location_type: locationType,
-        status: "scheduled",
-        notes: typeof body.notes === "string" ? body.notes : null,
-        created_by: actorId,
-        updated_by: actorId,
-      })
+      .insert(appointmentInsert)
       .select("*")
       .single();
-    if (apptError) {
-      return NextResponse.json({ ok: false, error: apptError.message }, { status: 500 });
+    if (apptError && /subject|location_text|column|schema cache/i.test(apptError.message)) {
+      delete appointmentInsert.subject;
+      delete appointmentInsert.location_text;
+      const retry = await supabase.from("ic_appointments").insert(appointmentInsert).select("*").single();
+      appointment = retry.data;
+      apptError = retry.error;
+    }
+    if (apptError || !appointment) {
+      return NextResponse.json(
+        { ok: false, error: apptError?.message ?? "Could not save event." },
+        { status: 500 },
+      );
     }
 
     const nextStage =
@@ -669,8 +856,15 @@ export async function PATCH(request: Request) {
         scheduled_at: scheduledAt,
         installer_id: installerId,
         "Lead Status": { from: existing.stage, to: nextStage },
+        subject,
+        location_text: locationText,
+        confirmation_logged: logConfirmation,
       },
     });
+
+    if (appointment?.id) {
+      await pushAppointmentById(appointment.id);
+    }
 
     return NextResponse.json({ ok: true, lead, appointment });
   }
@@ -735,6 +929,7 @@ export async function PATCH(request: Request) {
         site_ready_notes: siteReadyNotes,
         deposit_intake_status: depositIntakeStatus,
         designer_id: designerId,
+        account_id: existing.account_id ?? null,
         notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || existing.notes,
         updated_at: nowIso,
         updated_by: actorId,
@@ -797,6 +992,7 @@ export async function PATCH(request: Request) {
 
     const jobInsertFull = {
       client_id: existing.client_id,
+      account_id: existing.account_id ?? null,
       lead_id: leadId,
       designer_id: designerId,
       stage: depositIntakeStatus === "paid" ? "deposit_received" : "deposit_pending",
@@ -950,9 +1146,30 @@ export async function PATCH(request: Request) {
   if (typeof body.source === "string" && VALID_SOURCES.has(body.source)) {
     updates.source = body.source;
   }
+  if (typeof body.referral_name === "string" || body.referral_name === null) {
+    updates.referral_name = typeof body.referral_name === "string" ? body.referral_name.trim() || null : null;
+  }
+  if (typeof body.first_name === "string" || body.first_name === null) {
+    updates.first_name = typeof body.first_name === "string" ? body.first_name.trim() || null : null;
+  }
+  if (typeof body.last_name === "string" || body.last_name === null) {
+    updates.last_name = typeof body.last_name === "string" ? body.last_name.trim() || null : null;
+  }
+  const nextSource = (updates.source as string | undefined) ?? existing.source;
+  const nextReferral =
+    updates.referral_name !== undefined ? updates.referral_name : existing.referral_name;
+  if (sourceNeedsReferralName(nextSource) && !nextReferral) {
+    return NextResponse.json(
+      { ok: false, error: "Referral name is required when the lead source is a referral." },
+      { status: 400 },
+    );
+  }
   if (typeof body.owner_id === "string" || body.owner_id === null) updates.owner_id = body.owner_id;
   if (typeof body.designer_id === "string" || body.designer_id === null) {
     updates.designer_id = body.designer_id;
+  }
+  if (typeof body.account_id === "string" || body.account_id === null) {
+    updates.account_id = typeof body.account_id === "string" && body.account_id ? body.account_id : null;
   }
   if (typeof body.notes === "string" || body.notes === null) updates.notes = body.notes;
   if (body.lead_type === "consumer" || body.lead_type === "influencer") {
@@ -1025,6 +1242,12 @@ export async function PATCH(request: Request) {
     if (typeof body.email === "string" || body.email === null) clientUpdates.email = body.email;
     if (typeof body.client_name === "string" && body.client_name.trim()) {
       clientUpdates.name = body.client_name.trim();
+    } else if (updates.first_name !== undefined || updates.last_name !== undefined) {
+      const combined = joinPersonName(
+        String(updates.first_name ?? existing.first_name ?? ""),
+        String(updates.last_name ?? existing.last_name ?? ""),
+      );
+      if (combined) clientUpdates.name = combined;
     }
     const addr = formatAddress({
       street: (updates.street as string) ?? existing.street,
@@ -1038,14 +1261,24 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("ic_leads")
     .update(updates)
     .eq("id", leadId)
     .select("*")
     .single();
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error && /first_name|last_name|referral_name|account_id|column|schema cache/i.test(error.message)) {
+    const fallback = { ...updates };
+    delete fallback.first_name;
+    delete fallback.last_name;
+    delete fallback.referral_name;
+    delete fallback.account_id;
+    const retry = await supabase.from("ic_leads").update(fallback).eq("id", leadId).select("*").single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error || !data) {
+    return NextResponse.json({ ok: false, error: error?.message ?? "Could not save lead." }, { status: 500 });
   }
 
   await supabase.from("ic_activity_log").insert({

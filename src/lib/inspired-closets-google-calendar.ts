@@ -124,6 +124,8 @@ export type AppointmentCalendarInput = {
   notes: string | null;
   community_ref: string | null;
   google_event_id: string | null;
+  subject?: string | null;
+  location_text?: string | null;
   clientName?: string | null;
   designerName?: string | null;
   address?: string | null;
@@ -132,7 +134,7 @@ export type AppointmentCalendarInput = {
 function eventBody(appt: AppointmentCalendarInput) {
   const start = new Date(appt.scheduled_at);
   const end = new Date(start.getTime() + 90 * 60 * 1000);
-  const title = [
+  const fallbackTitle = [
     appt.kind.replace(/_/g, " "),
     appt.clientName ?? "Client",
     appt.designerName ? `· ${appt.designerName}` : null,
@@ -152,9 +154,13 @@ function eventBody(appt: AppointmentCalendarInput) {
     .join("\n");
 
   return {
-    summary: title,
+    summary: appt.subject?.trim() || fallbackTitle,
     description,
-    location: appt.address ?? appt.location_type?.replace(/_/g, " ") ?? undefined,
+    location:
+      appt.location_text?.trim() ||
+      appt.address ||
+      appt.location_type?.replace(/_/g, " ") ||
+      undefined,
     start: { dateTime: start.toISOString() },
     end: { dateTime: end.toISOString() },
     status: appt.status === "cancelled" ? "cancelled" : "confirmed",
@@ -284,6 +290,8 @@ export async function pushAppointmentById(appointmentId: string): Promise<Calend
     notes: appt.notes,
     community_ref: appt.community_ref,
     google_event_id: appt.google_event_id,
+    subject: appt.subject ?? null,
+    location_text: appt.location_text ?? address,
     clientName,
     designerName,
     address,

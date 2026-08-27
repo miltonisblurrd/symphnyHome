@@ -34,6 +34,7 @@ const EDITABLE = new Set([
   "notes",
   "risk_flag",
   "lead_id",
+  "account_id",
 ]);
 
 const VALID_STAGES = new Set(JOB_STAGES.map((stage) => stage.id));

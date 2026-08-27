@@ -31,6 +31,8 @@ type Job = {
   completed_date: string | null;
   notes: string | null;
   risk_flag: boolean;
+  proposal_url?: string | null;
+  proposal_filename?: string | null;
   client: Client | null;
   designer: Staff | null;
 };
@@ -330,6 +332,33 @@ export default function OpsJobsWorkspace() {
     }
   }
 
+  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
+
+  async function uploadProposal(file: File) {
+    if (!selectedJobId) return;
+    setSaving(true);
+    try {
+      const body = new FormData();
+      body.set("job_id", selectedJobId);
+      body.set("file", file);
+      const response = await fetch("/api/inspired-closets/ops/jobs/proposal", {
+        method: "POST",
+        body,
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok) throw new Error(payload.error ?? "Upload failed.");
+      setNotice({ kind: "info", text: "Signed proposal saved on this job." });
+      await load();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Upload failed.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <OpsShell
       title="Jobs"
@@ -479,6 +508,30 @@ export default function OpsJobsWorkspace() {
 
         {selectedJobId ? (
           <div style={{ marginTop: "1rem" }}>
+            <p className={styles.fieldLabel}>
+              Signed proposal
+              {selectedJob?.proposal_filename ? ` · ${selectedJob.proposal_filename}` : ""}
+            </p>
+            <div className={styles.formActions} style={{ justifyContent: "flex-start", marginBottom: "0.85rem" }}>
+              {selectedJob?.proposal_url ? (
+                <a className={styles.buttonGhost} href={selectedJob.proposal_url} target="_blank" rel="noreferrer">
+                  Open PDF
+                </a>
+              ) : null}
+              <label className={styles.buttonGhost} style={{ cursor: "pointer" }}>
+                {selectedJob?.proposal_url ? "Replace PDF" : "Upload signed PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadProposal(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
             <p className={styles.fieldLabel}>
               Materials on this job ·{" "}
               <span className={styles.summaryStrong}>{centsToDisplay(materialsTotal)}</span>

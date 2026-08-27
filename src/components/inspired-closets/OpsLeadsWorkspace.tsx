@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import AddressAutocomplete from "@/components/inspired-closets/AddressAutocomplete";
 import {
   AREAS_OF_HOME,
   FORM_TYPES,
@@ -11,9 +12,20 @@ import {
   LEAD_STAGES,
   LEAD_TYPES,
   NURTURING_REASONS,
+  defaultEventSubject,
+  formatLeadAddress,
+  joinPersonName,
   sourceLabel,
+  sourceNeedsReferralName,
+  splitPersonName,
   stageLabel,
 } from "@/lib/inspired-closets-ops-leads";
+import {
+  matchPartnerAccount,
+  partnerTypeLabel,
+  type IcAccount,
+} from "@/lib/inspired-closets-ops-accounts";
+import type { AddressParts } from "@/lib/inspired-closets-google-places";
 import { CONSULT_OUTCOMES, type IcConsultOutcome } from "@/lib/inspired-closets-ops-appointments";
 import styles from "./ops-payroll.module.css";
 
@@ -29,6 +41,7 @@ type Client = {
 type Lead = {
   id: string;
   client_id: string | null;
+  account_id: string | null;
   source: string;
   stage: string;
   owner_id: string | null;
@@ -38,6 +51,9 @@ type Lead = {
   lead_type: string | null;
   influencer_type: string | null;
   form_type: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  referral_name: string | null;
   street: string | null;
   city: string | null;
   state: string | null;
@@ -57,6 +73,7 @@ type Lead = {
   updated_at: string;
   followUpNeeded?: boolean;
   client: Client | null;
+  account: IcAccount | null;
   owner: Staff | null;
   designer: Staff | null;
   appointment?: {
@@ -89,6 +106,7 @@ type ApiResponse = {
   leads?: Lead[];
   lead?: Lead;
   staff?: Staff[];
+  accounts?: IcAccount[];
   activity?: Activity[];
   chatter?: ChatterPost[];
   appointments?: Array<{
@@ -101,14 +119,16 @@ type ApiResponse = {
 };
 
 const EMPTY_FORM = {
-  client_name: "",
+  first_name: "",
+  last_name: "",
   phone: "",
   email: "",
   street: "",
   city: "",
   state: "NV",
   zip: "",
-  source: "instagram",
+  source: "call",
+  referral_name: "",
   designer_id: "",
   lead_type: "consumer",
   influencer_type: "",
@@ -117,6 +137,7 @@ const EMPTY_FORM = {
   showroom_visit: false,
   notes: "",
   areas_of_home: [] as string[],
+  account_id: "",
 };
 
 function formatStamp(value: string | null | undefined): string {
@@ -154,9 +175,15 @@ function formatRelative(value: string): string {
   return `${days}d ago`;
 }
 
+function lastNameFromLead(lead: Partial<Lead> | null | undefined): string {
+  if (lead?.last_name?.trim()) return lead.last_name.trim();
+  return splitPersonName(lead?.client?.name).last;
+}
+
 export default function OpsLeadsWorkspace() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [accounts, setAccounts] = useState<IcAccount[]>([]);
   const [listView, setListView] = useState<"unscheduled" | "scheduled" | "needs" | "all">(
     "unscheduled",
   );
@@ -174,13 +201,30 @@ export default function OpsLeadsWorkspace() {
   const [eventOpen, setEventOpen] = useState(false);
   const [eventForm, setEventForm] = useState({
     kind: "consultation",
+    subject: "",
     scheduled_at: "",
     location_type: "on_site",
+    location_text: "",
     designer_id: "",
     installer_id: "",
     notes: "",
+    log_confirmation: true,
   });
   const [soldOpen, setSoldOpen] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [convertForm, setConvertForm] = useState({
+    account_mode: "new_customer" as "new_customer" | "existing",
+    account_id: "",
+    designer_id: "",
+    partner_name: "",
+    partner_type: "realtor",
+  });
+  const [partnerDraft, setPartnerDraft] = useState({
+    name: "",
+    partner_type: "realtor",
+    phone: "",
+    email: "",
+  });
   const [soldForm, setSoldForm] = useState({
     contract: "",
     sold_date: new Date().toISOString().slice(0, 10),
@@ -191,6 +235,7 @@ export default function OpsLeadsWorkspace() {
     tentative_install_notes: "",
     site_ready_notes: "",
   });
+  const [proposalFile, setProposalFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<Partial<Lead> | null>(null);
 
   const designers = useMemo(
@@ -200,6 +245,10 @@ export default function OpsLeadsWorkspace() {
   const installers = useMemo(
     () => staff.filter((s) => s.role === "installer"),
     [staff],
+  );
+  const partnerAccounts = useMemo(
+    () => accounts.filter((a) => a.kind === "partner"),
+    [accounts],
   );
 
   const loadList = useCallback(async () => {
@@ -211,6 +260,7 @@ export default function OpsLeadsWorkspace() {
       if (!payload.ok) throw new Error(payload.error ?? "Failed to load leads.");
       setLeads(payload.leads ?? []);
       setStaff(payload.staff ?? []);
+      setAccounts(payload.accounts ?? []);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -232,6 +282,7 @@ export default function OpsLeadsWorkspace() {
       setChatter(payload.chatter ?? []);
       setAppointments(payload.appointments ?? []);
       setStaff(payload.staff ?? []);
+      if (payload.accounts) setAccounts(payload.accounts);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -284,15 +335,31 @@ export default function OpsLeadsWorkspace() {
     setBusy(true);
     setNotice(null);
     const payload = { ...form, ...override };
+    const clientName = joinPersonName(payload.first_name, payload.last_name);
+    if (!clientName) {
+      setBusy(false);
+      setNotice({ kind: "error", text: "First and last name are required." });
+      return;
+    }
+    if (sourceNeedsReferralName(payload.source) && !payload.referral_name.trim()) {
+      setBusy(false);
+      setNotice({ kind: "error", text: "Referral name is required for this lead source." });
+      return;
+    }
     try {
       const response = await fetch("/api/inspired-closets/ops/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
+          client_name: clientName,
+          first_name: payload.first_name.trim(),
+          last_name: payload.last_name.trim(),
+          referral_name: payload.referral_name.trim() || null,
           designer_id: payload.designer_id || null,
           influencer_type: payload.lead_type === "influencer" ? payload.influencer_type || null : null,
           form_type: payload.form_type || null,
+          account_id: payload.account_id || null,
         }),
       });
       const data = (await response.json()) as ApiResponse;
@@ -345,6 +412,9 @@ export default function OpsLeadsWorkspace() {
       lead_type: draft.lead_type,
       influencer_type: draft.influencer_type,
       form_type: draft.form_type,
+      first_name: draft.first_name,
+      last_name: draft.last_name,
+      referral_name: draft.referral_name,
       street: draft.street,
       city: draft.city,
       state: draft.state,
@@ -359,9 +429,11 @@ export default function OpsLeadsWorkspace() {
       junk_reason: draft.junk_reason,
       needs_follow_up_date: draft.needs_follow_up_date,
       contact_preference: draft.contact_preference,
+      account_id: draft.account_id || null,
       phone: draft.client?.phone ?? null,
       email: draft.client?.email ?? null,
-      client_name: draft.client?.name,
+      client_name:
+        joinPersonName(draft.first_name ?? "", draft.last_name ?? "") || draft.client?.name,
     });
   }
 
@@ -405,8 +477,11 @@ export default function OpsLeadsWorkspace() {
           id: selectedId,
           action: "schedule_event",
           kind: eventForm.kind,
+          subject: eventForm.subject.trim() || null,
           scheduled_at: when.toISOString(),
           location_type: eventForm.location_type,
+          location_text: eventForm.location_text.trim() || null,
+          log_confirmation: eventForm.kind === "consultation" && eventForm.log_confirmation,
           designer_id:
             eventForm.kind === "install"
               ? draft?.designer_id || null
@@ -421,18 +496,23 @@ export default function OpsLeadsWorkspace() {
       setEventOpen(false);
       setEventForm({
         kind: "consultation",
+        subject: "",
         scheduled_at: "",
         location_type: "on_site",
+        location_text: "",
         designer_id: "",
         installer_id: "",
         notes: "",
+        log_confirmation: true,
       });
       setNotice({
         kind: "info",
         text:
           eventForm.kind === "install"
             ? "Install event saved — installer assigned on the job."
-            : "Appointment saved — lead moved to Scheduled. No need to enter it again.",
+            : eventForm.log_confirmation
+              ? "Design Event saved — lead is Scheduled. Confirmation logged (Community sends the email; assigned designer is the CC)."
+              : "Design Event saved — lead moved to Scheduled.",
       });
       await loadList();
       await loadDetail(selectedId);
@@ -476,7 +556,22 @@ export default function OpsLeadsWorkspace() {
       });
       const data = (await response.json()) as ApiResponse & { job?: { id: string } };
       if (!data.ok) throw new Error(data.error ?? "Could not save sold intake.");
+      const jobId = data.job?.id ?? detail?.converted_job_id ?? null;
+      if (proposalFile && jobId) {
+        const upload = new FormData();
+        upload.set("job_id", jobId);
+        upload.set("file", proposalFile);
+        const uploaded = await fetch("/api/inspired-closets/ops/jobs/proposal", {
+          method: "POST",
+          body: upload,
+        });
+        const uploadedPayload = (await uploaded.json()) as { ok?: boolean; error?: string };
+        if (!uploadedPayload.ok) {
+          throw new Error(uploadedPayload.error ?? "Sold saved, but proposal upload failed.");
+        }
+      }
       setSoldOpen(false);
+      setProposalFile(null);
       setNotice({
         kind: "info",
         text:
@@ -507,6 +602,7 @@ export default function OpsLeadsWorkspace() {
       tentative_install_notes: "",
       site_ready_notes: "",
     });
+    setProposalFile(null);
     setSoldOpen(true);
   }
 
@@ -517,6 +613,169 @@ export default function OpsLeadsWorkspace() {
       ? current.filter((a) => a !== area)
       : [...current, area];
     setDraft({ ...draft, areas_of_home: next });
+  }
+
+  function toggleFormArea(area: string) {
+    setForm((current) => ({
+      ...current,
+      areas_of_home: current.areas_of_home.includes(area)
+        ? current.areas_of_home.filter((item) => item !== area)
+        : [...current.areas_of_home, area],
+    }));
+  }
+
+  function openNewEvent() {
+    const last = lastNameFromLead(draft ?? detail);
+    const address = formatLeadAddress(draft ?? detail ?? {});
+    setEventForm({
+      kind: "consultation",
+      subject: defaultEventSubject("consultation", last),
+      scheduled_at: "",
+      location_type: "on_site",
+      location_text: address,
+      designer_id: draft?.designer_id ?? detail?.designer_id ?? "",
+      installer_id: "",
+      notes: "",
+      log_confirmation: true,
+    });
+    setEventOpen(true);
+  }
+
+  function applyFormAddress(parts: AddressParts) {
+    setForm((current) => ({
+      ...current,
+      street: parts.street || current.street,
+      city: parts.city || current.city,
+      state: parts.state || current.state,
+      zip: parts.zip || current.zip,
+    }));
+  }
+
+  function applyDraftAddress(parts: AddressParts) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            street: parts.street || current.street,
+            city: parts.city || current.city,
+            state: parts.state || current.state,
+            zip: parts.zip || current.zip,
+            country: parts.country || current.country,
+          }
+        : current,
+    );
+  }
+
+  function openConvert() {
+    if (!detail) return;
+    const attachedPartner = partnerAccounts.some((a) => a.id === detail.account_id);
+    setConvertForm({
+      account_mode: attachedPartner ? "existing" : "new_customer",
+      account_id: attachedPartner ? (detail.account_id ?? "") : "",
+      designer_id: detail.designer_id ?? "",
+      partner_name: detail.referral_name ?? "",
+      partner_type: "realtor",
+    });
+    setConvertOpen(true);
+  }
+
+  async function addPartnerAccount(input: {
+    name: string;
+    partner_type: string;
+    phone?: string;
+    email?: string;
+  }): Promise<IcAccount | null> {
+    const name = input.name.trim();
+    if (!name) {
+      setNotice({ kind: "error", text: "Partner name is required." });
+      return null;
+    }
+    const response = await fetch("/api/inspired-closets/ops/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        kind: "partner",
+        partner_type: input.partner_type || null,
+        phone: input.phone?.trim() || null,
+        email: input.email?.trim() || null,
+      }),
+    });
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+      account?: IcAccount;
+    };
+    if (!payload.ok || !payload.account) {
+      throw new Error(payload.error ?? "Could not save partner account.");
+    }
+    setAccounts((current) =>
+      current.some((a) => a.id === payload.account!.id)
+        ? current
+        : [...current, payload.account!].sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    return payload.account;
+  }
+
+  async function createPartnerFromPanel() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const account = await addPartnerAccount(partnerDraft);
+      if (!account) {
+        setBusy(false);
+        return;
+      }
+      setPartnerDraft({ name: "", partner_type: "realtor", phone: "", email: "" });
+      setNotice({ kind: "info", text: `Partner account saved: ${account.name}` });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not save partner.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function convertToStudio() {
+    if (!detail) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      let accountId = convertForm.account_id;
+      if (convertForm.account_mode === "existing" && !accountId && convertForm.partner_name.trim()) {
+        const created = await addPartnerAccount({
+          name: convertForm.partner_name,
+          partner_type: convertForm.partner_type,
+        });
+        accountId = created?.id ?? "";
+      }
+      const response = await fetch("/api/inspired-closets/ops/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: detail.id,
+          action: "move_to_studio",
+          account_mode: convertForm.account_mode,
+          account_id: convertForm.account_mode === "existing" ? accountId || null : undefined,
+          designer_id: convertForm.designer_id || null,
+        }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not convert.");
+      setConvertOpen(false);
+      setNotice({ kind: "info", text: "Moved to Studio. Contact stays this person." });
+      await loadList();
+      await loadDetail(detail.id);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not convert.",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (selectedId && detail && draft) {
@@ -559,6 +818,13 @@ export default function OpsLeadsWorkspace() {
               {detail.zip || detail.street
                 ? ` · ${[detail.street, detail.city, detail.state, detail.zip].filter(Boolean).join(", ")}`
                 : ""}
+              {detail.account?.name
+                ? ` · Account: ${detail.account.name}${
+                    detail.account.kind === "partner"
+                      ? ` (${partnerTypeLabel(detail.account.partner_type) || "Partner"})`
+                      : ""
+                  }`
+                : ""}
             </p>
           </div>
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -566,13 +832,7 @@ export default function OpsLeadsWorkspace() {
               type="button"
               className={styles.buttonGhost}
               disabled={busy}
-              onClick={() => {
-                setEventForm((f) => ({
-                  ...f,
-                  designer_id: draft.designer_id ?? "",
-                }));
-                setEventOpen(true);
-              }}
+              onClick={() => openNewEvent()}
             >
               + New Event
             </button>
@@ -589,9 +849,7 @@ export default function OpsLeadsWorkspace() {
                 type="button"
                 className={styles.buttonGhost}
                 disabled={busy}
-                onClick={() =>
-                  void patchLead({ id: detail.id, action: "move_to_studio" })
-                }
+                onClick={openConvert}
               >
                 Move to Studio
               </button>
@@ -647,6 +905,17 @@ export default function OpsLeadsWorkspace() {
                       ))}
                     </select>
                   </label>
+                  {sourceNeedsReferralName(draft.source ?? "") ? (
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Referral name *</span>
+                      <input
+                        className={styles.input}
+                        value={draft.referral_name ?? ""}
+                        onChange={(e) => setDraft({ ...draft, referral_name: e.target.value })}
+                        placeholder="Who referred them"
+                      />
+                    </label>
+                  ) : null}
 
                   {draft.stage === "nurturing" ? (
                     <label className={styles.field}>
@@ -754,6 +1023,40 @@ export default function OpsLeadsWorkspace() {
                   </label>
 
                   <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Partner account</span>
+                    <select
+                      className={styles.input}
+                      value={draft.account_id ?? ""}
+                      onChange={(e) => setDraft({ ...draft, account_id: e.target.value || null })}
+                    >
+                      <option value="">None — customer file at convert</option>
+                      {partnerAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name}
+                          {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>First name</span>
+                    <input
+                      className={styles.input}
+                      value={draft.first_name ?? splitPersonName(draft.client?.name).first}
+                      onChange={(e) => setDraft({ ...draft, first_name: e.target.value })}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Last name</span>
+                    <input
+                      className={styles.input}
+                      value={draft.last_name ?? splitPersonName(draft.client?.name).last}
+                      onChange={(e) => setDraft({ ...draft, last_name: e.target.value })}
+                    />
+                  </label>
+
+                  <label className={styles.field}>
                     <span className={styles.fieldLabel}>Phone</span>
                     <input
                       className={styles.input}
@@ -803,10 +1106,12 @@ export default function OpsLeadsWorkspace() {
                     <div className={styles.detailGrid}>
                       <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
                         <span className={styles.fieldLabel}>Street</span>
-                        <input
-                          className={styles.input}
+                        <AddressAutocomplete
                           value={draft.street ?? ""}
-                          onChange={(e) => setDraft({ ...draft, street: e.target.value })}
+                          inputClassName={styles.input}
+                          placeholder="Start typing — pick a Google address"
+                          onChange={(street) => setDraft({ ...draft, street })}
+                          onResolved={applyDraftAddress}
                         />
                       </label>
                       <label className={styles.field}>
@@ -1019,7 +1324,7 @@ export default function OpsLeadsWorkspace() {
                 type="button"
                 className={styles.buttonPrimary}
                 style={{ width: "100%", marginTop: "0.65rem" }}
-                onClick={() => setEventOpen(true)}
+                onClick={() => openNewEvent()}
               >
                 New Event
               </button>
@@ -1043,6 +1348,153 @@ export default function OpsLeadsWorkspace() {
             </div>
           </aside>
         </div>
+
+        {convertOpen ? (
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setConvertOpen(false)}
+          >
+            <div
+              className={styles.modal}
+              role="dialog"
+              aria-label="Convert — Move to Studio"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className={styles.modalTitle}>Convert — Move to Studio</h3>
+              <p className={styles.leadContact} style={{ marginBottom: "0.75rem" }}>
+                Same as Community: pick a partner account, or create a new customer
+                account under this person. Contact stays this person (always new).
+              </p>
+              <div className={styles.detailGrid}>
+                <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                  <span className={styles.fieldLabel}>Account</span>
+                  <select
+                    className={styles.input}
+                    value={convertForm.account_mode}
+                    onChange={(e) =>
+                      setConvertForm((f) => ({
+                        ...f,
+                        account_mode: e.target.value as "new_customer" | "existing",
+                      }))
+                    }
+                  >
+                    <option value="new_customer">
+                      Create new account — this customer
+                    </option>
+                    <option value="existing">Choose existing partner account</option>
+                  </select>
+                </label>
+                {convertForm.account_mode === "existing" ? (
+                  <>
+                    <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                      <span className={styles.fieldLabel}>Partner account</span>
+                      <select
+                        className={styles.input}
+                        value={convertForm.account_id}
+                        onChange={(e) =>
+                          setConvertForm((f) => ({ ...f, account_id: e.target.value }))
+                        }
+                      >
+                        <option value="">— Select or add below —</option>
+                        {partnerAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name}
+                            {account.partner_type
+                              ? ` · ${partnerTypeLabel(account.partner_type)}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Or add partner</span>
+                      <input
+                        className={styles.input}
+                        value={convertForm.partner_name}
+                        onChange={(e) =>
+                          setConvertForm((f) => ({ ...f, partner_name: e.target.value }))
+                        }
+                        placeholder="Brian / ABC Homes"
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Partner type</span>
+                      <select
+                        className={styles.input}
+                        value={convertForm.partner_type}
+                        onChange={(e) =>
+                          setConvertForm((f) => ({ ...f, partner_type: e.target.value }))
+                        }
+                      >
+                        {INFLUENCER_TYPES.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                ) : (
+                  <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
+                    New account name: {detail.client?.name ?? "this customer"}
+                  </p>
+                )}
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Contact</span>
+                  <input
+                    className={styles.input}
+                    value={`Create new — ${detail.client?.name ?? "this person"}`}
+                    readOnly
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Record owner (designer)</span>
+                  <select
+                    className={styles.input}
+                    value={convertForm.designer_id}
+                    onChange={(e) =>
+                      setConvertForm((f) => ({ ...f, designer_id: e.target.value }))
+                    }
+                  >
+                    <option value="">Unassigned</option>
+                    {designers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Converted status</span>
+                  <input className={styles.input} value="Moved to Studio" readOnly />
+                </label>
+              </div>
+              <div className={styles.formActions} style={{ marginTop: "0.85rem" }}>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setConvertOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={styles.buttonPrimary}
+                  disabled={
+                    busy ||
+                    (convertForm.account_mode === "existing" &&
+                      !convertForm.account_id &&
+                      !convertForm.partner_name.trim())
+                  }
+                  onClick={() => void convertToStudio()}
+                >
+                  Convert
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {soldOpen ? (
           <div
@@ -1155,6 +1607,15 @@ export default function OpsLeadsWorkspace() {
                     placeholder="Flooring, access, client notes…"
                   />
                 </label>
+                <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                  <span className={styles.fieldLabel}>Signed proposal PDF</span>
+                  <input
+                    className={styles.input}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={(e) => setProposalFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
               </div>
               <div className={styles.formActions} style={{ marginTop: "1rem" }}>
                 <button
@@ -1187,25 +1648,36 @@ export default function OpsLeadsWorkspace() {
             >
               <h3 className={styles.modalTitle}>New Event</h3>
               <p className={styles.leadContact} style={{ marginBottom: "0.75rem" }}>
-                Select a record type — saves once on this lead (no double entry).
+                Design Event uses the designer already on this lead. Location comes from the lead
+                address. Community still sends the email — check the box to log that it went out.
               </p>
               <label className={styles.field}>
                 <span className={styles.fieldLabel}>Type</span>
                 <select
                   className={styles.input}
                   value={eventForm.kind}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const kind = e.target.value;
                     setEventForm((f) => ({
                       ...f,
-                      kind: e.target.value,
-                      designer_id: "",
+                      kind,
+                      subject: defaultEventSubject(kind, lastNameFromLead(draft ?? detail)),
                       installer_id: "",
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   <option value="consultation">Design Event</option>
                   <option value="install">Install Event</option>
                 </select>
+              </label>
+              <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                <span className={styles.fieldLabel}>Subject</span>
+                <input
+                  className={styles.input}
+                  value={eventForm.subject}
+                  onChange={(e) => setEventForm((f) => ({ ...f, subject: e.target.value }))}
+                  placeholder="Riccardo Design Consultation"
+                />
               </label>
               <label className={styles.field} style={{ marginTop: "0.55rem" }}>
                 <span className={styles.fieldLabel}>When</span>
@@ -1219,7 +1691,18 @@ export default function OpsLeadsWorkspace() {
                 />
               </label>
               <label className={styles.field} style={{ marginTop: "0.55rem" }}>
-                <span className={styles.fieldLabel}>Location</span>
+                <span className={styles.fieldLabel}>Event location</span>
+                <input
+                  className={styles.input}
+                  value={eventForm.location_text}
+                  onChange={(e) =>
+                    setEventForm((f) => ({ ...f, location_text: e.target.value }))
+                  }
+                  placeholder="Filled from the lead address"
+                />
+              </label>
+              <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                <span className={styles.fieldLabel}>Location type</span>
                 <select
                   className={styles.input}
                   value={eventForm.location_type}
@@ -1269,6 +1752,18 @@ export default function OpsLeadsWorkspace() {
                   </select>
                 </label>
               )}
+              {eventForm.kind === "consultation" ? (
+                <label className={styles.checkRow} style={{ marginTop: "0.85rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={eventForm.log_confirmation}
+                    onChange={(e) =>
+                      setEventForm((f) => ({ ...f, log_confirmation: e.target.checked }))
+                    }
+                  />
+                  Log confirmation email now (CC {designers.find((d) => d.id === eventForm.designer_id)?.name ?? "assigned designer"}). Community still sends it.
+                </label>
+              ) : null}
               <div className={styles.formActions} style={{ marginTop: "1rem" }}>
                 <button
                   type="button"
@@ -1346,19 +1841,94 @@ export default function OpsLeadsWorkspace() {
 
       <div className={styles.panel} style={{ marginBottom: "1rem" }}>
         <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-          Quick add lead
+          Partner accounts — realtor, builder, interior designer. Referral leads convert onto
+          one of these instead of a new customer file.
         </p>
         <div className={styles.formGrid}>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>Client name *</span>
+            <span className={styles.fieldLabel}>Partner name</span>
             <input
               className={styles.input}
-              value={form.client_name}
-              onChange={(e) => setForm((f) => ({ ...f, client_name: e.target.value }))}
+              value={partnerDraft.name}
+              onChange={(e) => setPartnerDraft((f) => ({ ...f, name: e.target.value }))}
+              placeholder="Brian / ABC Homes"
             />
           </label>
           <label className={styles.field}>
+            <span className={styles.fieldLabel}>Type</span>
+            <select
+              className={styles.input}
+              value={partnerDraft.partner_type}
+              onChange={(e) => setPartnerDraft((f) => ({ ...f, partner_type: e.target.value }))}
+            >
+              {INFLUENCER_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
             <span className={styles.fieldLabel}>Phone</span>
+            <input
+              className={styles.input}
+              value={partnerDraft.phone}
+              onChange={(e) => setPartnerDraft((f) => ({ ...f, phone: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Email</span>
+            <input
+              className={styles.input}
+              value={partnerDraft.email}
+              onChange={(e) => setPartnerDraft((f) => ({ ...f, email: e.target.value }))}
+            />
+          </label>
+          <div className={styles.formActions}>
+            <button
+              type="button"
+              className={styles.buttonPrimary}
+              disabled={busy || !partnerDraft.name.trim()}
+              onClick={() => void createPartnerFromPanel()}
+            >
+              Add partner
+            </button>
+          </div>
+        </div>
+        {partnerAccounts.length > 0 ? (
+          <p className={styles.leadContact} style={{ marginTop: "0.65rem" }}>
+            {partnerAccounts.map((account) => account.name).join(" · ")}
+          </p>
+        ) : (
+          <p className={styles.leadContact} style={{ marginTop: "0.65rem" }}>
+            No partners yet. Add one before converting a realtor or builder lead.
+          </p>
+        )}
+      </div>
+
+      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
+        <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+          New lead — same fields Des fills when someone calls in
+        </p>
+        <div className={styles.formGrid}>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>First name *</span>
+            <input
+              className={styles.input}
+              value={form.first_name}
+              onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Last name *</span>
+            <input
+              className={styles.input}
+              value={form.last_name}
+              onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Phone *</span>
             <input
               className={styles.input}
               value={form.phone}
@@ -1366,7 +1936,15 @@ export default function OpsLeadsWorkspace() {
             />
           </label>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>Source</span>
+            <span className={styles.fieldLabel}>Email</span>
+            <input
+              className={styles.input}
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Lead source</span>
             <select
               className={styles.input}
               value={form.source}
@@ -1379,6 +1957,25 @@ export default function OpsLeadsWorkspace() {
               ))}
             </select>
           </label>
+          {sourceNeedsReferralName(form.source) ? (
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Referral name *</span>
+              <input
+                className={styles.input}
+                value={form.referral_name}
+                onChange={(e) => {
+                  const referral_name = e.target.value;
+                  const match = matchPartnerAccount(referral_name, partnerAccounts);
+                  setForm((f) => ({
+                    ...f,
+                    referral_name,
+                    account_id: match?.id ?? f.account_id,
+                  }));
+                }}
+                placeholder="Brian"
+              />
+            </label>
+          ) : null}
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Designer</span>
             <select
@@ -1395,6 +1992,48 @@ export default function OpsLeadsWorkspace() {
             </select>
           </label>
           <label className={styles.field}>
+            <span className={styles.fieldLabel}>Partner account</span>
+            <select
+              className={styles.input}
+              value={form.account_id}
+              onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))}
+            >
+              <option value="">None — customer file at convert</option>
+              {partnerAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                  {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+            <span className={styles.fieldLabel}>Street</span>
+            <AddressAutocomplete
+              value={form.street}
+              inputClassName={styles.input}
+              placeholder="350 Kandinsky Court"
+              onChange={(street) => setForm((f) => ({ ...f, street }))}
+              onResolved={applyFormAddress}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>City</span>
+            <input
+              className={styles.input}
+              value={form.city}
+              onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>State</span>
+            <input
+              className={styles.input}
+              value={form.state}
+              onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+            />
+          </label>
+          <label className={styles.field}>
             <span className={styles.fieldLabel}>Zip</span>
             <input
               className={styles.input}
@@ -1402,19 +2041,39 @@ export default function OpsLeadsWorkspace() {
               onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
             />
           </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Notes</span>
-            <input
+          <div className={styles.field} style={{ gridColumn: "1 / -1" }}>
+            <span className={styles.fieldLabel}>Area of home</span>
+            <div className={styles.areaPicker} style={{ marginTop: "0.35rem" }}>
+              {AREAS_OF_HOME.map((area) => {
+                const on = form.areas_of_home.includes(area);
+                return (
+                  <button
+                    key={area}
+                    type="button"
+                    className={`${styles.areaChip} ${on ? styles.areaChipOn : ""}`}
+                    onClick={() => toggleFormArea(area)}
+                  >
+                    {area}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+            <span className={styles.fieldLabel}>Project notes</span>
+            <textarea
               className={styles.input}
+              rows={3}
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="8/26/26 Tommy and wife Stacey called…"
             />
           </label>
           <div className={styles.formActions}>
             <button
               type="button"
               className={styles.buttonGhost}
-              disabled={busy || !form.client_name.trim()}
+              disabled={busy || !form.first_name.trim() || !form.last_name.trim()}
               onClick={() => void createLead({ source: "instagram" })}
             >
               + Instagram lead
@@ -1422,7 +2081,7 @@ export default function OpsLeadsWorkspace() {
             <button
               type="button"
               className={styles.buttonPrimary}
-              disabled={busy || !form.client_name.trim()}
+              disabled={busy || !form.first_name.trim() || !form.last_name.trim()}
               onClick={() => void createLead()}
             >
               Add lead
@@ -1443,6 +2102,7 @@ export default function OpsLeadsWorkspace() {
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Zip</th>
+                <th>Account</th>
                 <th>Status</th>
                 <th>Form Type</th>
                 <th>Source</th>
@@ -1463,6 +2123,7 @@ export default function OpsLeadsWorkspace() {
                   </td>
                   <td>{lead.client?.phone ?? "—"}</td>
                   <td>{lead.zip ?? "—"}</td>
+                  <td>{lead.account?.name ?? "—"}</td>
                   <td>{stageLabel(lead.stage)}</td>
                   <td>
                     {FORM_TYPES.find((f) => f.id === lead.form_type)?.label ?? "—"}

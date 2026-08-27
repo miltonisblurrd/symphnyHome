@@ -2,6 +2,7 @@
  * Lead CRM constants — Des desk, aligned to Community.
  */
 export const LEAD_SOURCES = [
+  { id: "call", label: "Phone call" },
   { id: "instagram", label: "Instagram" },
   { id: "facebook", label: "Facebook" },
   { id: "google", label: "Google" },
@@ -147,6 +148,39 @@ export function nextAttemptStage(current: string): string {
   if (idx >= 0 && idx < ATTEMPT_STAGES.length - 1) return ATTEMPT_STAGES[idx + 1];
   if (idx === ATTEMPT_STAGES.length - 1) return "nurturing";
   return current;
+}
+
+export function sourceNeedsReferralName(source: string): boolean {
+  return source === "referral_company" || source === "referral_personal" || source === "referral";
+}
+
+export function splitPersonName(full: string | null | undefined): { first: string; last: string } {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", last: "" };
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+export function joinPersonName(first: string, last: string): string {
+  return [first.trim(), last.trim()].filter(Boolean).join(" ");
+}
+
+export function defaultEventSubject(kind: string, lastName: string): string {
+  const last = lastName.trim() || "Client";
+  if (kind === "install") return last;
+  if (kind === "job_check") return `${last} Job check`;
+  return `${last} Design Consultation`;
+}
+
+export function formatLeadAddress(lead: {
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}): string {
+  return [lead.street, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function isUnscheduledStage(stage: string): boolean {

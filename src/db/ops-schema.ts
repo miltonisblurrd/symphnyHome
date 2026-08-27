@@ -91,6 +91,22 @@ export const icClients = pgTable("ic_clients", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
+/** Partner (realtor/builder/designer) or customer file. Contact stays on ic_clients. */
+export const icAccounts = pgTable("ic_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("customer"),
+  partnerType: text("partner_type"),
+  phone: text("phone"),
+  email: text("email"),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  updatedBy: uuid("updated_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
 export const icLeadSourceEnum = pgEnum("ic_lead_source", [
   "call",
   "website",
@@ -176,6 +192,7 @@ export const icPaymentMethodEnum = pgEnum("ic_payment_method", [
 export const icLeads = pgTable("ic_leads", {
   id: uuid("id").primaryKey().defaultRandom(),
   clientId: uuid("client_id").references(() => icClients.id),
+  accountId: uuid("account_id").references(() => icAccounts.id),
   source: icLeadSourceEnum("source").notNull().default("instagram"),
   stage: icLeadStageEnum("stage").notNull().default("new"),
   ownerId: uuid("owner_id").references(() => icStaff.id),
@@ -191,6 +208,9 @@ export const icLeads = pgTable("ic_leads", {
   leadType: text("lead_type").default("consumer"),
   influencerType: text("influencer_type"),
   formType: text("form_type"),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  referralName: text("referral_name"),
   street: text("street"),
   city: text("city"),
   state: text("state"),
@@ -239,6 +259,7 @@ export const icLeadChatter = pgTable("ic_lead_chatter", {
 export const icJobs = pgTable("ic_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
   clientId: uuid("client_id").references(() => icClients.id),
+  accountId: uuid("account_id").references(() => icAccounts.id),
   leadId: uuid("lead_id").references(() => icLeads.id),
   designerId: uuid("designer_id").references(() => icStaff.id),
   installerId: uuid("installer_id").references(() => icStaff.id),
@@ -268,6 +289,9 @@ export const icJobs = pgTable("ic_jobs", {
   jobKind: text("job_kind").default("new_install"),
   /** Time window as written on the board, e.g. 8-9 or 10-11am. */
   visitWindow: text("visit_window"),
+  proposalUrl: text("proposal_url"),
+  proposalPath: text("proposal_path"),
+  proposalFilename: text("proposal_filename"),
   notes: text("notes"),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
@@ -285,8 +309,10 @@ export const icAppointments = pgTable("ic_appointments", {
   jobId: uuid("job_id").references(() => icJobs.id),
   designerId: uuid("designer_id").references(() => icStaff.id),
   kind: icAppointmentKindEnum("kind").notNull().default("consultation"),
+  subject: text("subject"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
   locationType: icAppointmentLocationEnum("location_type").notNull().default("on_site"),
+  locationText: text("location_text"),
   status: icAppointmentStatusEnum("status").notNull().default("scheduled"),
   delayReason: text("delay_reason"),
   confirmationSentAt: timestamp("confirmation_sent_at", { withTimezone: true }),
@@ -602,6 +628,7 @@ export const icFieldIssues = pgTable("ic_field_issues", {
 
 export type IcStaff = typeof icStaff.$inferSelect;
 export type IcClient = typeof icClients.$inferSelect;
+export type IcAccount = typeof icAccounts.$inferSelect;
 export type IcLead = typeof icLeads.$inferSelect;
 export type IcJob = typeof icJobs.$inferSelect;
 export type IcAppointment = typeof icAppointments.$inferSelect;

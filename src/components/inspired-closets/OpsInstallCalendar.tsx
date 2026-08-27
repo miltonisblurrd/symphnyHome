@@ -144,6 +144,15 @@ export default function OpsInstallCalendar({
   onWeekChange: (iso: string) => void;
 }) {
   const weekStart = useMemo(() => new Date(weekStartIso), [weekStartIso]);
+  const callToSchedule = useMemo(() => {
+    return readyToSchedule
+      .filter((job) => job.receive_date && !job.install_date)
+      .map((job) => {
+        const received = new Date(`${job.receive_date}T00:00:00`);
+        return { job, callOn: ymd(addDays(received, 7)) };
+      })
+      .sort((a, b) => a.callOn.localeCompare(b.callOn));
+  }, [readyToSchedule]);
   const [view, setView] = useState<"calendar" | "board" | "list">("board");
   const [showQueues, setShowQueues] = useState(false);
   const [showAssigned, setShowAssigned] = useState(true);
@@ -694,6 +703,41 @@ export default function OpsInstallCalendar({
           )}
         </div>
       </div>
+
+      {callToSchedule.length > 0 ? (
+        <section className={styles.strip}>
+          <div className={styles.stripHead}>
+            <h3 className={styles.stripTitle}>Call to schedule</h3>
+            <span className={styles.stripCount}>{callToSchedule.length}</span>
+          </div>
+          <p className={styles.stripEmpty} style={{ marginBottom: "0.5rem" }}>
+            Receive date is on the job. Call about a week later with install-day options.
+          </p>
+          <ul className={styles.stripList}>
+            {callToSchedule.map(({ job, callOn }) => (
+              <li key={job.id} className={styles.stripItemReady}>
+                <div>
+                  <strong>{job.client?.name ?? "Client"}</strong>
+                  <span>
+                    Call on {shortDate(callOn)} · received {shortDate(job.receive_date)} ·{" "}
+                    {job.designer?.name ?? "—"}
+                  </span>
+                </div>
+                <div className={styles.stripActions}>
+                  <button
+                    type="button"
+                    className={styles.navBtn}
+                    disabled={busy}
+                    onClick={() => setScheduleJob(job)}
+                  >
+                    Book install
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {showQueues ? (
         <>

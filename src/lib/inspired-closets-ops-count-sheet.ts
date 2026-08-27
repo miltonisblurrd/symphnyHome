@@ -146,23 +146,56 @@ export function parseCountSheetText(text: string): ImportPartRow[] {
   return rows;
 }
 
+function findZipEocd(buf: Buffer): number {
+  for (let i = buf.length - 22; i >= 0; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) return i;
+  }
+  return -1;
+}
+
+/** Central directory sizes are reliable; Community xlsx local headers often have ZIP flag 0x8 (sizes live after the file). */
 function unzipXml(buf: Buffer): Map<string, string> {
   const files = new Map<string, string>();
+  const eocd = findZipEocd(buf);
+  if (eocd >= 0) {
+    const entries = buf.readUInt16LE(eocd + 10);
+    let i = buf.readUInt32LE(eocd + 16);
+    for (let n = 0; n < entries && i + 46 <= buf.length; n += 1) {
+      if (buf.readUInt32LE(i) !== 0x02014b50) break;
+      const method = buf.readUInt16LE(i + 10);
+      const compSize = buf.readUInt32LE(i + 20);
+      const nameLen = buf.readUInt16LE(i + 28);
+      const extraLen = buf.readUInt16LE(i + 30);
+      const commentLen = buf.readUInt16LE(i + 32);
+      const localOff = buf.readUInt32LE(i + 42);
+      const name = buf
+        .subarray(i + 46, i + 46 + nameLen)
+        .toString("utf8")
+        .replace(/^\//, "");
+      if (localOff + 30 <= buf.length) {
+        const locNameLen = buf.readUInt16LE(localOff + 26);
+        const locExtraLen = buf.readUInt16LE(localOff + 28);
+        const dataStart = localOff + 30 + locNameLen + locExtraLen;
+        const data = buf.subarray(dataStart, dataStart + compSize);
+        const content = method === 0 ? data : method === 8 ? inflateRawSync(data) : null;
+        if (content) files.set(name, content.toString("utf8"));
+      }
+      i += 46 + nameLen + extraLen + commentLen;
+    }
+    if (files.size) return files;
+  }
+
   let i = 0;
   while (i + 30 <= buf.length) {
     const sig = buf.readUInt32LE(i);
     if (sig === 0x02014b50 || sig === 0x06054b50) break;
     if (sig !== 0x04034b50) break;
-    const flags = buf.readUInt16LE(i + 6);
     const method = buf.readUInt16LE(i + 8);
     const compSize = buf.readUInt32LE(i + 18);
     const nameLen = buf.readUInt16LE(i + 26);
     const extraLen = buf.readUInt16LE(i + 28);
     const name = buf.subarray(i + 30, i + 30 + nameLen).toString("utf8").replace(/^\//, "");
     const dataStart = i + 30 + nameLen + extraLen;
-    if (flags & 0x8) {
-      throw new Error("Could not read this Excel file. Save it as CSV and upload that.");
-    }
     const data = buf.subarray(dataStart, dataStart + compSize);
     const content = method === 0 ? data : method === 8 ? inflateRawSync(data) : null;
     if (!content) {
@@ -234,7 +267,9 @@ function sheetToGrid(xml: string, shared: string[]): string[][] {
       const col = colIndex(ref || "A");
       cells[col] = value;
     }
-    grid[rowNum - 1] = cells.map((c) => c ?? "");
+    const dense: string[] = [];
+    for (let i = 0; i < cells.length; i += 1) dense.push(cells[i] ?? "");
+    grid[rowNum - 1] = dense;
   }
   return grid.filter((row) => row && row.some((c) => String(c ?? "").trim()));
 }
@@ -255,7 +290,9 @@ function gridToRows(grid: string[][]): ImportPartRow[] {
   return rows;
 }
 
-export function parseXlsxBuffer(buf: Buffer): ImportPartRow[] {
+export type XlsxSheetGrid = { name: string; grid: string[][] };
+
+export function parseXlsxToSheets(buf: Buffer): XlsxSheetGrid[] {
   const files = unzipXml(buf);
   const workbook = files.get("xl/workbook.xml");
   if (!workbook) throw new Error("Not a valid Excel workbook.");
@@ -275,14 +312,24 @@ export function parseXlsxBuffer(buf: Buffer): ImportPartRow[] {
     if (name && path) sheets.push({ name, path });
   }
   const shared = parseSharedStrings(files.get("xl/sharedStrings.xml") ?? "");
-  const preferred = sheets.find((s) => /warehouse count|inventory|count/i.test(s.name));
-  const order = preferred
-    ? [preferred, ...sheets.filter((s) => s.path !== preferred.path)]
-    : sheets;
-  for (const sheet of order) {
+  const out: XlsxSheetGrid[] = [];
+  for (const sheet of sheets) {
     const xml = files.get(sheet.path);
     if (!xml) continue;
-    const rows = gridToRows(sheetToGrid(xml, shared));
+    out.push({ name: sheet.name, grid: sheetToGrid(xml, shared) });
+  }
+  if (!out.length) throw new Error("Not a valid Excel workbook.");
+  return out;
+}
+
+export function parseXlsxBuffer(buf: Buffer): ImportPartRow[] {
+  const sheets = parseXlsxToSheets(buf);
+  const preferred = sheets.find((s) => /warehouse count|inventory|count/i.test(s.name));
+  const order = preferred
+    ? [preferred, ...sheets.filter((s) => s.name !== preferred.name)]
+    : sheets;
+  for (const sheet of order) {
+    const rows = gridToRows(sheet.grid);
     if (rows.length) return rows;
   }
   throw new Error(

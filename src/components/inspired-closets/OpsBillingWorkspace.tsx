@@ -159,7 +159,7 @@ export default function OpsBillingWorkspace() {
 
   return (
     <OpsShell
-      title="Billing"
+      title="Payments"
       subtitle="50 / 40 / 10 ledger. Podium stays the rail. Marking 50% paid pings Frank to job-check / order Stow."
       actions={
         <button type="button" className={styles.buttonGhost} onClick={() => void load()}>

@@ -13,20 +13,20 @@ type NavGroup = { label: string; items: NavItem[] };
 /** Sequenced process for Des → Craig → money, then supporting lanes. */
 const NAV_GROUPS: NavGroup[] = [
   {
+    label: "Projects",
+    items: [{ href: "/inspired-closets/ops/projects", label: "Projects", icon: "▤" }],
+  },
+  {
     label: "Process",
     items: [
       { href: "/inspired-closets/ops/leads", label: "Leads", icon: "◉" },
-      { href: "/inspired-closets/ops/appointments", label: "Appointments", icon: "◷" },
-      { href: "/inspired-closets/ops/installs", label: "Installs", icon: "▸" },
-      { href: "/inspired-closets/ops/billing", label: "Billing", icon: "◈" },
-      { href: "/inspired-closets/ops/finance", label: "Finance", icon: "◆" },
-      { href: "/inspired-closets/ops/designer-sales", label: "Leads vs Sales", icon: "▣" },
+      { href: "/inspired-closets/ops/appointments", label: "Calendar", icon: "◷" },
+      { href: "/inspired-closets/ops/billing", label: "Payments", icon: "◈" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/inspired-closets/ops/jobs", label: "Jobs", icon: "▤" },
       { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
       { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▣" },
       { href: "/inspired-closets/ops/crew", label: "Crew", icon: "◎" },
@@ -34,13 +34,29 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "People",
-    items: [{ href: "/inspired-closets/ops", label: "Payroll", icon: "▦" }],
+    label: "Finance",
+    items: [
+      { href: "/inspired-closets/ops", label: "Payroll", icon: "▦" },
+      { href: "/inspired-closets/ops/finance", label: "Billing", icon: "◆" },
+    ],
   },
 ];
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/inspired-closets/ops") return pathname === href;
+  if (href === "/inspired-closets/ops/appointments") {
+    return (
+      pathname.startsWith("/inspired-closets/ops/appointments") ||
+      pathname.startsWith("/inspired-closets/ops/installs") ||
+      pathname.startsWith("/inspired-closets/ops/schedule")
+    );
+  }
+  if (href === "/inspired-closets/ops/projects") {
+    return (
+      pathname.startsWith("/inspired-closets/ops/projects") ||
+      pathname.startsWith("/inspired-closets/ops/jobs")
+    );
+  }
   if (href === "/inspired-closets/ops/inventory") {
     return (
       pathname === href ||
@@ -54,11 +70,13 @@ export default function OpsShell({
   title,
   subtitle,
   actions,
+  hideTitle,
   children,
 }: {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  hideTitle?: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -111,14 +129,25 @@ export default function OpsShell({
           </nav>
 
           <div className={styles.sidebarBottom}>
-            <Link href="/inspired-closets/gavin" className={styles.sidebarLink}>
+            <Link
+              href="/inspired-closets/ops/designer-sales"
+              className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/ops/designer-sales") ? styles.sidebarLinkActive : ""}`}
+              onClick={() => setSidebarOpen(false)}
+            >
+              Craig’s dashboard
+            </Link>
+            <Link
+              href="/inspired-closets/gavin"
+              className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/gavin") ? styles.sidebarLinkActive : ""}`}
+              onClick={() => setSidebarOpen(false)}
+            >
               Gavin dashboard
             </Link>
           </div>
         </aside>
 
         <div className={styles.main}>
-          <header className={styles.topBar}>
+          <header className={`${styles.topBar} ${hideTitle ? styles.topBarCompact : ""}`}>
             <button
               type="button"
               className={styles.menuBtn}
@@ -129,13 +158,15 @@ export default function OpsShell({
               <span />
               <span />
             </button>
-            <div className={styles.headerRow}>
-              <div>
-                <h1 className={styles.title}>{title}</h1>
-                {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+            {hideTitle ? null : (
+              <div className={styles.headerRow}>
+                <div>
+                  <h1 className={styles.title}>{title}</h1>
+                  {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+                </div>
+                {actions ? <div className={styles.actions}>{actions}</div> : null}
               </div>
-              {actions ? <div className={styles.actions}>{actions}</div> : null}
-            </div>
+            )}
           </header>
           {children}
         </div>

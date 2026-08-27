@@ -164,7 +164,7 @@ export default function OpsFinanceWorkspace() {
 
   return (
     <OpsShell
-      title="Finance"
+      title="Billing"
       subtitle={`Lulu’s desk · Podium receipts → QuickBooks books · ${gate}% spiff gate · job costs in one place`}
       actions={
         <button type="button" className={styles.buttonGhost} onClick={() => void load()}>
@@ -183,7 +183,7 @@ export default function OpsFinanceWorkspace() {
         {data?.quickbooksStatus === "connected" ? " (pulse connected)" : ""} — this app does{" "}
         <strong>not</strong> write into QuickBooks. After <em>you</em> enter a payment in QB,
         tap <strong>Marked in QB</strong> here so the checklist clears (same idea as checking it
-        off in Excel). Des records the payment in Billing/Podium; Lulu owns the QB entry +
+        off in Excel). Des records the payment in Payments/Podium; Lulu owns the QB entry +
         checkmark.
       </p>
 
@@ -326,7 +326,7 @@ export default function OpsFinanceWorkspace() {
       ) : tab === "qb" ? (
         <div className={styles.panel}>
           <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-            Payments already recorded in the app (from Billing / Podium). This is Lulu’s
+            Payments already recorded in the app (from Payments / Podium). This is Lulu’s
             checklist — enter each one in QuickBooks yourself, then mark it here. Nothing is
             sent to QB automatically.
           </p>

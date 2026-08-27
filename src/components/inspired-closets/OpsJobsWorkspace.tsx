@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import OpsProjectFile, {
+  type ProjectFile,
+} from "@/components/inspired-closets/OpsProjectFile";
 import styles from "./ops-payroll.module.css";
 
 type Stage = { id: string; label: string };
@@ -16,25 +20,36 @@ type Staff = {
 type Client = {
   id: string;
   name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
 };
 
 type Job = {
   id: string;
   client_id: string | null;
+  lead_id?: string | null;
   designer_id: string | null;
+  installer_id?: string | null;
   stage: string;
   contract_cents: number;
   deposit_cents: number;
   collected_cents: number;
   sold_date: string | null;
   install_date: string | null;
-  completed_date: string | null;
+  completed_date?: string | null;
   notes: string | null;
   risk_flag: boolean;
+  community_ref?: string | null;
+  studio_ref?: string | null;
+  receive_date?: string | null;
+  visit_window?: string | null;
+  job_kind?: string | null;
   proposal_url?: string | null;
   proposal_filename?: string | null;
   client: Client | null;
   designer: Staff | null;
+  installer?: Staff | null;
 };
 
 type ApiResponse = {
@@ -61,6 +76,18 @@ function dollarsInputToCents(value: string): number {
   return Number.isFinite(num) ? Math.round(num * 100) : 0;
 }
 
+const STATUS_TABS = [
+  { id: "all", label: "All" },
+  { id: "not_complete", label: "Not Complete" },
+  { id: "completed", label: "Completed" },
+] as const;
+
+type StatusFilter = (typeof STATUS_TABS)[number]["id"];
+
+function isCompletedStage(stage: string): boolean {
+  return stage === "closed";
+}
+
 const EMPTY_FORM = {
   client_name: "",
   designer_id: "",
@@ -72,16 +99,23 @@ const EMPTY_FORM = {
 };
 
 export default function OpsJobsWorkspace() {
+  const searchParams = useSearchParams();
+  const presetId = searchParams.get("id");
   const [stages, setStages] = useState<Stage[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [stageFilter, setStageFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [stageFilter, setStageFilter] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(presetId);
+  const [projectFile, setProjectFile] = useState<ProjectFile | null>(null);
   const [jobMaterials, setJobMaterials] = useState<
     Array<{
       id: string;
@@ -104,32 +138,49 @@ export default function OpsJobsWorkspace() {
   >([]);
   const [matTick, setMatTick] = useState(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const response = await fetch("/api/inspired-closets/ops/jobs");
       const payload = (await response.json()) as ApiResponse;
-      if (!payload.ok) throw new Error(payload.error ?? "Failed to load jobs.");
+      if (!payload.ok) throw new Error(payload.error ?? "Failed to load projects.");
       setStages(payload.stages ?? []);
       setJobs(payload.jobs ?? []);
       setStaff(payload.staff ?? []);
+      setListUpdatedAt(new Date());
       setForm((current) =>
         current.designer_id || !payload.staff?.[0]?.id
           ? current
           : { ...current, designer_id: payload.staff[0].id },
       );
     } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Failed to load jobs.",
-      });
+      if (!opts?.silent) {
+        setNotice({
+          kind: "error",
+          text: error instanceof Error ? error.message : "Failed to load projects.",
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    function onFocus() {
+      void load({ silent: true });
+    }
+    const timer = window.setInterval(() => {
+      void load({ silent: true });
+    }, 30_000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -197,50 +248,99 @@ export default function OpsJobsWorkspace() {
   }, [selectedJobId, matTick]);
 
   const designers = useMemo(
-    () => staff.filter((member) => member.role === "designer" && member.active),
+    () => staff.filter((member) => (member.role === "designer" || member.role === "owner") && member.active),
+    [staff],
+  );
+  const installers = useMemo(
+    () => staff.filter((member) => member.role === "installer" && member.active),
     [staff],
   );
 
+  const loadProjectFile = useCallback(async (jobId: string) => {
+    setFileLoading(true);
+    try {
+      const response = await fetch(`/api/inspired-closets/ops/jobs/${jobId}`);
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        job?: ProjectFile["job"];
+        lead?: ProjectFile["lead"];
+        appointments?: ProjectFile["appointments"];
+        payments?: ProjectFile["payments"];
+      };
+      if (!payload.ok || !payload.job) {
+        throw new Error(payload.error ?? "Failed to load project.");
+      }
+      setProjectFile({
+        job: payload.job,
+        lead: payload.lead ?? null,
+        appointments: payload.appointments ?? [],
+        payments: payload.payments ?? [],
+      });
+      setJobs((current) =>
+        current.map((item) =>
+          item.id === jobId
+            ? {
+                ...item,
+                ...payload.job,
+                client: payload.job.client ?? item.client,
+                designer: payload.job.designer ?? item.designer,
+                installer: payload.job.installer ?? item.installer,
+              }
+            : item,
+        ),
+      );
+    } catch (error) {
+      setProjectFile(null);
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Failed to load project.",
+      });
+    } finally {
+      setFileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedJobId) {
+      setProjectFile(null);
+      return;
+    }
+    void loadProjectFile(selectedJobId);
+  }, [selectedJobId, loadProjectFile]);
+
+  useEffect(() => {
+    if (!selectedJobId) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setSelectedJobId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    function onDoc(event: MouseEvent) {
+      if (!filterRef.current?.contains(event.target as Node)) setFilterOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [filterOpen]);
+
   const visibleJobs = useMemo(() => {
-    if (stageFilter === "all") return jobs;
-    return jobs.filter((job) => job.stage === stageFilter);
-  }, [jobs, stageFilter]);
+    return jobs.filter((job) => {
+      if (statusFilter === "completed" && !isCompletedStage(job.stage)) return false;
+      if (statusFilter === "not_complete" && isCompletedStage(job.stage)) return false;
+      if (stageFilter && job.stage !== stageFilter) return false;
+      return true;
+    });
+  }, [jobs, statusFilter, stageFilter]);
 
   const summary = useMemo(() => {
     const open = jobs.filter((job) => !["closed", "cancelled"].includes(job.stage)).length;
     const contract = visibleJobs.reduce((sum, job) => sum + job.contract_cents, 0);
     return { total: jobs.length, open, contract, showing: visibleJobs.length };
   }, [jobs, visibleJobs]);
-
-  async function syncFromPayroll() {
-    setSyncing(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/jobs/sync-from-payroll", {
-        method: "POST",
-      });
-      const raw = await response.text();
-      let payload: ApiResponse;
-      try {
-        payload = JSON.parse(raw) as ApiResponse;
-      } catch {
-        throw new Error(raw.slice(0, 160) || `Sync failed (${response.status}).`);
-      }
-      if (!payload.ok) throw new Error(payload.error ?? "Sync failed.");
-      setNotice({
-        kind: "info",
-        text: `Synced jobs from payroll · ${payload.jobsCreated ?? 0} created · ${payload.jobsLinked ?? 0} linked · ${payload.clientsCreated ?? 0} clients`,
-      });
-      await load();
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Sync failed.",
-      });
-    } finally {
-      setSyncing(false);
-    }
-  }
 
   async function addJob(event: React.FormEvent) {
     event.preventDefault();
@@ -263,14 +363,14 @@ export default function OpsJobsWorkspace() {
         }),
       });
       const payload = (await response.json()) as ApiResponse;
-      if (!payload.ok) throw new Error(payload.error ?? "Failed to create job.");
+      if (!payload.ok) throw new Error(payload.error ?? "Failed to create project.");
       setForm({ ...EMPTY_FORM, designer_id: form.designer_id, stage: form.stage });
-      setNotice({ kind: "info", text: `Created job for ${form.client_name.trim()}.` });
+      setNotice({ kind: "info", text: `Created project for ${form.client_name.trim()}.` });
       await load();
     } catch (error) {
       setNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "Failed to create job.",
+        text: error instanceof Error ? error.message : "Failed to create project.",
       });
     } finally {
       setSaving(false);
@@ -290,7 +390,7 @@ export default function OpsJobsWorkspace() {
       setJobs((current) =>
         current.map((item) =>
           item.id === job.id
-            ? { ...item, ...updated, client: item.client, designer: item.designer }
+            ? { ...item, ...updated, client: item.client, designer: item.designer, installer: item.installer }
             : item,
         ),
       );
@@ -299,6 +399,49 @@ export default function OpsJobsWorkspace() {
         kind: "error",
         text: error instanceof Error ? error.message : "Failed to update stage.",
       });
+    }
+  }
+
+  async function patchJob(jobId: string, body: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: jobId, ...body }),
+      });
+      const payload = (await response.json()) as ApiResponse;
+      if (!payload.ok || !payload.job) throw new Error(payload.error ?? "Failed to update project.");
+      const updated = payload.job;
+      setJobs((current) =>
+        current.map((item) =>
+          item.id === jobId
+            ? {
+                ...item,
+                ...updated,
+                client: item.client,
+                designer:
+                  typeof body.designer_id === "string"
+                    ? staff.find((person) => person.id === body.designer_id) ?? item.designer
+                    : item.designer,
+                installer:
+                  body.installer_id === null
+                    ? null
+                    : typeof body.installer_id === "string"
+                      ? staff.find((person) => person.id === body.installer_id) ?? item.installer
+                      : item.installer,
+              }
+            : item,
+        ),
+      );
+      if (selectedJobId === jobId) void loadProjectFile(jobId);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Failed to update project.",
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -320,7 +463,7 @@ export default function OpsJobsWorkspace() {
       setJobs((current) =>
         current.map((item) =>
           item.id === job.id
-            ? { ...item, ...updated, client: item.client, designer: item.designer }
+            ? { ...item, ...updated, client: item.client, designer: item.designer, installer: item.installer }
             : item,
         ),
       );
@@ -347,8 +490,9 @@ export default function OpsJobsWorkspace() {
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Upload failed.");
-      setNotice({ kind: "info", text: "Signed proposal saved on this job." });
+      setNotice({ kind: "info", text: "Signed proposal saved on this project." });
       await load();
+      if (selectedJobId) await loadProjectFile(selectedJobId);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -361,28 +505,8 @@ export default function OpsJobsWorkspace() {
 
   return (
     <OpsShell
-      title="Jobs"
-      subtitle="Company job spine · every module hangs off these records"
-      actions={
-        <>
-          <button
-            type="button"
-            className={styles.buttonGhost}
-            onClick={() => void load()}
-            disabled={loading}
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            className={styles.buttonPrimary}
-            onClick={() => void syncFromPayroll()}
-            disabled={syncing}
-          >
-            {syncing ? "Syncing…" : "Sync from payroll"}
-          </button>
-        </>
-      }
+      title="Projects"
+      subtitle="Home file for every sold project — open a row to see lead, schedule, payments, people, and inventory"
     >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
@@ -390,30 +514,85 @@ export default function OpsJobsWorkspace() {
         </p>
       ) : null}
 
-      <nav className={styles.tabs}>
-        <button
-          type="button"
-          className={`${styles.tab} ${stageFilter === "all" ? styles.tabActive : ""}`}
-          onClick={() => setStageFilter("all")}
-        >
-          All
-        </button>
-        {stages.map((stage) => (
-          <button
-            key={stage.id}
-            type="button"
-            className={`${styles.tab} ${stageFilter === stage.id ? styles.tabActive : ""}`}
-            onClick={() => setStageFilter(stage.id)}
-          >
-            {stage.label}
-          </button>
-        ))}
-      </nav>
+      <div className={styles.listToolbar}>
+        <nav className={styles.tabs} aria-label="Project views">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`${styles.tab} ${statusFilter === tab.id ? styles.tabActive : ""}`}
+              onClick={() => setStatusFilter(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        <div className={styles.toolbarRight}>
+          <p className={styles.updatedStamp}>
+            {listUpdatedAt
+              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}`
+              : loading
+                ? "Updating…"
+                : "—"}
+          </p>
+          <div className={styles.filterWrap} ref={filterRef}>
+            <button
+              type="button"
+              className={`${styles.filterBtn} ${stageFilter ? styles.filterBtnActive : ""}`}
+              aria-label="Filter by stage"
+              aria-expanded={filterOpen}
+              onClick={() => setFilterOpen((open) => !open)}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.5 4h11M4.5 8h7M6.5 12h3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            {filterOpen ? (
+              <div className={styles.filterMenu} role="listbox">
+                <button
+                  type="button"
+                  className={`${styles.filterOption} ${!stageFilter ? styles.filterOptionActive : ""}`}
+                  onClick={() => {
+                    setStageFilter("");
+                    setFilterOpen(false);
+                  }}
+                >
+                  All stages
+                </button>
+                {stages.map((stage) => (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    className={`${styles.filterOption} ${stageFilter === stage.id ? styles.filterOptionActive : ""}`}
+                    onClick={() => {
+                      setStageFilter(stage.id);
+                      setFilterOpen(false);
+                    }}
+                  >
+                    {stage.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
 
       <section className={styles.panel}>
         <div className={styles.summaryRow}>
           <span>
-            <span className={styles.summaryStrong}>{summary.total}</span> jobs total
+            <span className={styles.summaryStrong}>{summary.total}</span> projects total
           </span>
           <span>
             <span className={styles.summaryStrong}>{summary.open}</span> open
@@ -426,19 +605,16 @@ export default function OpsJobsWorkspace() {
             <span className={styles.summaryStrong}>{centsToDisplay(summary.contract)}</span>
           </span>
         </div>
-
         {loading ? (
-          <p className={styles.empty}>Loading jobs…</p>
+          <p className={styles.empty}>Loading projects…</p>
         ) : visibleJobs.length === 0 ? (
           <p className={styles.empty}>
-            No jobs yet. Click “Sync from payroll” to create jobs + clients from Craig’s imported
-            workbook rows, or add a job below.
+            No projects in this view. Sold intake on a lead creates the project file.
           </p>
         ) : (
           <table className={styles.table}>
             <thead>
               <tr>
-                <th></th>
                 <th>Client</th>
                 <th>Designer</th>
                 <th>Stage</th>
@@ -454,25 +630,17 @@ export default function OpsJobsWorkspace() {
               {visibleJobs.map((job) => (
                 <tr
                   key={job.id}
-                  className={job.risk_flag ? styles.rowHeld : undefined}
+                  className={`${job.risk_flag ? styles.rowHeld : ""} ${selectedJobId === job.id ? styles.rowSelected : ""}`.trim() || undefined}
                   onClick={() => setSelectedJobId(job.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>
-                    <input
-                      type="radio"
-                      name="selectedJob"
-                      checked={selectedJobId === job.id}
-                      onChange={() => setSelectedJobId(job.id)}
-                      aria-label={`Select ${job.client?.name ?? "job"}`}
-                    />
-                  </td>
                   <td>{job.client?.name ?? "—"}</td>
                   <td>{job.designer?.name ?? "—"}</td>
                   <td>
                     <select
                       className={styles.input}
                       value={job.stage}
+                      onClick={(event) => event.stopPropagation()}
                       onChange={(event) => void updateStage(job, event.target.value)}
                       style={{ minWidth: "10rem" }}
                     >
@@ -489,6 +657,7 @@ export default function OpsJobsWorkspace() {
                       className={styles.input}
                       type="date"
                       value={job.install_date ?? ""}
+                      onClick={(event) => event.stopPropagation()}
                       onChange={(event) => void updateInstallDate(job, event.target.value)}
                       style={{ minWidth: "9.5rem" }}
                       title="Install date"
@@ -506,152 +675,92 @@ export default function OpsJobsWorkspace() {
           </table>
         )}
 
-        {selectedJobId ? (
-          <div style={{ marginTop: "1rem" }}>
-            <p className={styles.fieldLabel}>
-              Signed proposal
-              {selectedJob?.proposal_filename ? ` · ${selectedJob.proposal_filename}` : ""}
-            </p>
-            <div className={styles.formActions} style={{ justifyContent: "flex-start", marginBottom: "0.85rem" }}>
-              {selectedJob?.proposal_url ? (
-                <a className={styles.buttonGhost} href={selectedJob.proposal_url} target="_blank" rel="noreferrer">
-                  Open PDF
-                </a>
-              ) : null}
-              <label className={styles.buttonGhost} style={{ cursor: "pointer" }}>
-                {selectedJob?.proposal_url ? "Replace PDF" : "Upload signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  hidden
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void uploadProposal(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
+        {selectedJobId && (selectedJob || projectFile?.job) ? (
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setSelectedJobId(null)}
+          >
+            <div
+              className={`${styles.modal} ${styles.modalWide}`}
+              role="dialog"
+              aria-label="Project file"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <OpsProjectFile
+                job={(selectedJob ?? projectFile?.job)!}
+                file={projectFile}
+                loading={fileLoading}
+                stages={stages}
+                installers={installers}
+                designers={designers}
+                jobLines={jobLines}
+                jobMaterials={jobMaterials}
+                materialsTotal={materialsTotal}
+                busy={saving}
+                onClose={() => setSelectedJobId(null)}
+                onStage={(stage) => {
+                  if (selectedJob) void updateStage(selectedJob, stage);
+                }}
+                onInstallDate={(value) => {
+                  if (selectedJob) void updateInstallDate(selectedJob, value);
+                  else if (selectedJobId) void patchJob(selectedJobId, { install_date: value || null });
+                }}
+                onInstaller={(id) => {
+                  if (selectedJobId) void patchJob(selectedJobId, { installer_id: id });
+                }}
+                onDesigner={(id) => {
+                  if (selectedJobId) void patchJob(selectedJobId, { designer_id: id });
+                }}
+                onNotes={(value) => {
+                  if (selectedJobId) void patchJob(selectedJobId, { notes: value.trim() || null });
+                }}
+                onUploadProposal={(file) => void uploadProposal(file)}
+                onStagePart={(lineId) =>
+                  void (async () => {
+                    await fetch("/api/inspired-closets/ops/inventory/job-materials", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "stage",
+                        job_id: selectedJobId,
+                        line_id: lineId,
+                      }),
+                    });
+                    setMatTick((n) => n + 1);
+                  })()
+                }
+                onDamagePart={(lineId) =>
+                  void (async () => {
+                    await fetch("/api/inspired-closets/ops/inventory/job-materials", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "damage",
+                        job_id: selectedJobId,
+                        line_id: lineId,
+                      }),
+                    });
+                    setMatTick((n) => n + 1);
+                  })()
+                }
+              />
             </div>
-            <p className={styles.fieldLabel}>
-              Materials on this job ·{" "}
-              <span className={styles.summaryStrong}>{centsToDisplay(materialsTotal)}</span>
-              <a
-                href="/inspired-closets/ops/inventory"
-                style={{ marginLeft: "0.75rem", fontSize: "0.8rem" }}
-              >
-                Open Inventory
-              </a>
-            </p>
-            {jobLines.length > 0 ? (
-              <table className={styles.table} style={{ minWidth: "32rem", marginBottom: "1rem" }}>
-                <thead>
-                  <tr>
-                    <th>Part</th>
-                    <th>Qty</th>
-                    <th>Status</th>
-                    <th>Ext</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobLines.map((line) => (
-                    <tr key={line.id}>
-                      <td>
-                        {line.part
-                          ? `${line.part.sku}${line.part.size ? ` · ${line.part.size}` : ""} · ${line.part.name}`
-                          : "—"}
-                      </td>
-                      <td>{line.qty}</td>
-                      <td>{line.status}</td>
-                      <td>{centsToDisplay(line.ext_cents ?? 0)}</td>
-                      <td>
-                        {line.status === "reserved" ? (
-                          <button
-                            type="button"
-                            className={styles.buttonGhost}
-                            onClick={() =>
-                              void (async () => {
-                                await fetch("/api/inspired-closets/ops/inventory/job-materials", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    action: "stage",
-                                    job_id: selectedJobId,
-                                    line_id: line.id,
-                                  }),
-                                });
-                                setMatTick((n) => n + 1);
-                              })()
-                            }
-                          >
-                            Staged
-                          </button>
-                        ) : null}
-                        {line.status === "reserved" ? (
-                          <button
-                            type="button"
-                            className={styles.buttonGhost}
-                            onClick={() =>
-                              void (async () => {
-                                await fetch("/api/inspired-closets/ops/inventory/job-materials", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    action: "damage",
-                                    job_id: selectedJobId,
-                                    line_id: line.id,
-                                  }),
-                                });
-                                setMatTick((n) => n + 1);
-                              })()
-                            }
-                          >
-                            Damaged
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className={styles.empty}>
-                No reserved parts yet — Frank should job-check this job so stock vs. order is
-                locked.
-              </p>
-            )}
-            {jobMaterials.length > 0 ? (
-              <table className={styles.table} style={{ minWidth: "32rem" }}>
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Type</th>
-                    <th>Part</th>
-                    <th>Qty</th>
-                    <th>Ext</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobMaterials.map((m) => (
-                    <tr key={m.id}>
-                      <td>{new Date(m.created_at).toLocaleDateString()}</td>
-                      <td>{m.movement_type}</td>
-                      <td>
-                        {m.part ? `${m.part.sku} · ${m.part.name}` : "—"}
-                      </td>
-                      <td>{m.qty}</td>
-                      <td>
-                        {centsToDisplay(Math.abs(m.qty) * (m.unit_cost_cents ?? 0))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
+          </div>
+        ) : selectedJobId ? (
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setSelectedJobId(null)}
+          >
+            <div className={`${styles.modal} ${styles.modalWide}`} role="dialog" aria-label="Project file">
+              <p className={styles.empty}>Loading project…</p>
+            </div>
           </div>
         ) : null}
 
         <form className={styles.formGrid} onSubmit={addJob}>
+
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Client</span>
             <input
@@ -729,7 +838,7 @@ export default function OpsJobsWorkspace() {
           </label>
           <div className={styles.formActions}>
             <button type="submit" className={styles.buttonPrimary} disabled={saving}>
-              {saving ? "Creating…" : "Add job"}
+              {saving ? "Creating…" : "Add project"}
             </button>
           </div>
         </form>

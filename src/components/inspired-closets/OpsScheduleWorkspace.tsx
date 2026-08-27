@@ -3,9 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
-import OpsInstallCalendar from "@/components/inspired-closets/OpsInstallCalendar";
+import OpsWeekCalendar, {
+  type WeekCalEvent,
+} from "@/components/inspired-closets/OpsWeekCalendar";
 import type { IcJobKind } from "@/lib/inspired-closets-ops-jobs";
 import { CONSULT_OUTCOMES } from "@/lib/inspired-closets-ops-appointments";
+import {
+  classifyAppointment,
+  classifyJob,
+  ymdFromIso,
+  type CalendarLane,
+} from "@/lib/inspired-closets-ops-calendar";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -18,6 +26,7 @@ type Appointment = {
   client_id: string | null;
   job_id: string | null;
   designer_id: string | null;
+  installer_id?: string | null;
   kind: string;
   scheduled_at: string;
   location_type: string;
@@ -29,6 +38,7 @@ type Appointment = {
   notes: string | null;
   client: Client | null;
   designer: Staff | null;
+  installer?: Staff | null;
 };
 
 type InstallJob = {
@@ -54,12 +64,12 @@ type InstallJob = {
   jobCheckOwner?: Staff | null;
 };
 
-type Closing = {
+type LeadOption = {
   id: string;
+  client_id: string | null;
+  designer_id: string | null;
+  converted_job_id: string | null;
   name: string;
-  assigned: number;
-  converted: number;
-  closingRatioPct: number | null;
 };
 
 type ApiResponse = {
@@ -69,25 +79,71 @@ type ApiResponse = {
   installJobs?: InstallJob[];
   readyToSchedule?: InstallJob[];
   awaitingDeposit?: InstallJob[];
-  closing?: Closing[];
   staff?: Staff[];
   clients?: Client[];
+  leads?: LeadOption[];
   kinds?: Option[];
   locations?: Option[];
   statuses?: Option[];
   appointment?: Appointment;
-  googleCalendar?: {
-    configured?: boolean;
-    calendarId?: string | null;
-    serviceAccountEmail?: string | null;
-    officeChecklist?: string[];
-    ok?: boolean;
-    skipped?: boolean;
-    reason?: string;
-    error?: string;
-    action?: string;
-  };
 };
+
+const CALENDAR_TABS = ["all", "appointments", "installs", "showroom", "gobacks"] as const;
+type CalendarTab = (typeof CALENDAR_TABS)[number];
+
+const TAB_LANE: Record<Exclude<CalendarTab, "all">, CalendarLane> = {
+  appointments: "appointment",
+  installs: "install",
+  showroom: "showroom",
+  gobacks: "goback",
+};
+
+const TAB_CLASS: Record<CalendarTab, string> = {
+  all: "",
+  appointments: styles.tabAppointment,
+  installs: styles.tabInstall,
+  showroom: styles.tabShowroom,
+  gobacks: styles.tabGoback,
+};
+
+const TAB_COPY: Record<CalendarTab, { label: string; subtitle: string }> = {
+  all: {
+    label: "All",
+    subtitle: "Every appointment, install, showroom visit, and go-back this week.",
+  },
+  appointments: {
+    label: "Appointments",
+    subtitle: "Design consults this week. Log the outcome after the visit so Des gets Slack.",
+  },
+  installs: {
+    label: "Installs",
+    subtitle: "Installs this week — calendar on top, list underneath.",
+  },
+  showroom: {
+    label: "Showroom",
+    subtitle: "Showroom visits this week — calendar on top, list underneath.",
+  },
+  gobacks: {
+    label: "Go-backs",
+    subtitle: "Go-backs this week — calendar on top, list underneath.",
+  },
+};
+
+const EMPTY_EVENT = {
+  lead_id: "",
+  client_id: "",
+  job_id: "",
+  designer_id: "",
+  installer_id: "",
+  kind: "consultation",
+  location_type: "on_site",
+  scheduled_at: "",
+  notes: "",
+};
+
+function isCalendarTab(value: string | null | undefined): value is CalendarTab {
+  return CALENDAR_TABS.includes(value as CalendarTab);
+}
 
 function startOfWeek(d = new Date()): string {
   const date = new Date(d);
@@ -100,7 +156,7 @@ function startOfWeek(d = new Date()): string {
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  const date = new Date(value);
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("en-US", {
     weekday: "short",
@@ -111,60 +167,63 @@ function formatStamp(value: string | null): string {
   });
 }
 
+function formatTimeLabel(value: string | null | undefined): string {
+  if (!value) return "All day";
+  if (value.length === 10) return "All day";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 function addDays(iso: string, days: number): Date {
   const d = new Date(iso);
   d.setDate(d.getDate() + days);
   return d;
 }
 
+function eventKindLabel(row: Appointment, kinds: Option[]): string {
+  if (row.location_type === "showroom") return "Showroom";
+  return kinds.find((k) => k.id === row.kind)?.label ?? row.kind;
+}
+
 export default function OpsScheduleWorkspace({
   forcedTab,
 }: {
-  forcedTab?: "appointments" | "installs" | "designers";
+  forcedTab?: CalendarTab;
 } = {}) {
   const searchParams = useSearchParams();
   const presetLeadId = searchParams.get("leadId");
-  const tabParam = forcedTab ?? searchParams.get("tab");
-  const mainTab =
-    tabParam === "installs" ? "installs" : tabParam === "designers" ? "designers" : "appointments";
+  const queryTab = searchParams.get("tab");
+  const mainTab: CalendarTab = isCalendarTab(queryTab)
+    ? queryTab
+    : isCalendarTab(forcedTab)
+      ? forcedTab
+      : "all";
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [installJobs, setInstallJobs] = useState<InstallJob[]>([]);
   const [readyToSchedule, setReadyToSchedule] = useState<InstallJob[]>([]);
   const [awaitingDeposit, setAwaitingDeposit] = useState<InstallJob[]>([]);
-  const [closing, setClosing] = useState<Closing[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [leads, setLeads] = useState<LeadOption[]>([]);
   const [kinds, setKinds] = useState<Option[]>([]);
   const [locations, setLocations] = useState<Option[]>([]);
-  const [designerFilter, setDesignerFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [calendarStatus, setCalendarStatus] = useState<ApiResponse["googleCalendar"] | null>(null);
+  const [eventOpen, setEventOpen] = useState(false);
+  const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [reschedule, setReschedule] = useState<Record<string, { at: string; reason: string }>>({});
   const [weekStart, setWeekStart] = useState(() => startOfWeek());
   const [form, setForm] = useState({
+    ...EMPTY_EVENT,
     lead_id: presetLeadId ?? "",
-    client_id: "",
-    job_id: "",
-    designer_id: "",
-    installer_id: "",
-    kind: "consultation",
-    location_type: "on_site",
-    scheduled_at: "",
-    notes: "",
-    community_ref: "",
   });
-
-  const consultAppts = useMemo(
-    () => appointments.filter((a) => a.kind !== "install"),
-    [appointments],
-  );
 
   useEffect(() => {
     if (presetLeadId) {
       setForm((f) => ({ ...f, lead_id: presetLeadId, kind: "consultation" }));
+      setEventOpen(true);
     }
   }, [presetLeadId]);
 
@@ -177,13 +236,12 @@ export default function OpsScheduleWorkspace({
     [staff],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const from = weekStart;
       const to = addDays(weekStart, 7).toISOString();
       const params = new URLSearchParams({ from, to });
-      if (designerFilter) params.set("designerId", designerFilter);
       const response = await fetch(`/api/inspired-closets/ops/appointments?${params.toString()}`);
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Failed to load schedule.");
@@ -191,25 +249,124 @@ export default function OpsScheduleWorkspace({
       setInstallJobs(payload.installJobs ?? []);
       setReadyToSchedule(payload.readyToSchedule ?? []);
       setAwaitingDeposit(payload.awaitingDeposit ?? []);
-      setClosing(payload.closing ?? []);
       setStaff(payload.staff ?? []);
-      setClients(payload.clients ?? []);
+      setLeads(payload.leads ?? []);
       setKinds(payload.kinds ?? []);
       setLocations(payload.locations ?? []);
-      setCalendarStatus(payload.googleCalendar ?? null);
+      setListUpdatedAt(new Date());
     } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Failed to load schedule.",
-      });
+      if (!opts?.silent) {
+        setNotice({
+          kind: "error",
+          text: error instanceof Error ? error.message : "Failed to load schedule.",
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
-  }, [designerFilter, weekStart]);
+  }, [weekStart]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    function onFocus() {
+      void load({ silent: true });
+    }
+    const timer = window.setInterval(() => {
+      void load({ silent: true });
+    }, 30_000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (!eventOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setEventOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [eventOpen]);
+
+  const appointmentLaneAppts = useMemo(
+    () => appointments.filter((row) => classifyAppointment(row) === "appointment"),
+    [appointments],
+  );
+  const showroomAppts = useMemo(
+    () => appointments.filter((row) => classifyAppointment(row) === "showroom"),
+    [appointments],
+  );
+  const installAppts = useMemo(
+    () => appointments.filter((row) => classifyAppointment(row) === "install"),
+    [appointments],
+  );
+  const gobackAppts = useMemo(
+    () => appointments.filter((row) => classifyAppointment(row) === "goback"),
+    [appointments],
+  );
+  const uncoveredJobs = useMemo(() => {
+    const coveredInstall = new Set(
+      appointments
+        .filter((row) => row.kind === "install" && row.job_id)
+        .map((row) => row.job_id as string),
+    );
+    const coveredGoback = new Set(
+      appointments
+        .filter((row) => row.kind === "job_check" && row.job_id)
+        .map((row) => row.job_id as string),
+    );
+    return installJobs.filter((job) => {
+      const lane = classifyJob(job);
+      if (lane === "install") return !coveredInstall.has(job.id);
+      if (lane === "goback") return !coveredGoback.has(job.id);
+      return true;
+    });
+  }, [appointments, installJobs]);
+  const installLaneJobs = useMemo(
+    () => uncoveredJobs.filter((job) => classifyJob(job) === "install"),
+    [uncoveredJobs],
+  );
+  const gobackLaneJobs = useMemo(
+    () => uncoveredJobs.filter((job) => classifyJob(job) === "goback"),
+    [uncoveredJobs],
+  );
+
+  const calendarEvents = useMemo(() => {
+    const events: WeekCalEvent[] = [];
+    for (const row of appointments) {
+      events.push({
+        id: `appt-${row.id}`,
+        lane: classifyAppointment(row),
+        date: ymdFromIso(row.scheduled_at),
+        timeLabel: formatTimeLabel(row.scheduled_at),
+        title: row.client?.name ?? "Event",
+        meta: [row.designer?.name, row.installer?.name].filter(Boolean).join(" · ") || undefined,
+      });
+    }
+    for (const job of uncoveredJobs) {
+      if (!job.install_date) continue;
+      events.push({
+        id: `job-${job.id}`,
+        lane: classifyJob(job),
+        date: ymdFromIso(job.install_date),
+        timeLabel: "All day",
+        title: job.client?.name ?? "Job",
+        meta: [job.installer?.name, job.designer?.name].filter(Boolean).join(" · ") || undefined,
+      });
+    }
+    return events;
+  }, [appointments, uncoveredJobs]);
+
+  const visibleEvents = useMemo(() => {
+    if (mainTab === "all") return calendarEvents;
+    const lane = TAB_LANE[mainTab];
+    return calendarEvents.filter((event) => event.lane === lane);
+  }, [calendarEvents, mainTab]);
 
   async function createAppointment() {
     setBusy(true);
@@ -223,46 +380,34 @@ export default function OpsScheduleWorkspace({
         throw new Error("When is invalid — set a full date and time.");
       }
       const leadId = form.lead_id.trim();
-      if (leadId && !/^[0-9a-f-]{36}$/i.test(leadId)) {
-        throw new Error(
-          "Lead id looks incomplete. Paste the full UUID from Leads, or clear the field and pick Client.",
-        );
+      if (!leadId) {
+        throw new Error("Pick the lead this event is for.");
       }
+      const isShowroom = form.kind === "showroom";
       const response = await fetch("/api/inspired-closets/ops/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          lead_id: leadId || null,
+          kind: isShowroom ? "consultation" : form.kind,
+          location_type: isShowroom ? "showroom" : form.location_type,
+          lead_id: leadId,
           client_id: form.client_id || null,
           job_id: form.job_id || null,
-          designer_id: form.kind === "install" ? null : form.designer_id || null,
-          installer_id: form.kind === "install" ? form.installer_id || null : null,
+          designer_id: form.designer_id || null,
+          installer_id: form.installer_id || null,
           scheduled_at: when.toISOString(),
         }),
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Failed to create appointment.");
-      const cal = payload.googleCalendar;
-      const calNote =
-        cal?.ok === true
-          ? ` Google Calendar: ${cal.action ?? "synced"}.`
-          : cal?.skipped
-            ? " Google Calendar not connected yet (office setup)."
-            : cal?.error
-              ? ` Google Calendar error: ${cal.error}`
-              : "";
       setNotice({
         kind: "info",
-        text: `Appointment saved. Confirm in Community as needed.${calNote}`,
+        text: "Event saved. It will show on this schedule and on the lead.",
       });
-      setForm((f) => ({
-        ...f,
-        scheduled_at: "",
-        notes: "",
-        job_id: "",
-      }));
-      await load();
+      setForm({ ...EMPTY_EVENT });
+      setEventOpen(false);
+      await load({ silent: true });
     } catch (error) {
       setNotice({
         kind: "error",
@@ -324,52 +469,6 @@ export default function OpsScheduleWorkspace({
     }
   }
 
-  async function scheduleInstall(input: {
-    jobId: string;
-    leadId: string | null;
-    scheduledAt: string;
-    installerId: string | null;
-    acknowledgeNoReceiveDate?: boolean;
-    jobKind?: string;
-    visitWindow?: string | null;
-  }) {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "install",
-          job_id: input.jobId,
-          lead_id: input.leadId,
-          scheduled_at: input.scheduledAt,
-          installer_id: input.installerId,
-          location_type: "on_site",
-          job_kind: input.jobKind ?? null,
-          visit_window: input.visitWindow ?? null,
-          notes: input.acknowledgeNoReceiveDate
-            ? "Scheduled without Studio receive date (Des acknowledged)."
-            : null,
-        }),
-      });
-      const payload = (await response.json()) as ApiResponse;
-      if (!payload.ok) throw new Error(payload.error ?? "Could not schedule install.");
-      setNotice({
-        kind: "info",
-        text: "Install scheduled — Slack notified. Log customer confirm from the event card when sent.",
-      });
-      await load();
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Could not schedule install.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function logInstallConfirm(jobId: string) {
     setBusy(true);
     setNotice(null);
@@ -398,203 +497,446 @@ export default function OpsScheduleWorkspace({
     }
   }
 
-  async function advanceJobStage(jobId: string, patch: Record<string, unknown>) {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/jobs", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: jobId, ...patch }),
-      });
-      const payload = (await response.json()) as { ok: boolean; error?: string };
-      if (!payload.ok) throw new Error(payload.error ?? "Could not update job.");
-      setNotice({ kind: "info", text: "Job stage updated." });
-      await load();
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Could not update job.",
-      });
-    } finally {
-      setBusy(false);
+  const jobChoices = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: InstallJob[] = [];
+    for (const job of [...readyToSchedule, ...installJobs, ...awaitingDeposit]) {
+      if (seen.has(job.id)) continue;
+      seen.add(job.id);
+      rows.push(job);
     }
+    return rows.filter((job) => !form.lead_id || job.lead_id === form.lead_id);
+  }, [readyToSchedule, installJobs, awaitingDeposit, form.lead_id]);
+
+  function applyLead(leadId: string) {
+    const lead = leads.find((row) => row.id === leadId);
+    setForm((f) => ({
+      ...f,
+      lead_id: leadId,
+      client_id: lead?.client_id ?? "",
+      designer_id: lead?.designer_id ?? f.designer_id,
+      job_id: lead?.converted_job_id ?? (f.kind === "install" ? "" : f.job_id),
+    }));
+  }
+
+  function openNewEvent() {
+    const lead = presetLeadId ? leads.find((row) => row.id === presetLeadId) : null;
+    const kind =
+      mainTab === "installs"
+        ? "install"
+        : mainTab === "showroom"
+          ? "showroom"
+          : mainTab === "gobacks"
+            ? "job_check"
+            : "consultation";
+    setForm({
+      ...EMPTY_EVENT,
+      kind,
+      location_type: kind === "showroom" ? "showroom" : "on_site",
+      lead_id: presetLeadId ?? "",
+      client_id: lead?.client_id ?? "",
+      designer_id: lead?.designer_id ?? "",
+      job_id: lead?.converted_job_id ?? "",
+    });
+    setEventOpen(true);
+  }
+
+  function renderAppointmentTable(rows: Appointment[]) {
+    if (rows.length === 0) {
+      return <p className={styles.empty}>Nothing this week.</p>;
+    }
+    return (
+      <table className={styles.table} style={{ minWidth: "48rem" }}>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Kind</th>
+            <th>Client</th>
+            <th>Designer</th>
+            <th>Status</th>
+            <th>After consult</th>
+            <th>Podium confirm</th>
+            <th>Reschedule</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const draft = reschedule[row.id] ?? {
+              at: row.scheduled_at.slice(0, 16),
+              reason: "",
+            };
+            return (
+              <tr key={row.id}>
+                <td>{formatStamp(row.scheduled_at)}</td>
+                <td>{eventKindLabel(row, kinds)}</td>
+                <td>{row.client?.name ?? "—"}</td>
+                <td>{row.designer?.name ?? "—"}</td>
+                <td>{row.status}</td>
+                <td>
+                  {row.kind !== "consultation" ? (
+                    <span className={styles.handoffDone}>—</span>
+                  ) : row.status === "completed" ? (
+                    <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
+                      Consult logged
+                    </span>
+                  ) : row.status === "cancelled" ? (
+                    <span className={styles.handoffDone}>Cancelled</span>
+                  ) : (
+                    <div className={styles.handoffRow}>
+                      {CONSULT_OUTCOMES.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={styles.handoffBtn}
+                          disabled={busy}
+                          onClick={() =>
+                            void patchAppointment({
+                              id: row.id,
+                              action: "complete_consult",
+                              outcome: item.id,
+                            })
+                          }
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  {row.confirmation_sent_at ? (
+                    <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
+                      Logged {formatStamp(row.confirmation_sent_at)}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.buttonGhost}
+                      disabled={busy}
+                      onClick={() =>
+                        void patchAppointment({
+                          id: row.id,
+                          action: "confirm_podium",
+                        })
+                      }
+                    >
+                      Log Podium confirm
+                    </button>
+                  )}
+                </td>
+                <td>
+                  <div style={{ display: "grid", gap: "0.25rem", minWidth: "12rem" }}>
+                    <input
+                      className={styles.input}
+                      type="datetime-local"
+                      value={draft.at}
+                      onChange={(e) =>
+                        setReschedule((m) => ({
+                          ...m,
+                          [row.id]: { ...draft, at: e.target.value },
+                        }))
+                      }
+                    />
+                    <input
+                      className={styles.input}
+                      placeholder="Delay reason (required)"
+                      value={draft.reason}
+                      onChange={(e) =>
+                        setReschedule((m) => ({
+                          ...m,
+                          [row.id]: { ...draft, reason: e.target.value },
+                        }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      className={styles.buttonGhost}
+                      disabled={busy || !draft.reason.trim() || !draft.at}
+                      onClick={() =>
+                        void patchAppointment({
+                          id: row.id,
+                          action: "reschedule",
+                          scheduled_at: new Date(draft.at).toISOString(),
+                          delay_reason: draft.reason,
+                        })
+                      }
+                    >
+                      Reschedule
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+
+  function renderJobishTable(
+    appts: Appointment[],
+    jobs: InstallJob[],
+    emptyText: string,
+    withInstallConfirm: boolean,
+  ) {
+    if (appts.length === 0 && jobs.length === 0) {
+      return <p className={styles.empty}>{emptyText}</p>;
+    }
+    return (
+      <table className={styles.table} style={{ minWidth: "42rem" }}>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Client</th>
+            <th>Designer</th>
+            <th>Installer</th>
+            <th>Status</th>
+            {withInstallConfirm ? <th>Confirm</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {appts.map((row) => (
+            <tr key={`appt-${row.id}`}>
+              <td>{formatStamp(row.scheduled_at)}</td>
+              <td>{row.client?.name ?? "—"}</td>
+              <td>{row.designer?.name ?? "—"}</td>
+              <td>{row.installer?.name ?? "—"}</td>
+              <td>{row.status}</td>
+              {withInstallConfirm ? (
+                <td>
+                  {row.confirmation_sent_at ? (
+                    <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
+                      Logged
+                    </span>
+                  ) : row.job_id ? (
+                    <button
+                      type="button"
+                      className={styles.buttonGhost}
+                      disabled={busy}
+                      onClick={() => void logInstallConfirm(row.job_id as string)}
+                    >
+                      Log confirm
+                    </button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+          {jobs.map((job) => (
+            <tr key={`job-${job.id}`}>
+              <td>{formatStamp(job.install_date)}</td>
+              <td>{job.client?.name ?? "—"}</td>
+              <td>{job.designer?.name ?? "—"}</td>
+              <td>
+                <select
+                  className={styles.input}
+                  value={job.installer?.id ?? ""}
+                  disabled={busy}
+                  onChange={(e) => void assignInstaller(job.id, e.target.value || null)}
+                >
+                  <option value="">Unassigned</option>
+                  {installers.map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>{job.stage}</td>
+              {withInstallConfirm ? (
+                <td>
+                  <button
+                    type="button"
+                    className={styles.buttonGhost}
+                    disabled={busy}
+                    onClick={() => void logInstallConfirm(job.id)}
+                  >
+                    Log confirm
+                  </button>
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
   }
 
   return (
-    <OpsShell
-      title={mainTab === "installs" ? "Installs" : mainTab === "designers" ? "Designer load" : "Appointments"}
-      subtitle={
-        mainTab === "installs"
-          ? "Scheduled installs this week — assign from the lead/project with Install Event"
-          : mainTab === "designers"
-            ? "Which designer got which leads (closing ratio)"
-            : "Scheduled appointments — prefer New Event on the lead so there’s no double entry"
-      }
-      actions={
-        <>
-          <select
-            className={styles.input}
-            style={{ width: "auto" }}
-            value={designerFilter}
-            onChange={(e) => setDesignerFilter(e.target.value)}
-          >
-            <option value="">All designers</option>
-            {designers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className={styles.buttonGhost} onClick={() => void load()}>
-            Refresh
-          </button>
-        </>
-      }
-    >
+    <OpsShell title="Calendar" subtitle={TAB_COPY[mainTab].subtitle}>
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
           {notice.text}
         </p>
       ) : null}
 
-      <nav className={styles.tabs}>
-        <a
-          className={`${styles.tab} ${mainTab === "appointments" ? styles.tabActive : ""}`}
-          href="/inspired-closets/ops/appointments"
-          style={{ textDecoration: "none" }}
-        >
-          Appointments
-        </a>
-        <a
-          className={`${styles.tab} ${mainTab === "installs" ? styles.tabActive : ""}`}
-          href="/inspired-closets/ops/installs"
-          style={{ textDecoration: "none" }}
-        >
-          Installs
-        </a>
-        <a
-          className={`${styles.tab} ${mainTab === "designers" ? styles.tabActive : ""}`}
-          href="/inspired-closets/ops/schedule?tab=designers"
-          style={{ textDecoration: "none" }}
-        >
-          Designers
-        </a>
-      </nav>
-
-      <p className={styles.notice}>
-        {calendarStatus?.configured ? (
-          <>
-            Google Calendar: <strong>connected</strong>
-            {calendarStatus.calendarId ? ` · ${calendarStatus.calendarId}` : ""}. New /
-            rescheduled appointments push automatically.
-          </>
-        ) : (
-          <>
-            Google Calendar: <strong>not connected</strong> — appointments still save here.
-            Prefer booking from the lead’s <strong>New Event</strong> so the lead auto-moves to
-            Scheduled.
-          </>
-        )}
-      </p>
-
-      {mainTab === "designers" ? (
-        <div className={styles.panel}>
-          <div className={styles.summaryRow}>
-            {closing.map((row) => (
-              <span key={row.id}>
-                {row.name}{" "}
-                <span className={styles.summaryStrong}>
-                  {row.closingRatioPct == null ? "—" : `${row.closingRatioPct}%`}
-                </span>
-                <span
-                  style={{
-                    color:
-                      row.closingRatioPct != null && row.closingRatioPct < 50
-                        ? "var(--ic-red)"
-                        : undefined,
-                  }}
-                >
-                  {" "}
-                  ({row.converted}/{row.assigned})
-                </span>
-              </span>
-            ))}
-          </div>
-          {closing.length === 0 ? (
-            <p className={styles.empty}>No designer stats yet.</p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {mainTab === "appointments" ? (
-      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-          Manual add (only if needed — normally use New Event on the lead)
-        </p>
-        <div className={styles.formGrid}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>When</span>
-            <input
-              className={styles.input}
-              type="datetime-local"
-              value={form.scheduled_at}
-              onChange={(e) => setForm((f) => ({ ...f, scheduled_at: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Kind</span>
-            <select
-              className={styles.input}
-              value={form.kind}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  kind: e.target.value,
-                  designer_id: "",
-                  installer_id: "",
-                }))
+      <div className={styles.listToolbar}>
+        <nav className={styles.tabs} aria-label="Calendar views">
+          {CALENDAR_TABS.map((tab) => (
+            <a
+              key={tab}
+              className={`${styles.tab} ${TAB_CLASS[tab]} ${mainTab === tab ? styles.tabActive : ""}`}
+              href={
+                tab === "all"
+                  ? "/inspired-closets/ops/appointments"
+                  : `/inspired-closets/ops/appointments?tab=${tab}`
               }
+              style={{ textDecoration: "none" }}
             >
-              {kinds.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Location</span>
-            <select
-              className={styles.input}
-              value={form.location_type}
-              onChange={(e) => setForm((f) => ({ ...f, location_type: e.target.value }))}
-            >
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {form.kind === "install" ? (
+              {TAB_COPY[tab].label}
+            </a>
+          ))}
+        </nav>
+        <div className={styles.toolbarRight}>
+          <p className={styles.updatedStamp}>
+            {listUpdatedAt
+              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}`
+              : loading
+                ? "Updating…"
+                : "—"}
+          </p>
+          <button type="button" className={styles.buttonPrimary} onClick={openNewEvent}>
+            + New Event
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className={styles.panel}>
+          <p className={styles.empty}>Loading calendar…</p>
+        </div>
+      ) : (
+        <>
+          <OpsWeekCalendar
+            events={visibleEvents}
+            weekStartIso={weekStart}
+            onWeekChange={setWeekStart}
+          />
+
+          {mainTab === "appointments" ? (
+            <div className={styles.panel}>
+              <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+                Appointments this week
+              </p>
+              {renderAppointmentTable(appointmentLaneAppts)}
+            </div>
+          ) : null}
+
+          {mainTab === "installs" ? (
+            <div className={styles.panel}>
+              <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+                Installs this week
+              </p>
+              {renderJobishTable(installAppts, installLaneJobs, "No installs this week.", true)}
+            </div>
+          ) : null}
+
+          {mainTab === "showroom" ? (
+            <div className={styles.panel}>
+              <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+                Showroom this week
+              </p>
+              {renderAppointmentTable(showroomAppts)}
+            </div>
+          ) : null}
+
+          {mainTab === "gobacks" ? (
+            <div className={styles.panel}>
+              <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
+                Go-backs this week
+              </p>
+              {renderJobishTable(gobackAppts, gobackLaneJobs, "No go-backs this week.", false)}
+            </div>
+          ) : null}
+        </>
+      )}
+
+      {eventOpen ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onClick={() => setEventOpen(false)}
+        >
+          <div
+            className={styles.modal}
+            role="dialog"
+            aria-label="New Event"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={styles.modalTitle}>New Event</h3>
+            <p className={styles.leadContact} style={{ marginBottom: "0.75rem" }}>
+              Same as New Event on a lead. Pick the person, then who is going — designer,
+              installer, or both.
+            </p>
             <label className={styles.field}>
-              <span className={styles.fieldLabel}>Installer</span>
+              <span className={styles.fieldLabel}>Type</span>
               <select
                 className={styles.input}
-                value={form.installer_id}
-                onChange={(e) => setForm((f) => ({ ...f, installer_id: e.target.value }))}
+                value={form.kind}
+                onChange={(e) => {
+                  const kind = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    kind,
+                    location_type: kind === "showroom" ? "showroom" : kind === "consultation" ? "on_site" : f.location_type,
+                    job_id: kind === "install" ? f.job_id : "",
+                  }));
+                }}
               >
-                <option value="">Unassigned</option>
-                {installers.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
+                <option value="consultation">Design Event</option>
+                <option value="showroom">Showroom</option>
+                <option value="install">Install Event</option>
+                <option value="job_check">Go-back</option>
+              </select>
+            </label>
+            <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+              <span className={styles.fieldLabel}>Lead</span>
+              <select
+                className={styles.input}
+                value={form.lead_id}
+                onChange={(e) => applyLead(e.target.value)}
+              >
+                <option value="">Select a lead</option>
+                {leads.map((lead) => (
+                  <option key={lead.id} value={lead.id}>
+                    {lead.name}
                   </option>
                 ))}
               </select>
             </label>
-          ) : (
-            <label className={styles.field}>
+            <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+              <span className={styles.fieldLabel}>When</span>
+              <input
+                className={styles.input}
+                type="datetime-local"
+                value={form.scheduled_at}
+                onChange={(e) => setForm((f) => ({ ...f, scheduled_at: e.target.value }))}
+              />
+            </label>
+            {form.kind !== "showroom" ? (
+              <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                <span className={styles.fieldLabel}>Location</span>
+                <select
+                  className={styles.input}
+                  value={form.location_type}
+                  onChange={(e) => setForm((f) => ({ ...f, location_type: e.target.value }))}
+                >
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className={styles.field} style={{ marginTop: "0.55rem" }}>
               <span className={styles.fieldLabel}>Designer</span>
               <select
                 className={styles.input}
@@ -609,218 +951,57 @@ export default function OpsScheduleWorkspace({
                 ))}
               </select>
             </label>
-          )}
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Client</span>
-            <select
-              className={styles.input}
-              value={form.client_id}
-              onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}
-            >
-              <option value="">From lead / none</option>
-              {clients.slice(0, 400).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Lead id (optional)</span>
-            <input
-              className={styles.input}
-              value={form.lead_id}
-              onChange={(e) => setForm((f) => ({ ...f, lead_id: e.target.value }))}
-              placeholder="From Leads → Set appointment"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Job id (install)</span>
-            <input
-              className={styles.input}
-              value={form.job_id}
-              onChange={(e) => setForm((f) => ({ ...f, job_id: e.target.value }))}
-              placeholder="Required for install kind"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Community ref</span>
-            <input
-              className={styles.input}
-              value={form.community_ref}
-              onChange={(e) => setForm((f) => ({ ...f, community_ref: e.target.value }))}
-            />
-          </label>
-          <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={busy || !form.scheduled_at}
-              onClick={() => void createAppointment()}
-            >
-              Save appointment
-            </button>
+            <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+              <span className={styles.fieldLabel}>Installer (optional)</span>
+              <select
+                className={styles.input}
+                value={form.installer_id}
+                onChange={(e) => setForm((f) => ({ ...f, installer_id: e.target.value }))}
+              >
+                <option value="">Unassigned</option>
+                {installers.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {form.kind === "install" ? (
+              <label className={styles.field} style={{ marginTop: "0.55rem" }}>
+                <span className={styles.fieldLabel}>Job</span>
+                <select
+                  className={styles.input}
+                  value={form.job_id}
+                  onChange={(e) => setForm((f) => ({ ...f, job_id: e.target.value }))}
+                >
+                  <option value="">Select the sold job</option>
+                  {jobChoices.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.client?.name ?? "Job"} {job.studio_ref ? `· ${job.studio_ref}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <div className={styles.formActions} style={{ marginTop: "1rem" }}>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setEventOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.buttonPrimary}
+                disabled={busy || !form.scheduled_at || !form.lead_id}
+                onClick={() => void createAppointment()}
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      ) : null}
-
-      {mainTab !== "designers" ? (
-      <div className={styles.panel}>
-        {loading ? (
-          <p className={styles.empty}>Loading schedule…</p>
-        ) : mainTab === "appointments" ? (
-          <>
-            <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-              Appointments this week (design / consult). When the designer is done, log the
-              outcome so Des gets Slack.
-            </p>
-            {consultAppts.length === 0 ? (
-              <p className={styles.empty}>No appointments this week.</p>
-            ) : (
-              <table className={styles.table} style={{ minWidth: "48rem" }}>
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Kind</th>
-                    <th>Client</th>
-                    <th>Designer</th>
-                    <th>Status</th>
-                    <th>After consult</th>
-                    <th>Podium confirm</th>
-                    <th>Reschedule</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {consultAppts.map((row) => {
-                    const draft = reschedule[row.id] ?? {
-                      at: row.scheduled_at.slice(0, 16),
-                      reason: "",
-                    };
-                    return (
-                      <tr key={row.id}>
-                        <td>{formatStamp(row.scheduled_at)}</td>
-                        <td>{kinds.find((k) => k.id === row.kind)?.label ?? row.kind}</td>
-                        <td>{row.client?.name ?? "—"}</td>
-                        <td>{row.designer?.name ?? "—"}</td>
-                        <td>{row.status}</td>
-                        <td>
-                          {row.kind !== "consultation" ? (
-                            <span className={styles.handoffDone}>—</span>
-                          ) : row.status === "completed" ? (
-                            <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
-                              Consult logged
-                            </span>
-                          ) : row.status === "cancelled" ? (
-                            <span className={styles.handoffDone}>Cancelled</span>
-                          ) : (
-                            <div className={styles.handoffRow}>
-                              {CONSULT_OUTCOMES.map((item) => (
-                                <button
-                                  key={item.id}
-                                  type="button"
-                                  className={styles.handoffBtn}
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void patchAppointment({
-                                      id: row.id,
-                                      action: "complete_consult",
-                                      outcome: item.id,
-                                    })
-                                  }
-                                >
-                                  {item.label}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {row.confirmation_sent_at ? (
-                            <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
-                              Logged {formatStamp(row.confirmation_sent_at)}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className={styles.buttonGhost}
-                              disabled={busy}
-                              onClick={() =>
-                                void patchAppointment({
-                                  id: row.id,
-                                  action: "confirm_podium",
-                                })
-                              }
-                            >
-                              Log Podium confirm
-                            </button>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: "grid", gap: "0.25rem", minWidth: "12rem" }}>
-                            <input
-                              className={styles.input}
-                              type="datetime-local"
-                              value={draft.at}
-                              onChange={(e) =>
-                                setReschedule((m) => ({
-                                  ...m,
-                                  [row.id]: { ...draft, at: e.target.value },
-                                }))
-                              }
-                            />
-                            <input
-                              className={styles.input}
-                              placeholder="Delay reason (required)"
-                              value={draft.reason}
-                              onChange={(e) =>
-                                setReschedule((m) => ({
-                                  ...m,
-                                  [row.id]: { ...draft, reason: e.target.value },
-                                }))
-                              }
-                            />
-                            <button
-                              type="button"
-                              className={styles.buttonGhost}
-                              disabled={busy || !draft.reason.trim() || !draft.at}
-                              onClick={() =>
-                                void patchAppointment({
-                                  id: row.id,
-                                  action: "reschedule",
-                                  scheduled_at: new Date(draft.at).toISOString(),
-                                  delay_reason: draft.reason,
-                                })
-                              }
-                            >
-                              Reschedule
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </>
-        ) : (
-          <OpsInstallCalendar
-            jobs={installJobs}
-            readyToSchedule={readyToSchedule}
-            awaitingDeposit={awaitingDeposit}
-            installers={installers}
-            busy={busy}
-            weekStartIso={weekStart}
-            onWeekChange={setWeekStart}
-            onRefresh={() => void load()}
-            onAssignInstaller={assignInstaller}
-            onScheduleInstall={scheduleInstall}
-            onAdvanceStage={advanceJobStage}
-            onLogInstallConfirm={logInstallConfirm}
-          />
-        )}
-      </div>
       ) : null}
     </OpsShell>
   );

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import OpsScheduleWorkspace from "@/components/inspired-closets/OpsScheduleWorkspace";
 
 export const metadata = {
-  title: "Inspired Closets OS · Installs",
+  title: "Inspired Closets OS · Calendar",
 };
 
 export default function InspiredClosetsOpsInstallsPage() {

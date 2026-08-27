@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import AddressAutocomplete from "@/components/inspired-closets/AddressAutocomplete";
 import {
@@ -184,15 +184,14 @@ export default function OpsLeadsWorkspace() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [accounts, setAccounts] = useState<IcAccount[]>([]);
-  const [listView, setListView] = useState<"unscheduled" | "scheduled" | "needs" | "all">(
-    "unscheduled",
-  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Lead | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [chatter, setChatter] = useState<ChatterPost[]>([]);
   const [appointments, setAppointments] = useState<ApiResponse["appointments"]>([]);
-  const [detailTab, setDetailTab] = useState<"details" | "activity" | "chatter">("details");
+  const [detailTab, setDetailTab] = useState<"details" | "partner" | "activity" | "chatter">(
+    "details",
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
@@ -237,6 +236,10 @@ export default function OpsLeadsWorkspace() {
   });
   const [proposalFile, setProposalFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<Partial<Lead> | null>(null);
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const designers = useMemo(
     () => staff.filter((s) => s.role === "designer" || s.role === "front_office" || s.role === "owner"),
@@ -250,26 +253,35 @@ export default function OpsLeadsWorkspace() {
     () => accounts.filter((a) => a.kind === "partner"),
     [accounts],
   );
+  const consultComplete = useMemo(
+    () =>
+      (appointments ?? []).some(
+        (a) => a.kind === "consultation" && a.status === "completed",
+      ),
+    [appointments],
+  );
 
-  const loadList = useCallback(async () => {
-    setLoading(true);
+  const loadList = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
-      const params = new URLSearchParams({ view: listView });
-      const response = await fetch(`/api/inspired-closets/ops/leads?${params}`);
+      const response = await fetch("/api/inspired-closets/ops/leads?view=all");
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Failed to load leads.");
       setLeads(payload.leads ?? []);
       setStaff(payload.staff ?? []);
       setAccounts(payload.accounts ?? []);
+      setListUpdatedAt(new Date());
     } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Failed to load leads.",
-      });
+      if (!opts?.silent) {
+        setNotice({
+          kind: "error",
+          text: error instanceof Error ? error.message : "Failed to load leads.",
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
-  }, [listView]);
+  }, []);
 
   const loadDetail = useCallback(async (id: string) => {
     try {
@@ -293,6 +305,29 @@ export default function OpsLeadsWorkspace() {
 
   useEffect(() => {
     void loadList();
+  }, [loadList]);
+
+  useEffect(() => {
+    if (!newLeadOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setNewLeadOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newLeadOpen]);
+
+  useEffect(() => {
+    function onFocus() {
+      void loadList({ silent: true });
+    }
+    const timer = window.setInterval(() => {
+      void loadList({ silent: true });
+    }, 30_000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [loadList]);
 
   useEffect(() => {
@@ -365,8 +400,9 @@ export default function OpsLeadsWorkspace() {
       const data = (await response.json()) as ApiResponse;
       if (!data.ok) throw new Error(data.error ?? "Failed to create lead.");
       setForm({ ...EMPTY_FORM });
+      setNewLeadOpen(false);
       setNotice({ kind: "info", text: "Lead created." });
-      await loadList();
+      await loadList({ silent: true });
       if (data.lead?.id) setSelectedId(data.lead.id);
     } catch (error) {
       setNotice({
@@ -728,6 +764,7 @@ export default function OpsLeadsWorkspace() {
       }
       setPartnerDraft({ name: "", partner_type: "realtor", phone: "", email: "" });
       setNotice({ kind: "info", text: `Partner account saved: ${account.name}` });
+      if (draft) setDraft({ ...draft, account_id: account.id });
     } catch (error) {
       setNotice({
         kind: "error",
@@ -735,6 +772,46 @@ export default function OpsLeadsWorkspace() {
       });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function importCommunityFile(file: File) {
+    setImporting(true);
+    setNotice(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch("/api/inspired-closets/ops/leads/import", {
+        method: "POST",
+        body,
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        created?: number;
+        updated?: number;
+        skipped?: number;
+        errors?: string[];
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Import failed.");
+      const parts = [
+        `${payload.created ?? 0} new`,
+        payload.updated ? `${payload.updated} updated` : null,
+        payload.skipped ? `${payload.skipped} skipped` : null,
+        payload.errors?.length ? `${payload.errors.length} row errors` : null,
+      ].filter(Boolean);
+      setNotice({
+        kind: payload.errors?.length ? "error" : "info",
+        text: `Community import: ${parts.join(" · ")}.`,
+      });
+      await loadList({ silent: true });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Import failed.",
+      });
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -779,30 +856,12 @@ export default function OpsLeadsWorkspace() {
   }
 
   if (selectedId && detail && draft) {
+    const movedToStudio = detail.stage === "moved_to_studio";
+    const alreadySold = Boolean(detail.converted_job_id);
+    const canSoldIntake = alreadySold || movedToStudio || consultComplete;
+
     return (
-      <OpsShell
-        title={detail.client?.name ?? "Lead"}
-        subtitle="Lead detail · Details · Activity · Chatter"
-        actions={
-          <>
-            <button
-              type="button"
-              className={styles.buttonGhost}
-              onClick={() => setSelectedId(null)}
-            >
-              ← Back to list
-            </button>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={busy}
-              onClick={() => void saveDetail()}
-            >
-              Save
-            </button>
-          </>
-        }
-      >
+      <OpsShell title={detail.client?.name ?? "Lead"} hideTitle>
         {notice ? (
           <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
             {notice.text}
@@ -811,7 +870,7 @@ export default function OpsLeadsWorkspace() {
 
         <div className={styles.leadHeader}>
           <div>
-            <h2 className={styles.leadName}>{detail.client?.name}</h2>
+            <h1 className={styles.leadName}>{detail.client?.name}</h1>
             <p className={styles.leadContact}>
               {detail.client?.phone ?? "No phone"}
               {detail.client?.email ? ` · ${detail.client.email}` : ""}
@@ -827,40 +886,30 @@ export default function OpsLeadsWorkspace() {
                 : ""}
             </p>
           </div>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <div className={styles.leadHeaderActions}>
             <button
               type="button"
               className={styles.buttonGhost}
-              disabled={busy}
-              onClick={() => openNewEvent()}
+              onClick={() => {
+                setSelectedId(null);
+                setDetailTab("details");
+              }}
             >
-              + New Event
+              ← Back to leads
             </button>
             <button
               type="button"
               className={styles.buttonPrimary}
               disabled={busy}
-              onClick={openSoldIntake}
+              onClick={() => void saveDetail()}
             >
-              {detail.converted_job_id ? "Update sold intake" : "Sold intake"}
+              Save
             </button>
-            {detail.stage !== "moved_to_studio" ? (
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                disabled={busy}
-                onClick={openConvert}
-              >
-                Move to Studio
-              </button>
-            ) : (
-              <span className={`${styles.statusBadge} ${styles.statusPaid}`}>Moved to Studio</span>
-            )}
           </div>
         </div>
 
         <div className={styles.leadTabs}>
-          {(["details", "activity", "chatter"] as const).map((tab) => (
+          {(["details", "partner", "activity", "chatter"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -877,20 +926,6 @@ export default function OpsLeadsWorkspace() {
             {detailTab === "details" ? (
               <>
                 <div className={styles.detailGrid}>
-                  <label className={styles.field}>
-                    <span className={styles.fieldLabel}>Lead Status</span>
-                    <select
-                      className={styles.input}
-                      value={draft.stage ?? "new"}
-                      onChange={(e) => setDraft({ ...draft, stage: e.target.value })}
-                    >
-                      {LEAD_STAGES.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <label className={styles.field}>
                     <span className={styles.fieldLabel}>Lead Source</span>
                     <select
@@ -914,44 +949,6 @@ export default function OpsLeadsWorkspace() {
                         onChange={(e) => setDraft({ ...draft, referral_name: e.target.value })}
                         placeholder="Who referred them"
                       />
-                    </label>
-                  ) : null}
-
-                  {draft.stage === "nurturing" ? (
-                    <label className={styles.field}>
-                      <span className={styles.fieldLabel}>Lead Nurturing Reason *</span>
-                      <select
-                        className={styles.input}
-                        value={draft.nurturing_reason ?? ""}
-                        onChange={(e) =>
-                          setDraft({ ...draft, nurturing_reason: e.target.value })
-                        }
-                      >
-                        <option value="">— Select —</option>
-                        {NURTURING_REASONS.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-
-                  {draft.stage === "junk" ? (
-                    <label className={styles.field}>
-                      <span className={styles.fieldLabel}>Junk Reason *</span>
-                      <select
-                        className={styles.input}
-                        value={draft.junk_reason ?? ""}
-                        onChange={(e) => setDraft({ ...draft, junk_reason: e.target.value })}
-                      >
-                        <option value="">— Select —</option>
-                        {JUNK_REASONS.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
                     </label>
                   ) : null}
 
@@ -1017,23 +1014,6 @@ export default function OpsLeadsWorkspace() {
                       {designers.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className={styles.field}>
-                    <span className={styles.fieldLabel}>Partner account</span>
-                    <select
-                      className={styles.input}
-                      value={draft.account_id ?? ""}
-                      onChange={(e) => setDraft({ ...draft, account_id: e.target.value || null })}
-                    >
-                      <option value="">None — customer file at convert</option>
-                      {partnerAccounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.name}
-                          {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
                         </option>
                       ))}
                     </select>
@@ -1210,6 +1190,88 @@ export default function OpsLeadsWorkspace() {
               </>
             ) : null}
 
+            {detailTab === "partner" ? (
+              <div className={styles.detailGrid}>
+                <p className={styles.leadContact} style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                  {detail.account?.name
+                    ? `Tied to ${detail.account.name}${
+                        detail.account.kind === "partner"
+                          ? ` (${partnerTypeLabel(detail.account.partner_type) || "Partner"})`
+                          : ""
+                      }`
+                    : "No partner on this file yet. Assign a realtor, builder, or designer — or leave blank for a customer account at convert."}
+                </p>
+                <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                  <span className={styles.fieldLabel}>Assign partner</span>
+                  <select
+                    className={styles.input}
+                    value={draft.account_id ?? ""}
+                    onChange={(e) => setDraft({ ...draft, account_id: e.target.value || null })}
+                  >
+                    <option value="">None — customer file at convert</option>
+                    {partnerAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}
+                        {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className={styles.subtitle} style={{ gridColumn: "1 / -1", margin: "0.35rem 0 0" }}>
+                  Add a partner
+                </p>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Partner name</span>
+                  <input
+                    className={styles.input}
+                    value={partnerDraft.name}
+                    onChange={(e) => setPartnerDraft((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="Brian / ABC Homes"
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Type</span>
+                  <select
+                    className={styles.input}
+                    value={partnerDraft.partner_type}
+                    onChange={(e) => setPartnerDraft((f) => ({ ...f, partner_type: e.target.value }))}
+                  >
+                    {INFLUENCER_TYPES.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Phone</span>
+                  <input
+                    className={styles.input}
+                    value={partnerDraft.phone}
+                    onChange={(e) => setPartnerDraft((f) => ({ ...f, phone: e.target.value }))}
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Email</span>
+                  <input
+                    className={styles.input}
+                    value={partnerDraft.email}
+                    onChange={(e) => setPartnerDraft((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </label>
+                <div className={styles.formActions}>
+                  <button
+                    type="button"
+                    className={styles.buttonGhost}
+                    disabled={busy || !partnerDraft.name.trim()}
+                    onClick={() => void createPartnerFromPanel()}
+                  >
+                    Add partner
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {detailTab === "activity" ? (
               <div className={styles.chatterFeed}>
                 {activity.length === 0 ? (
@@ -1292,7 +1354,7 @@ export default function OpsLeadsWorkspace() {
                 <p className={styles.leadContact}>No events yet. Use New Event.</p>
               ) : (
                 (appointments ?? []).map((a) => (
-                  <div key={a.id} className={styles.leadContact} style={{ marginBottom: "0.7rem" }}>
+                  <div key={a.id} className={`${styles.leadContact} ${styles.railEvent}`}>
                     <strong>{a.kind === "install" ? "Install" : "Design"}</strong>
                     <br />
                     {formatStamp(a.scheduled_at)} · {a.status}
@@ -1320,31 +1382,127 @@ export default function OpsLeadsWorkspace() {
                   </div>
                 ))
               )}
-              <button
-                type="button"
-                className={styles.buttonPrimary}
-                style={{ width: "100%", marginTop: "0.65rem" }}
-                onClick={() => openNewEvent()}
-              >
-                New Event
-              </button>
+              <div className={styles.railActions}>
+                <button
+                  type="button"
+                  className={styles.buttonPrimary}
+                  onClick={() => openNewEvent()}
+                >
+                  New Event
+                </button>
+              </div>
             </div>
             <div className={styles.railCard}>
-              <p className={styles.railTitle}>Owner</p>
-              <p className={styles.leadContact}>{detail.owner?.name ?? "—"}</p>
-              <p className={styles.railTitle} style={{ marginTop: "0.75rem" }}>
-                Attempts
-              </p>
-              <p className={styles.leadContact}>{detail.contact_attempts} / 5</p>
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                style={{ width: "100%", marginTop: "0.5rem" }}
-                disabled={busy}
-                onClick={() => void patchLead({ id: detail.id, action: "attempt" })}
-              >
-                Log no-answer attempt
-              </button>
+              <p className={styles.railTitle}>This file</p>
+              <div className={`${styles.railActions} ${styles.railActionsFlush}`}>
+                {movedToStudio ? (
+                  <p className={`${styles.statusBadge} ${styles.statusPaid}`}>Moved to Studio</p>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.buttonGhost}
+                    disabled={busy}
+                    onClick={openConvert}
+                  >
+                    Move to Studio
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  disabled={busy || !canSoldIntake}
+                  onClick={openSoldIntake}
+                >
+                  {alreadySold ? "Update sold intake" : "Sold intake"}
+                </button>
+              </div>
+              {!canSoldIntake ? (
+                <p className={styles.railHint}>
+                  Log how the consult went, or Move to Studio first.
+                </p>
+              ) : null}
+            </div>
+            <div className={styles.railCard}>
+              <p className={styles.railTitle}>Lead Status</p>
+              <label className={styles.field}>
+                <select
+                  className={styles.input}
+                  value={draft.stage ?? "new"}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const stage = e.target.value;
+                    setDraft({ ...draft, stage });
+                    if (stage === "nurturing" && !draft.nurturing_reason) return;
+                    if (stage === "junk" && !draft.junk_reason) return;
+                    void patchLead({
+                      id: detail.id,
+                      stage,
+                      nurturing_reason: draft.nurturing_reason,
+                      junk_reason: draft.junk_reason,
+                    });
+                  }}
+                >
+                  {LEAD_STAGES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {draft.stage === "nurturing" ? (
+                <label className={styles.field} style={{ marginTop: "0.65rem" }}>
+                  <span className={styles.fieldLabel}>Lead Nurturing Reason *</span>
+                  <select
+                    className={styles.input}
+                    value={draft.nurturing_reason ?? ""}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const nurturing_reason = e.target.value;
+                      setDraft({ ...draft, nurturing_reason });
+                      if (!nurturing_reason) return;
+                      void patchLead({
+                        id: detail.id,
+                        stage: "nurturing",
+                        nurturing_reason,
+                      });
+                    }}
+                  >
+                    <option value="">— Select —</option>
+                    {NURTURING_REASONS.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {draft.stage === "junk" ? (
+                <label className={styles.field} style={{ marginTop: "0.65rem" }}>
+                  <span className={styles.fieldLabel}>Junk Reason *</span>
+                  <select
+                    className={styles.input}
+                    value={draft.junk_reason ?? ""}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const junk_reason = e.target.value;
+                      setDraft({ ...draft, junk_reason });
+                      if (!junk_reason) return;
+                      void patchLead({
+                        id: detail.id,
+                        stage: "junk",
+                        junk_reason,
+                      });
+                    }}
+                  >
+                    <option value="">— Select —</option>
+                    {JUNK_REASONS.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </div>
           </aside>
         </div>
@@ -1791,12 +1949,7 @@ export default function OpsLeadsWorkspace() {
   return (
     <OpsShell
       title="Leads"
-      subtitle="Active leads · tap a row for the full Community-style detail"
-      actions={
-        <button type="button" className={styles.buttonGhost} onClick={() => void loadList()}>
-          Refresh
-        </button>
-      }
+      subtitle="Input the leads here that are inputted in Community. This provides accurate data for the Operating System."
     >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
@@ -1804,297 +1957,259 @@ export default function OpsLeadsWorkspace() {
         </p>
       ) : null}
 
-      <nav className={styles.tabs}>
-        {(
-          [
-            ["unscheduled", "Active – Unscheduled"],
-            ["scheduled", "Scheduled"],
-            ["needs", "Needs follow-up"],
-            ["all", "All"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={`${styles.tab} ${listView === id ? styles.tabActive : ""}`}
-            onClick={() => setListView(id)}
-          >
-            {label}
+      <div className={styles.listToolbar}>
+        <nav className={styles.tabs} aria-label="Lead views">
+          <button type="button" className={`${styles.tab} ${styles.tabActive}`}>
+            All
           </button>
-        ))}
-      </nav>
-
-      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.55rem" }}>
-          Website forms — same fields as inspiredclosets.com. Submit as the customer, then refresh
-          this list.
-        </p>
-        <div className={styles.formActions}>
-          <a className={styles.buttonGhost} href="/inspired-closets/site/consultation" target="_blank" rel="noreferrer">
-            Consultation form
-          </a>
-          <a className={styles.buttonGhost} href="/inspired-closets/site/brochure" target="_blank" rel="noreferrer">
-            Brochure form
-          </a>
+        </nav>
+        <div className={styles.toolbarRight}>
+          <p className={styles.updatedStamp}>
+            {listUpdatedAt
+              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}`
+              : loading
+                ? "Updating…"
+                : "—"}
+          </p>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".xlsx,.xlsm,.csv,text/csv"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void importCommunityFile(file);
+            }}
+          />
+          <button
+            type="button"
+            className={styles.buttonGhost}
+            disabled={importing}
+            onClick={() => importFileRef.current?.click()}
+          >
+            {importing ? "Importing…" : "Import from Community"}
+          </button>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            onClick={() => {
+              setForm({ ...EMPTY_FORM });
+              setNewLeadOpen(true);
+            }}
+          >
+            New lead
+          </button>
         </div>
       </div>
 
-      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-          Partner accounts — realtor, builder, interior designer. Referral leads convert onto
-          one of these instead of a new customer file.
-        </p>
-        <div className={styles.formGrid}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Partner name</span>
-            <input
-              className={styles.input}
-              value={partnerDraft.name}
-              onChange={(e) => setPartnerDraft((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Brian / ABC Homes"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Type</span>
-            <select
-              className={styles.input}
-              value={partnerDraft.partner_type}
-              onChange={(e) => setPartnerDraft((f) => ({ ...f, partner_type: e.target.value }))}
-            >
-              {INFLUENCER_TYPES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Phone</span>
-            <input
-              className={styles.input}
-              value={partnerDraft.phone}
-              onChange={(e) => setPartnerDraft((f) => ({ ...f, phone: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Email</span>
-            <input
-              className={styles.input}
-              value={partnerDraft.email}
-              onChange={(e) => setPartnerDraft((f) => ({ ...f, email: e.target.value }))}
-            />
-          </label>
-          <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={busy || !partnerDraft.name.trim()}
-              onClick={() => void createPartnerFromPanel()}
-            >
-              Add partner
-            </button>
-          </div>
-        </div>
-        {partnerAccounts.length > 0 ? (
-          <p className={styles.leadContact} style={{ marginTop: "0.65rem" }}>
-            {partnerAccounts.map((account) => account.name).join(" · ")}
-          </p>
-        ) : (
-          <p className={styles.leadContact} style={{ marginTop: "0.65rem" }}>
-            No partners yet. Add one before converting a realtor or builder lead.
-          </p>
-        )}
-      </div>
-
-      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-          New lead — same fields Des fills when someone calls in
-        </p>
-        <div className={styles.formGrid}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>First name *</span>
-            <input
-              className={styles.input}
-              value={form.first_name}
-              onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Last name *</span>
-            <input
-              className={styles.input}
-              value={form.last_name}
-              onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Phone *</span>
-            <input
-              className={styles.input}
-              value={form.phone}
-              onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Email</span>
-            <input
-              className={styles.input}
-              value={form.email}
-              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Lead source</span>
-            <select
-              className={styles.input}
-              value={form.source}
-              onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}
-            >
-              {LEAD_SOURCES.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {sourceNeedsReferralName(form.source) ? (
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Referral name *</span>
-              <input
-                className={styles.input}
-                value={form.referral_name}
-                onChange={(e) => {
-                  const referral_name = e.target.value;
-                  const match = matchPartnerAccount(referral_name, partnerAccounts);
-                  setForm((f) => ({
-                    ...f,
-                    referral_name,
-                    account_id: match?.id ?? f.account_id,
-                  }));
-                }}
-                placeholder="Brian"
-              />
-            </label>
-          ) : null}
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Designer</span>
-            <select
-              className={styles.input}
-              value={form.designer_id}
-              onChange={(e) => setForm((f) => ({ ...f, designer_id: e.target.value }))}
-            >
-              <option value="">Unassigned</option>
-              {designers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Partner account</span>
-            <select
-              className={styles.input}
-              value={form.account_id}
-              onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))}
-            >
-              <option value="">None — customer file at convert</option>
-              {partnerAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                  {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
-            <span className={styles.fieldLabel}>Street</span>
-            <AddressAutocomplete
-              value={form.street}
-              inputClassName={styles.input}
-              placeholder="350 Kandinsky Court"
-              onChange={(street) => setForm((f) => ({ ...f, street }))}
-              onResolved={applyFormAddress}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>City</span>
-            <input
-              className={styles.input}
-              value={form.city}
-              onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>State</span>
-            <input
-              className={styles.input}
-              value={form.state}
-              onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Zip</span>
-            <input
-              className={styles.input}
-              value={form.zip}
-              onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
-            />
-          </label>
-          <div className={styles.field} style={{ gridColumn: "1 / -1" }}>
-            <span className={styles.fieldLabel}>Area of home</span>
-            <div className={styles.areaPicker} style={{ marginTop: "0.35rem" }}>
-              {AREAS_OF_HOME.map((area) => {
-                const on = form.areas_of_home.includes(area);
-                return (
-                  <button
-                    key={area}
-                    type="button"
-                    className={`${styles.areaChip} ${on ? styles.areaChipOn : ""}`}
-                    onClick={() => toggleFormArea(area)}
-                  >
-                    {area}
-                  </button>
-                );
-              })}
+      {newLeadOpen ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onClick={() => setNewLeadOpen(false)}
+        >
+          <div
+            className={styles.modal}
+            role="dialog"
+            aria-label="New lead"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={styles.modalTitle}>New lead</h3>
+            <p className={styles.leadContact} style={{ marginBottom: "0.75rem" }}>
+              Same fields Des fills when someone calls in.
+            </p>
+            <div className={styles.formGrid}>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>First name *</span>
+                <input
+                  className={styles.input}
+                  value={form.first_name}
+                  onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Last name *</span>
+                <input
+                  className={styles.input}
+                  value={form.last_name}
+                  onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Phone *</span>
+                <input
+                  className={styles.input}
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Email</span>
+                <input
+                  className={styles.input}
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Lead source</span>
+                <select
+                  className={styles.input}
+                  value={form.source}
+                  onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}
+                >
+                  {LEAD_SOURCES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {sourceNeedsReferralName(form.source) ? (
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Referral name *</span>
+                  <input
+                    className={styles.input}
+                    value={form.referral_name}
+                    onChange={(e) => {
+                      const referral_name = e.target.value;
+                      const match = matchPartnerAccount(referral_name, partnerAccounts);
+                      setForm((f) => ({
+                        ...f,
+                        referral_name,
+                        account_id: match?.id ?? f.account_id,
+                      }));
+                    }}
+                    placeholder="Brian"
+                  />
+                </label>
+              ) : null}
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Designer</span>
+                <select
+                  className={styles.input}
+                  value={form.designer_id}
+                  onChange={(e) => setForm((f) => ({ ...f, designer_id: e.target.value }))}
+                >
+                  <option value="">Unassigned</option>
+                  {designers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Partner account</span>
+                <select
+                  className={styles.input}
+                  value={form.account_id}
+                  onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))}
+                >
+                  <option value="">None — customer file at convert</option>
+                  {partnerAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                      {account.partner_type ? ` · ${partnerTypeLabel(account.partner_type)}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                <span className={styles.fieldLabel}>Street</span>
+                <AddressAutocomplete
+                  value={form.street}
+                  inputClassName={styles.input}
+                  placeholder="350 Kandinsky Court"
+                  onChange={(street) => setForm((f) => ({ ...f, street }))}
+                  onResolved={applyFormAddress}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>City</span>
+                <input
+                  className={styles.input}
+                  value={form.city}
+                  onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>State</span>
+                <input
+                  className={styles.input}
+                  value={form.state}
+                  onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Zip</span>
+                <input
+                  className={styles.input}
+                  value={form.zip}
+                  onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
+                />
+              </label>
+              <div className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                <span className={styles.fieldLabel}>Area of home</span>
+                <div className={styles.areaPicker} style={{ marginTop: "0.35rem" }}>
+                  {AREAS_OF_HOME.map((area) => {
+                    const on = form.areas_of_home.includes(area);
+                    return (
+                      <button
+                        key={area}
+                        type="button"
+                        className={`${styles.areaChip} ${on ? styles.areaChipOn : ""}`}
+                        onClick={() => toggleFormArea(area)}
+                      >
+                        {area}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+                <span className={styles.fieldLabel}>Project notes</span>
+                <textarea
+                  className={styles.input}
+                  rows={3}
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="8/26/26 Tommy and wife Stacey called…"
+                />
+              </label>
+            </div>
+            <div className={styles.formActions} style={{ marginTop: "0.85rem" }}>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setNewLeadOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.buttonPrimary}
+                disabled={busy || !form.first_name.trim() || !form.last_name.trim()}
+                onClick={() => void createLead()}
+              >
+                Add lead
+              </button>
             </div>
           </div>
-          <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
-            <span className={styles.fieldLabel}>Project notes</span>
-            <textarea
-              className={styles.input}
-              rows={3}
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="8/26/26 Tommy and wife Stacey called…"
-            />
-          </label>
-          <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.buttonGhost}
-              disabled={busy || !form.first_name.trim() || !form.last_name.trim()}
-              onClick={() => void createLead({ source: "instagram" })}
-            >
-              + Instagram lead
-            </button>
-            <button
-              type="button"
-              className={styles.buttonPrimary}
-              disabled={busy || !form.first_name.trim() || !form.last_name.trim()}
-              onClick={() => void createLead()}
-            >
-              Add lead
-            </button>
-          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className={styles.panel}>
         {loading ? (
           <p className={styles.empty}>Loading leads…</p>
         ) : leads.length === 0 ? (
-          <p className={styles.empty}>No leads in this view.</p>
+          <p className={styles.empty}>No leads yet.</p>
         ) : (
           <table className={styles.table} style={{ minWidth: "52rem" }}>
             <thead>
@@ -2116,7 +2231,10 @@ export default function OpsLeadsWorkspace() {
                 <tr
                   key={lead.id}
                   className={`${styles.leadRow} ${lead.followUpNeeded ? styles.rowHeld : ""}`}
-                  onClick={() => setSelectedId(lead.id)}
+                  onClick={() => {
+                    setDetailTab("details");
+                    setSelectedId(lead.id);
+                  }}
                 >
                   <td>
                     <strong>{lead.client?.name ?? "—"}</strong>

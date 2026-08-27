@@ -127,7 +127,7 @@ export default function OpsCraigSalesWorkspace() {
 
   return (
     <OpsShell
-      title="Leads vs Sales"
+      title="Craig’s dashboard"
       subtitle="Craig’s designer monthly board — pulls from Des leads; his labels stay here"
       actions={
         <>

@@ -118,7 +118,6 @@ export default function OpsInstallCalendar({
   onScheduleInstall,
   onAdvanceStage,
   onLogInstallConfirm,
-  onRefresh,
   weekStartIso,
   onWeekChange,
 }: {
@@ -139,7 +138,6 @@ export default function OpsInstallCalendar({
   }) => Promise<void>;
   onAdvanceStage: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   onLogInstallConfirm?: (jobId: string) => Promise<void>;
-  onRefresh: () => void;
   weekStartIso: string;
   onWeekChange: (iso: string) => void;
 }) {
@@ -415,9 +413,6 @@ export default function OpsInstallCalendar({
                 onClick={() => setView("list")}
               >
                 List
-              </button>
-              <button type="button" className={styles.navBtn} onClick={onRefresh}>
-                Refresh
               </button>
               <button
                 type="button"

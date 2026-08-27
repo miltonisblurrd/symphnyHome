@@ -108,8 +108,9 @@ a.buttonGhost {
   padding: 0.6rem 0.9rem;
   border-radius: 0.55rem;
   font-size: 0.82rem;
-  background: var(--ic-blush);
-  border: 1px solid rgba(130, 31, 45, 0.25);
+  background: #e8f6ee;
+  border: 1px solid rgba(22, 120, 70, 0.28);
+  color: #146c43;
 }
 
 .noticeError {
@@ -118,11 +119,98 @@ a.buttonGhost {
   color: #7a1212;
 }
 
+.listToolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.toolbarRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.updatedStamp {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .tabs {
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+}
+
+.listToolbar .tabs {
+  margin-bottom: 0;
+}
+
+.filterWrap {
+  position: relative;
+}
+
+.filterBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  min-width: 2.6rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--ic-red);
+  background: var(--ic-blush);
+  color: var(--ic-red);
+}
+
+.filterBtnActive {
+  background: var(--ic-red);
+  color: var(--ic-white);
+}
+
+.filterMenu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  left: auto;
+  z-index: 30;
+  min-width: 12.5rem;
+  max-height: 18rem;
+  overflow: auto;
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+  padding: 0.3rem;
+}
+
+.filterOption {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 0.45rem;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.filterOption:hover,
+.filterOptionActive {
+  background: var(--ic-bone);
 }
 
 .tab {
@@ -140,6 +228,164 @@ a.buttonGhost {
   background: var(--ic-black);
   color: var(--ic-white);
   border-color: var(--ic-black);
+}
+
+.tabAppointment {
+  color: #821f2d;
+  border-color: rgba(130, 31, 45, 0.45);
+}
+.tabAppointment.tabActive {
+  background: #821f2d;
+  border-color: #821f2d;
+  color: #fff;
+}
+
+.tabInstall {
+  color: #1f6f8a;
+  border-color: rgba(31, 111, 138, 0.45);
+}
+.tabInstall.tabActive {
+  background: #1f6f8a;
+  border-color: #1f6f8a;
+  color: #fff;
+}
+
+.tabShowroom {
+  color: #8a6a1f;
+  border-color: rgba(196, 154, 60, 0.55);
+}
+.tabShowroom.tabActive {
+  background: #c49a3c;
+  border-color: #c49a3c;
+  color: #1a1408;
+}
+
+.tabGoback {
+  color: #5a4a8c;
+  border-color: rgba(90, 74, 140, 0.45);
+}
+.tabGoback.tabActive {
+  background: #5a4a8c;
+  border-color: #5a4a8c;
+  color: #fff;
+}
+
+.calWeekToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.calLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.calLegendChip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.calWeekNav {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.calWeekRange {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  min-width: 9rem;
+  text-align: center;
+}
+
+.calWeekScroll {
+  overflow-x: auto;
+}
+
+.calWeekGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(8rem, 1fr));
+  gap: 0.4rem;
+  min-width: 56rem;
+}
+
+.calWeekDay {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #faf8f6;
+  min-height: 14rem;
+  padding: 0.4rem;
+}
+
+.calWeekDayHead {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.calWeekDayHead strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.calWeekEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.calChip {
+  display: grid;
+  gap: 0.05rem;
+  border-radius: 0.4rem;
+  padding: 0.32rem 0.4rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.calChipTime {
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.calChipTitle {
+  font-weight: 800;
+}
+
+.calChipMeta {
+  opacity: 0.85;
+}
+
+.calChipAppointment {
+  background: #821f2d;
+  color: #fff;
+}
+.calChipInstall {
+  background: #1f6f8a;
+  color: #fff;
+}
+.calChipShowroom {
+  background: #c49a3c;
+  color: #1a1408;
+}
+.calChipGoback {
+  background: #5a4a8c;
+  color: #fff;
 }
 
 .panel {
@@ -177,6 +423,25 @@ a.buttonGhost {
 
 .rowHeld {
   background: #fff6f6;
+}
+
+.rowSelected {
+  background: #f4eee8;
+}
+
+.projectFile {
+  margin-top: 1.35rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.projectFileHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
 }
 
 .statusBadge {
@@ -333,9 +598,17 @@ a.buttonGhost {
 .leadHeader {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 0.85rem;
+}
+
+.leadHeaderActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .leadName {
@@ -458,6 +731,39 @@ a.buttonGhost {
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--muted);
+}
+
+.railEvent {
+  margin: 0 0 0.7rem;
+}
+
+.railActions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.railActionsFlush {
+  margin-top: 0;
+}
+
+.railActions .buttonPrimary,
+.railActions .buttonGhost {
+  width: 100%;
+}
+
+.railActions .statusBadge {
+  width: 100%;
+  text-align: center;
+  box-sizing: border-box;
+  padding: 0.5rem 0.9rem;
+}
+
+.railHint {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
   color: var(--muted);
 }
 
@@ -651,4 +957,15 @@ a.buttonGhost {
   margin: 0.2rem 0 0;
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+.modal.modalWide {
+  width: min(64rem, 96vw);
+  max-height: 92dvh;
+}
+
+.modalWide .projectFile {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }

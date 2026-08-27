@@ -95,6 +95,7 @@ export async function GET(request: Request) {
     ...job,
     client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
     designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
+    installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
   }));
 
   return NextResponse.json({

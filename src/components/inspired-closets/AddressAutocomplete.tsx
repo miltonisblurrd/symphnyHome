@@ -25,7 +25,7 @@ export default function AddressAutocomplete({
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [active, setActive] = useState(0);
-  const [provider, setProvider] = useState<"google" | "osm" | null>(null);
+  const [provider, setProvider] = useState<"google" | "none" | null>(null);
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -61,7 +61,7 @@ export default function AddressAutocomplete({
           const payload = (await response.json()) as {
             ok?: boolean;
             suggestions?: PlaceSuggestion[];
-            provider?: "google" | "osm";
+            provider?: "google" | "none";
           };
           if (!payload.ok) return;
           setSuggestions(payload.suggestions ?? []);

@@ -81,7 +81,7 @@ export async function GET(request: Request) {
       supabase.from("ic_clients").select("id, name, phone, address").is("deleted_at", null),
       supabase
         .from("ic_leads")
-        .select("id, designer_id, stage, converted_job_id, source")
+        .select("id, client_id, designer_id, stage, converted_job_id")
         .is("deleted_at", null)
         .limit(3000),
       // select('*') stays compatible before/after migration 0010
@@ -124,7 +124,19 @@ export async function GET(request: Request) {
     ...row,
     client: row.client_id ? clientsById.get(row.client_id) ?? null : null,
     designer: row.designer_id ? staffById.get(row.designer_id) ?? null : null,
+    installer: row.installer_id ? staffById.get(row.installer_id) ?? null : null,
   }));
+
+  const leads = (leadsResult.data ?? []).map((lead) => {
+    const client = lead.client_id ? clientsById.get(lead.client_id) ?? null : null;
+    return {
+      id: lead.id,
+      client_id: lead.client_id ?? null,
+      designer_id: lead.designer_id ?? null,
+      converted_job_id: lead.converted_job_id ?? null,
+      name: client?.name || "Lead",
+    };
+  });
 
   // Closing ratio strip: assigned leads vs converted for designers.
   const designers = (staffResult.data ?? []).filter((s) => s.role === "designer");
@@ -212,6 +224,7 @@ export async function GET(request: Request) {
     closing,
     staff: staffResult.data ?? [],
     clients: clientsResult.data ?? [],
+    leads,
     googleCalendar: getGoogleCalendarStatus(),
   });
 }
@@ -304,6 +317,7 @@ export async function POST(request: Request) {
       client_id: resolvedClientId,
       job_id: jobId,
       designer_id: designerId,
+      installer_id: installerId,
       kind,
       subject,
       scheduled_at: scheduledAt,
@@ -321,27 +335,31 @@ export async function POST(request: Request) {
     })
     .select("*")
     .single();
-  if (error && /subject|location_text|column|schema cache/i.test(error.message)) {
+  if (error && /subject|location_text|installer_id|column|schema cache/i.test(error.message)) {
+    const retryPayload: Record<string, unknown> = {
+      lead_id: leadId,
+      client_id: resolvedClientId,
+      job_id: jobId,
+      designer_id: designerId,
+      kind,
+      scheduled_at: scheduledAt,
+      location_type: locationType,
+      status: logConfirmation ? "confirmed" : "scheduled",
+      confirmation_sent_at: logConfirmation ? new Date().toISOString() : null,
+      confirmation_note: logConfirmation
+        ? "Logged Community confirmation email · CC assigned designer"
+        : null,
+      notes,
+      community_ref: communityRef,
+      created_by: actor,
+      updated_by: actor,
+    };
+    if (!/installer_id/i.test(error.message)) {
+      retryPayload.installer_id = installerId;
+    }
     const retry = await supabase
       .from("ic_appointments")
-      .insert({
-        lead_id: leadId,
-        client_id: resolvedClientId,
-        job_id: jobId,
-        designer_id: designerId,
-        kind,
-        scheduled_at: scheduledAt,
-        location_type: locationType,
-        status: logConfirmation ? "confirmed" : "scheduled",
-        confirmation_sent_at: logConfirmation ? new Date().toISOString() : null,
-        confirmation_note: logConfirmation
-          ? "Logged Community confirmation email · CC assigned designer"
-          : null,
-        notes,
-        community_ref: communityRef,
-        created_by: actor,
-        updated_by: actor,
-      })
+      .insert(retryPayload)
       .select("*")
       .single();
     data = retry.data;

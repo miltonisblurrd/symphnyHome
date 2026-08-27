@@ -1,9 +1,8 @@
 /**
- * Address autocomplete for Des intake.
- * Google Places when INSPIRED_CLOSETS_GOOGLE_MAPS_API_KEY is set;
- * otherwise Photon (OpenStreetMap) so the walkthrough still fills street/city/state/zip.
+ * Google Maps address lookup for Des intake.
+ * Places Autocomplete + Place Details, with Geocoding so a full street
+ * (e.g. 1541 Spotted Pony Drive) resolves to the Las Vegas match.
  */
-
 export type AddressParts = {
   street: string;
   city: string;
@@ -15,7 +14,7 @@ export type AddressParts = {
 export type PlaceSuggestion = {
   id: string;
   label: string;
-  provider: "google" | "osm";
+  provider: "google";
   parts?: AddressParts;
 };
 
@@ -73,8 +72,12 @@ const STATE_ABBR: Record<string, string> = {
   wyoming: "WY",
 };
 
-function mapsKey(): string | null {
-  return process.env.INSPIRED_CLOSETS_GOOGLE_MAPS_API_KEY?.trim() || null;
+export function mapsKey(): string | null {
+  return (
+    process.env.INSPIRED_CLOSETS_GOOGLE_MAPS_API_KEY?.trim() ||
+    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
+    null
+  );
 }
 
 function toStateAbbr(value: string | undefined | null): string {
@@ -88,22 +91,13 @@ function streetLine(number: string | undefined, route: string | undefined): stri
   return [number, route].filter(Boolean).join(" ").trim();
 }
 
-type GooglePrediction = {
-  description?: string;
-  place_id?: string;
-};
-
 type GoogleComponent = {
   long_name?: string;
   short_name?: string;
   types?: string[];
 };
 
-function component(
-  parts: GoogleComponent[],
-  type: string,
-  short = false,
-): string {
+function component(parts: GoogleComponent[], type: string, short = false): string {
   const found = parts.find((c) => c.types?.includes(type));
   if (!found) return "";
   return (short ? found.short_name : found.long_name) ?? "";
@@ -117,6 +111,7 @@ function partsFromGoogle(components: GoogleComponent[]): AddressParts {
   const city =
     component(components, "locality") ||
     component(components, "sublocality") ||
+    component(components, "postal_town") ||
     component(components, "neighborhood") ||
     component(components, "administrative_area_level_2");
   return {
@@ -128,23 +123,41 @@ function partsFromGoogle(components: GoogleComponent[]): AddressParts {
   };
 }
 
-async function googleAutocomplete(query: string): Promise<PlaceSuggestion[] | null> {
+function labelFromParts(parts: AddressParts, fallback: string): string {
+  const line = [parts.street, [parts.city, parts.state].filter(Boolean).join(", "), parts.zip]
+    .filter(Boolean)
+    .join(", ");
+  return line || fallback;
+}
+
+function normalizeLabel(value: string): string {
+  return value.toLowerCase().replace(/,?\s*usa$/, "").replace(/\s+/g, " ").trim();
+}
+
+type GooglePrediction = {
+  description?: string;
+  place_id?: string;
+};
+
+async function googleAutocompleteClassic(query: string): Promise<PlaceSuggestion[]> {
   const key = mapsKey();
-  if (!key) return null;
+  if (!key) return [];
   const url = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
   url.searchParams.set("input", query);
   url.searchParams.set("types", "address");
   url.searchParams.set("components", "country:us");
   url.searchParams.set("location", `${LAS_VEGAS.lat},${LAS_VEGAS.lng}`);
   url.searchParams.set("radius", "80000");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("region", "us");
   url.searchParams.set("key", key);
   const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) return null;
+  if (!response.ok) return [];
   const payload = (await response.json()) as {
     status?: string;
     predictions?: GooglePrediction[];
   };
-  if (payload.status !== "OK" && payload.status !== "ZERO_RESULTS") return null;
+  if (payload.status !== "OK" && payload.status !== "ZERO_RESULTS") return [];
   return (payload.predictions ?? [])
     .filter((p) => p.place_id && p.description)
     .map((p) => ({
@@ -152,6 +165,97 @@ async function googleAutocomplete(query: string): Promise<PlaceSuggestion[] | nu
       label: p.description as string,
       provider: "google" as const,
     }));
+}
+
+type NewPrediction = {
+  placePrediction?: {
+    placeId?: string;
+    text?: { text?: string };
+    structuredFormat?: { mainText?: { text?: string }; secondaryText?: { text?: string } };
+  };
+};
+
+async function googleAutocompleteNew(query: string): Promise<PlaceSuggestion[]> {
+  const key = mapsKey();
+  if (!key) return [];
+  const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask":
+        "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat",
+    },
+    body: JSON.stringify({
+      input: query,
+      includedRegionCodes: ["us"],
+      languageCode: "en",
+      locationBias: {
+        circle: {
+          center: { latitude: LAS_VEGAS.lat, longitude: LAS_VEGAS.lng },
+          radius: 80000.0,
+        },
+      },
+    }),
+  });
+  if (!response.ok) return [];
+  const payload = (await response.json()) as { suggestions?: NewPrediction[] };
+  return (payload.suggestions ?? [])
+    .map((item) => {
+      const pred = item.placePrediction;
+      if (!pred?.placeId) return null;
+      const main = pred.structuredFormat?.mainText?.text;
+      const secondary = pred.structuredFormat?.secondaryText?.text;
+      const label =
+        main && secondary ? `${main}, ${secondary}` : pred.text?.text ?? main ?? "";
+      if (!label) return null;
+      return {
+        id: `g:${pred.placeId}`,
+        label,
+        provider: "google" as const,
+      };
+    })
+    .filter((row): row is PlaceSuggestion => Boolean(row));
+}
+
+async function googleGeocode(query: string): Promise<PlaceSuggestion | null> {
+  const key = mapsKey();
+  if (!key) return null;
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("address", query);
+  url.searchParams.set("components", "country:US");
+  url.searchParams.set("bounds", "35.90,-115.55|36.45,-114.70");
+  url.searchParams.set("region", "us");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("key", key);
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as {
+    status?: string;
+    results?: Array<{
+      formatted_address?: string;
+      place_id?: string;
+      address_components?: GoogleComponent[];
+      geometry?: { location?: { lat?: number; lng?: number } };
+    }>;
+  };
+  if (payload.status !== "OK" || !payload.results?.length) return null;
+  const ranked = [...payload.results].sort((a, b) => {
+    const aNv = component(a.address_components ?? [], "administrative_area_level_1", true) === "NV";
+    const bNv = component(b.address_components ?? [], "administrative_area_level_1", true) === "NV";
+    if (aNv !== bNv) return aNv ? -1 : 1;
+    return 0;
+  });
+  const best = ranked[0];
+  if (!best?.place_id || !best.address_components) return null;
+  const parts = partsFromGoogle(best.address_components);
+  if (!parts.street) return null;
+  return {
+    id: `g:${best.place_id}`,
+    label: labelFromParts(parts, best.formatted_address ?? parts.street),
+    provider: "google",
+    parts,
+  };
 }
 
 async function googleDetails(placeId: string): Promise<AddressParts | null> {
@@ -167,100 +271,63 @@ async function googleDetails(placeId: string): Promise<AddressParts | null> {
     status?: string;
     result?: { address_components?: GoogleComponent[] };
   };
-  if (payload.status !== "OK" || !payload.result?.address_components) return null;
-  return partsFromGoogle(payload.result.address_components);
-}
-
-type PhotonProps = {
-  osm_id?: number;
-  name?: string;
-  street?: string;
-  housenumber?: string;
-  city?: string;
-  locality?: string;
-  district?: string;
-  postcode?: string;
-  state?: string;
-  country?: string;
-};
-
-function partsFromPhoton(props: PhotonProps): AddressParts {
-  const street =
-    streetLine(props.housenumber, props.street) || (props.name ?? "").trim();
-  return {
-    street,
-    city: props.city || props.locality || props.district || "",
-    state: toStateAbbr(props.state),
-    zip: props.postcode ?? "",
-    country: props.country || "United States",
-  };
-}
-
-function photonLabel(props: PhotonProps, parts: AddressParts): string {
-  const line = [parts.street, [parts.city, parts.state].filter(Boolean).join(", "), parts.zip]
-    .filter(Boolean)
-    .join(", ");
-  return line || props.name || "Address";
-}
-
-async function photonAutocomplete(query: string): Promise<PlaceSuggestion[]> {
-  const url = new URL("https://photon.komoot.io/api/");
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", "6");
-  url.searchParams.set("lat", String(LAS_VEGAS.lat));
-  url.searchParams.set("lon", String(LAS_VEGAS.lng));
-  url.searchParams.set("lang", "en");
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: { "User-Agent": "InspiredClosetsOS/1.0 (www.symphny.xyz)" },
-  });
-  if (!response.ok) return [];
-  const payload = (await response.json()) as {
-    features?: Array<{ properties?: PhotonProps }>;
-  };
-  const seen = new Set<string>();
-  const suggestions: PlaceSuggestion[] = [];
-  for (const feature of payload.features ?? []) {
-    const props = feature.properties ?? {};
-    const parts = partsFromPhoton(props);
-    if (!parts.street) continue;
-    const label = photonLabel(props, parts);
-    if (seen.has(label)) continue;
-    seen.add(label);
-    suggestions.push({
-      id: `o:${props.osm_id ?? label}`,
-      label,
-      provider: "osm",
-      parts,
-    });
+  if (payload.status === "OK" && payload.result?.address_components) {
+    return partsFromGoogle(payload.result.address_components);
   }
-  return suggestions.slice(0, 6);
+
+  const newer = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+    headers: {
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask": "addressComponents,formattedAddress",
+    },
+  });
+  if (!newer.ok) return null;
+  const body = (await newer.json()) as {
+    formattedAddress?: string;
+    addressComponents?: Array<{
+      longText?: string;
+      shortText?: string;
+      types?: string[];
+    }>;
+  };
+  if (!body.addressComponents?.length) return null;
+  return partsFromGoogle(
+    body.addressComponents.map((c) => ({
+      long_name: c.longText,
+      short_name: c.shortText,
+      types: c.types,
+    })),
+  );
 }
 
 export async function suggestAddresses(query: string): Promise<PlaceSuggestion[]> {
   const trimmed = query.trim();
-  if (trimmed.length < 3) return [];
-  try {
-    const google = await googleAutocomplete(trimmed);
-    if (google && google.length > 0) return google;
-    if (google && google.length === 0 && mapsKey()) return [];
-  } catch {
-    /* fall through to Photon */
+  if (trimmed.length < 3 || !mapsKey()) return [];
+
+  const [geocoded, classic, newer] = await Promise.all([
+    googleGeocode(trimmed).catch(() => null),
+    googleAutocompleteClassic(trimmed).catch(() => [] as PlaceSuggestion[]),
+    googleAutocompleteNew(trimmed).catch(() => [] as PlaceSuggestion[]),
+  ]);
+
+  const merged: PlaceSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const item of [geocoded, ...newer, ...classic]) {
+    if (!item) continue;
+    const key = item.id || normalizeLabel(item.label);
+    if (seen.has(key) || seen.has(normalizeLabel(item.label))) continue;
+    seen.add(key);
+    seen.add(normalizeLabel(item.label));
+    merged.push(item);
   }
-  try {
-    return await photonAutocomplete(trimmed);
-  } catch {
-    return [];
-  }
+  return merged.slice(0, 6);
 }
 
 export async function resolvePlace(id: string): Promise<AddressParts | null> {
-  if (id.startsWith("g:")) {
-    return googleDetails(id.slice(2));
-  }
+  if (id.startsWith("g:")) return googleDetails(id.slice(2));
   return null;
 }
 
-export function placesProvider(): "google" | "osm" {
-  return mapsKey() ? "google" : "osm";
+export function placesProvider(): "google" | "none" {
+  return mapsKey() ? "google" : "none";
 }

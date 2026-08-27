@@ -154,6 +154,7 @@ export default function AddressAutocomplete({
       ? createPortal(
           <ul
             ref={listRef}
+            id={`${id}-suggestions`}
             className={styles.list}
             role="listbox"
             style={{ top: box.top, left: box.left, width: box.width }}
@@ -187,6 +188,7 @@ export default function AddressAutocomplete({
         autoComplete="off"
         role="combobox"
         aria-expanded={open}
+        aria-controls={`${id}-suggestions`}
         aria-autocomplete="list"
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => {

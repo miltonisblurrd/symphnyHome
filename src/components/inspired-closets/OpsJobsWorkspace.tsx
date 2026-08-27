@@ -271,8 +271,9 @@ export default function OpsJobsWorkspace() {
       if (!payload.ok || !payload.job) {
         throw new Error(payload.error ?? "Failed to load project.");
       }
+      const fileJob = payload.job;
       setProjectFile({
-        job: payload.job,
+        job: fileJob,
         lead: payload.lead ?? null,
         appointments: payload.appointments ?? [],
         payments: payload.payments ?? [],
@@ -282,10 +283,10 @@ export default function OpsJobsWorkspace() {
           item.id === jobId
             ? {
                 ...item,
-                ...payload.job,
-                client: payload.job.client ?? item.client,
-                designer: payload.job.designer ?? item.designer,
-                installer: payload.job.installer ?? item.installer,
+                ...fileJob,
+                client: fileJob.client ?? item.client,
+                designer: fileJob.designer ?? item.designer,
+                installer: fileJob.installer ?? item.installer,
               }
             : item,
         ),

@@ -5,11 +5,17 @@ export const INSPIRED_CLOSETS_ACCESS_PATH = "/inspired-closets/access";
 export function isInspiredClosetsProtectedPath(pathname: string): boolean {
   if (pathname.startsWith(INSPIRED_CLOSETS_PROTECTED_PREFIX)) {
     if (pathname === INSPIRED_CLOSETS_ACCESS_PATH) return false;
+    // Customer-site form replicas — public so the walkthrough can start like a real lead.
+    if (pathname === "/inspired-closets/site" || pathname.startsWith("/inspired-closets/site/")) {
+      return false;
+    }
     return true;
   }
 
   if (pathname.startsWith("/api/inspired-closets/")) {
-    return !pathname.startsWith("/api/inspired-closets/access");
+    if (pathname.startsWith("/api/inspired-closets/access")) return false;
+    if (pathname.startsWith("/api/inspired-closets/site")) return false;
+    return true;
   }
 
   if (pathname.startsWith("/api/integrations/quickbooks/")) {

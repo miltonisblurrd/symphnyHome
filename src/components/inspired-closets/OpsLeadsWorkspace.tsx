@@ -1330,6 +1330,21 @@ export default function OpsLeadsWorkspace() {
       </nav>
 
       <div className={styles.panel} style={{ marginBottom: "1rem" }}>
+        <p className={styles.subtitle} style={{ marginBottom: "0.55rem" }}>
+          Website forms — same fields as inspiredclosets.com. Submit as the customer, then refresh
+          this list.
+        </p>
+        <div className={styles.formActions}>
+          <a className={styles.buttonGhost} href="/inspired-closets/site/consultation" target="_blank" rel="noreferrer">
+            Consultation form
+          </a>
+          <a className={styles.buttonGhost} href="/inspired-closets/site/brochure" target="_blank" rel="noreferrer">
+            Brochure form
+          </a>
+        </div>
+      </div>
+
+      <div className={styles.panel} style={{ marginBottom: "1rem" }}>
         <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
           Quick add lead
         </p>

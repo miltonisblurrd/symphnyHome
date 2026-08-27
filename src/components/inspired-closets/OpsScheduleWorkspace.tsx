@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import OpsInstallCalendar from "@/components/inspired-closets/OpsInstallCalendar";
 import type { IcJobKind } from "@/lib/inspired-closets-ops-jobs";
+import { CONSULT_OUTCOMES } from "@/lib/inspired-closets-ops-appointments";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -283,6 +284,12 @@ export default function OpsScheduleWorkspace({
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Update failed.");
+      if (body.action === "complete_consult") {
+        setNotice({
+          kind: "info",
+          text: "Consult logged. Des was pinged on Slack.",
+        });
+      }
       await load();
     } catch (error) {
       setNotice({
@@ -665,7 +672,8 @@ export default function OpsScheduleWorkspace({
         ) : mainTab === "appointments" ? (
           <>
             <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-              Appointments this week (design / consult)
+              Appointments this week (design / consult). When the designer is done, log the
+              outcome so Des gets Slack.
             </p>
             {consultAppts.length === 0 ? (
               <p className={styles.empty}>No appointments this week.</p>
@@ -678,6 +686,7 @@ export default function OpsScheduleWorkspace({
                     <th>Client</th>
                     <th>Designer</th>
                     <th>Status</th>
+                    <th>After consult</th>
                     <th>Podium confirm</th>
                     <th>Reschedule</th>
                   </tr>
@@ -695,6 +704,37 @@ export default function OpsScheduleWorkspace({
                         <td>{row.client?.name ?? "—"}</td>
                         <td>{row.designer?.name ?? "—"}</td>
                         <td>{row.status}</td>
+                        <td>
+                          {row.kind !== "consultation" ? (
+                            <span className={styles.handoffDone}>—</span>
+                          ) : row.status === "completed" ? (
+                            <span className={`${styles.statusBadge} ${styles.statusPaid}`}>
+                              Consult logged
+                            </span>
+                          ) : row.status === "cancelled" ? (
+                            <span className={styles.handoffDone}>Cancelled</span>
+                          ) : (
+                            <div className={styles.handoffRow}>
+                              {CONSULT_OUTCOMES.map((item) => (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  className={styles.handoffBtn}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void patchAppointment({
+                                      id: row.id,
+                                      action: "complete_consult",
+                                      outcome: item.id,
+                                    })
+                                  }
+                                >
+                                  {item.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </td>
                         <td>
                           {row.confirmation_sent_at ? (
                             <span className={`${styles.statusBadge} ${styles.statusPaid}`}>

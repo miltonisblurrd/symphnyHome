@@ -4,6 +4,7 @@
  */
 import { getSupabaseAdmin } from "@/db/client";
 import type { IcPaymentMilestone, IcPaymentMethod, IcPaymentStatus } from "@/db/ops-schema";
+import { notifyDepositCleared } from "@/lib/inspired-closets-ops-handoffs";
 
 export const PAYMENT_MILESTONES: {
   id: IcPaymentMilestone;
@@ -320,6 +321,35 @@ export async function recordPaymentAmount(input: {
       milestone: current.milestone,
     },
   });
+
+  const justClearedDeposit =
+    current.milestone === "deposit_50" && current.status !== "paid" && status === "paid";
+  // Sold-as-paid already pings Frank from notifySoldHandoff — don't double-fire.
+  if (justClearedDeposit && input.notes !== "Marked paid from Sold intake") {
+    try {
+      const { data: job } = await supabase
+        .from("ic_jobs")
+        .select("client_id")
+        .eq("id", current.job_id)
+        .maybeSingle();
+      let clientName = "Client";
+      if (job?.client_id) {
+        const { data: client } = await supabase
+          .from("ic_clients")
+          .select("name")
+          .eq("id", job.client_id)
+          .maybeSingle();
+        if (client?.name) clientName = client.name;
+      }
+      await notifyDepositCleared({
+        clientName,
+        jobId: current.job_id,
+        amountCents: paid,
+      });
+    } catch {
+      /* Slack optional — never fail the payment write */
+    }
+  }
 
   return data as PaymentRow;
 }

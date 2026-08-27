@@ -69,6 +69,34 @@
   color: var(--ic-red);
 }
 
+.handoffRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.handoffBtn {
+  border: 1px solid var(--ic-red);
+  background: transparent;
+  color: var(--ic-red);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.handoffBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.handoffDone {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 .notice {
   margin: 0 0 1rem;
   padding: 0.6rem 0.9rem;

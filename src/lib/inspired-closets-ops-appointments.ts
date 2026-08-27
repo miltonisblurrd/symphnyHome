@@ -24,4 +24,12 @@ export const APPOINTMENT_STATUSES: { id: IcAppointmentStatus; label: string }[] 
   { id: "rescheduled", label: "Rescheduled" },
 ];
 
+export const CONSULT_OUTCOMES = [
+  { id: "quote_sent", label: "Quote sent" },
+  { id: "follow_up", label: "Follow up" },
+  { id: "no_sale", label: "No sale" },
+] as const;
+
+export type IcConsultOutcome = (typeof CONSULT_OUTCOMES)[number]["id"];
+
 export type { IcAppointmentKind, IcAppointmentLocation, IcAppointmentStatus };

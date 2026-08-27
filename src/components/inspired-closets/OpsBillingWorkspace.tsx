@@ -139,7 +139,13 @@ export default function OpsBillingWorkspace() {
       });
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Update failed.");
-      setNotice({ kind: "info", text: "Payment updated. Still enter in Podium if you sent a link / check." });
+      setNotice({
+        kind: "info",
+        text:
+          body.action === "record" && body.milestone === "deposit_50"
+            ? "50% recorded. Frank was pinged to job-check / order Stow."
+            : "Payment updated. Still enter in Podium if you sent a link / check.",
+      });
       await load();
     } catch (error) {
       setNotice({
@@ -154,7 +160,7 @@ export default function OpsBillingWorkspace() {
   return (
     <OpsShell
       title="Billing"
-      subtitle="50 / 40 / 10 ledger. Podium stays the rail — record checks & link-sent here."
+      subtitle="50 / 40 / 10 ledger. Podium stays the rail. Marking 50% paid pings Frank to job-check / order Stow."
       actions={
         <button type="button" className={styles.buttonGhost} onClick={() => void load()}>
           Refresh
@@ -387,6 +393,7 @@ export default function OpsBillingWorkspace() {
                                           method: draft.method,
                                           podium_ref: draft.podium || null,
                                           check_ref: draft.check || null,
+                                          milestone: payment.milestone,
                                         })
                                       }
                                     >

@@ -14,6 +14,7 @@ import {
   sourceLabel,
   stageLabel,
 } from "@/lib/inspired-closets-ops-leads";
+import { CONSULT_OUTCOMES, type IcConsultOutcome } from "@/lib/inspired-closets-ops-appointments";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -251,6 +252,34 @@ export default function OpsLeadsWorkspace() {
     }
   }, [selectedId, loadDetail]);
 
+  async function completeConsult(appointmentId: string, outcome: IcConsultOutcome) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/appointments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: appointmentId,
+          action: "complete_consult",
+          outcome,
+        }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Failed to log consult.");
+      setNotice({ kind: "info", text: "Consult logged. Des was pinged on Slack." });
+      if (selectedId) await loadDetail(selectedId);
+      await loadList();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Failed to log consult.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createLead(override?: Partial<typeof EMPTY_FORM>) {
     setBusy(true);
     setNotice(null);
@@ -452,8 +481,8 @@ export default function OpsLeadsWorkspace() {
         kind: "info",
         text:
           soldForm.deposit_intake_status === "paid"
-            ? "Sold intake saved — deposit marked paid. Job is in Ready to Schedule."
-            : "Sold intake saved — mark the 50% deposit paid in Billing, then it appears under Ready to Schedule on Installs.",
+            ? "Sold intake saved — Des and Frank got Slack. Deposit is in, so Frank can job-check now."
+            : "Sold intake saved — Des and Frank got Slack. Mark the 50% paid in Billing and Frank gets another ping to order.",
       });
       await loadList();
       await loadDetail(selectedId);
@@ -958,11 +987,32 @@ export default function OpsLeadsWorkspace() {
                 <p className={styles.leadContact}>No events yet. Use New Event.</p>
               ) : (
                 (appointments ?? []).map((a) => (
-                  <p key={a.id} className={styles.leadContact} style={{ marginBottom: "0.45rem" }}>
+                  <div key={a.id} className={styles.leadContact} style={{ marginBottom: "0.7rem" }}>
                     <strong>{a.kind === "install" ? "Install" : "Design"}</strong>
                     <br />
                     {formatStamp(a.scheduled_at)} · {a.status}
-                  </p>
+                    {a.kind === "consultation" &&
+                    a.status !== "completed" &&
+                    a.status !== "cancelled" ? (
+                      <div className={styles.handoffRow} style={{ marginTop: "0.35rem" }}>
+                        {CONSULT_OUTCOMES.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={styles.handoffBtn}
+                            disabled={busy}
+                            onClick={() => void completeConsult(a.id, item.id)}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : a.kind === "consultation" && a.status === "completed" ? (
+                      <div className={styles.handoffDone} style={{ marginTop: "0.2rem" }}>
+                        Consult logged — Des pinged
+                      </div>
+                    ) : null}
+                  </div>
                 ))
               )}
               <button

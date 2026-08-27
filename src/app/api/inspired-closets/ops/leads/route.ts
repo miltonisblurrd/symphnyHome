@@ -23,7 +23,7 @@ import {
   type IcLeadStageId,
 } from "@/lib/inspired-closets-ops-leads";
 import { IC_STAFF_ID_COOKIE, IC_STAFF_NAME_COOKIE } from "@/lib/inspired-closets-ops-field";
-import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
+import { notifySoldHandoff } from "@/lib/inspired-closets-ops-handoffs";
 
 export const runtime = "nodejs";
 
@@ -83,30 +83,14 @@ async function applyDepositIntakeStatus(
   }
 }
 
-async function notifyDesSold(input: {
+async function notifySold(input: {
   clientName: string;
   contractCents: number;
   jobId: string;
   depositStatus: string;
   requestedBy?: string | null;
 }) {
-  const dollars = (input.contractCents / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-  try {
-    await postInspiredClosetsSlackNotification({
-      assignee: "Des",
-      title: `Sold — ${input.clientName}`,
-      severity: "info",
-      todoLabel: `${dollars} · deposit ${input.depositStatus.replace(/_/g, " ")}`,
-      notifyMessage: `Sold job ready for Des intake follow-up. Job ${input.jobId}. Mark deposit in Billing when cleared, then schedule from Ready to Schedule.`,
-      requestedBy: input.requestedBy ?? "Ops",
-    });
-  } catch {
-    // Slack is optional — never fail the sell path.
-  }
+  await notifySoldHandoff(input);
 }
 
 function formatAddress(parts: {
@@ -801,7 +785,7 @@ export async function PATCH(request: Request) {
       const { data: client } = existing.client_id
         ? await supabase.from("ic_clients").select("name").eq("id", existing.client_id).maybeSingle()
         : { data: null };
-      await notifyDesSold({
+      await notifySold({
         clientName: client?.name ?? "Client",
         contractCents,
         jobId: job.id,
@@ -913,7 +897,7 @@ export async function PATCH(request: Request) {
       ? await supabase.from("ic_clients").select("name").eq("id", existing.client_id).maybeSingle()
       : { data: null };
 
-    await notifyDesSold({
+    await notifySold({
       clientName: client?.name ?? "Client",
       contractCents,
       jobId: job.id,

@@ -5,9 +5,11 @@ import {
   APPOINTMENT_KINDS,
   APPOINTMENT_LOCATIONS,
   APPOINTMENT_STATUSES,
+  CONSULT_OUTCOMES,
   type IcAppointmentKind,
   type IcAppointmentLocation,
   type IcAppointmentStatus,
+  type IcConsultOutcome,
 } from "@/lib/inspired-closets-ops-appointments";
 import { isDepositPaid } from "@/lib/inspired-closets-ops-billing";
 import { installBlockedByReceiving } from "@/lib/inspired-closets-ops-receiving";
@@ -15,7 +17,8 @@ import {
   getGoogleCalendarStatus,
   pushAppointmentById,
 } from "@/lib/inspired-closets-google-calendar";
-import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { IC_STAFF_ID_COOKIE, IC_STAFF_NAME_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { notifyConsultComplete } from "@/lib/inspired-closets-ops-handoffs";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 import { isJobKind, jobKindTag, resolveJobKind } from "@/lib/inspired-closets-ops-jobs";
 
@@ -24,10 +27,24 @@ export const runtime = "nodejs";
 const VALID_KINDS = new Set(APPOINTMENT_KINDS.map((k) => k.id));
 const VALID_LOCATIONS = new Set(APPOINTMENT_LOCATIONS.map((l) => l.id));
 const VALID_STATUSES = new Set(APPOINTMENT_STATUSES.map((s) => s.id));
+const CONSULT_OUTCOME_LABEL: Record<IcConsultOutcome, string> = {
+  quote_sent: "Quote sent",
+  follow_up: "Needs follow-up",
+  no_sale: "No sale",
+};
+
+function isConsultOutcome(value: string): value is IcConsultOutcome {
+  return CONSULT_OUTCOMES.some((item) => item.id === value);
+}
 
 async function actorId(): Promise<string | null> {
   const cookieStore = await cookies();
   return cookieStore.get(IC_STAFF_ID_COOKIE)?.value ?? null;
+}
+
+async function actorName(): Promise<string | null> {
+  const cookieStore = await cookies();
+  return cookieStore.get(IC_STAFF_NAME_COOKIE)?.value ?? null;
 }
 
 export async function GET(request: Request) {
@@ -486,6 +503,141 @@ export async function PATCH(request: Request) {
   }
   if (!current) {
     return NextResponse.json({ ok: false, error: "Appointment not found." }, { status: 404 });
+  }
+
+  if (action === "complete_consult") {
+    const outcomeRaw = typeof body.outcome === "string" ? body.outcome : "";
+    if (!isConsultOutcome(outcomeRaw)) {
+      return NextResponse.json(
+        { ok: false, error: "outcome must be quote_sent, follow_up, or no_sale." },
+        { status: 400 },
+      );
+    }
+    const outcome = outcomeRaw;
+    if (current.kind !== "consultation") {
+      return NextResponse.json(
+        { ok: false, error: "Only Design Events can be marked consult-complete." },
+        { status: 400 },
+      );
+    }
+    if (current.status === "cancelled") {
+      return NextResponse.json(
+        { ok: false, error: "Cancelled consults cannot be completed." },
+        { status: 409 },
+      );
+    }
+    if (current.status === "completed") {
+      return NextResponse.json({ ok: true, appointment: current, alreadyCompleted: true });
+    }
+
+    const outcomeLine = `Consult outcome: ${CONSULT_OUTCOME_LABEL[outcome]}`;
+    const existingNotes = typeof current.notes === "string" ? current.notes.trim() : "";
+    const notes = existingNotes.includes(outcomeLine)
+      ? current.notes
+      : [existingNotes, outcomeLine].filter(Boolean).join("\n");
+
+    const { data: updated, error } = await supabase
+      .from("ic_appointments")
+      .update({
+        status: "completed",
+        notes,
+        updated_at: nowIso,
+        updated_by: actor,
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+
+    try {
+      if (current.lead_id) {
+        const { data: lead } = await supabase
+          .from("ic_leads")
+          .select("id, converted_job_id, pipeline_status, stage")
+          .eq("id", current.lead_id)
+          .maybeSingle();
+        const alreadySold = Boolean(lead?.converted_job_id) || lead?.pipeline_status === "sold";
+        if (lead && !alreadySold) {
+          const leadUpdate: Record<string, unknown> = {
+            updated_at: nowIso,
+            updated_by: actor,
+          };
+          if (outcome === "no_sale") {
+            leadUpdate.stage = "nurturing";
+            leadUpdate.nurturing_reason = "no_longer_interested";
+          } else {
+            leadUpdate.stage = "follow_up";
+          }
+          await supabase.from("ic_leads").update(leadUpdate).eq("id", lead.id);
+          await supabase.from("ic_activity_log").insert({
+            entity_type: "lead",
+            entity_id: lead.id,
+            action: "consult_complete",
+            actor_id: actor,
+            changes: { outcome, appointment_id: id },
+          });
+        }
+      }
+
+      await supabase.from("ic_activity_log").insert({
+        entity_type: "appointment",
+        entity_id: id,
+        action: "consult_complete",
+        actor_id: actor,
+        changes: { outcome, lead_id: current.lead_id },
+      });
+
+      let clientName = "Client";
+      if (current.client_id) {
+        const { data: client } = await supabase
+          .from("ic_clients")
+          .select("name")
+          .eq("id", current.client_id)
+          .maybeSingle();
+        if (client?.name) clientName = client.name;
+      } else if (current.lead_id) {
+        const { data: lead } = await supabase
+          .from("ic_leads")
+          .select("client_id")
+          .eq("id", current.lead_id)
+          .maybeSingle();
+        if (lead?.client_id) {
+          const { data: client } = await supabase
+            .from("ic_clients")
+            .select("name")
+            .eq("id", lead.client_id)
+            .maybeSingle();
+          if (client?.name) clientName = client.name;
+        }
+      }
+
+      let designerName = await actorName();
+      if (current.designer_id) {
+        const { data: designer } = await supabase
+          .from("ic_staff")
+          .select("name")
+          .eq("id", current.designer_id)
+          .maybeSingle();
+        if (designer?.name) designerName = designer.name;
+      }
+
+      await notifyConsultComplete({
+        clientName,
+        designerName,
+        outcome,
+      });
+    } catch {
+      /* Lead move + Slack must not undo a completed consult */
+    }
+
+    const calendar = await pushAppointmentById(id);
+    return NextResponse.json({
+      ok: true,
+      appointment: updated,
+      googleCalendar: calendar,
+    });
   }
 
   const updates: Record<string, unknown> = {

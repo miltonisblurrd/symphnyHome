@@ -132,6 +132,7 @@ export default function OpsInventoryWorkspace() {
   });
   const [filter, setFilter] = useState<"all" | "low" | "excess">("all");
   const [query, setQuery] = useState("");
+  const [vendorFilter, setVendorFilter] = useState("all");
   const [selectedPartId, setSelectedPartId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
@@ -168,7 +169,6 @@ export default function OpsInventoryWorkspace() {
     try {
       const params = new URLSearchParams();
       if (filter !== "all") params.set("filter", filter);
-      if (query.trim()) params.set("q", query.trim());
 
       const [partsRes, jobsRes, attentionRes] = await Promise.all([
         fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`),
@@ -201,7 +201,7 @@ export default function OpsInventoryWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [filter, query]);
+  }, [filter]);
 
   useEffect(() => {
     void load();
@@ -211,6 +211,36 @@ export default function OpsInventoryWorkspace() {
     () => parts.find((part) => part.id === selectedPartId) ?? null,
     [parts, selectedPartId],
   );
+
+  const vendors = useMemo(() => {
+    const names = new Set<string>();
+    for (const part of parts) {
+      const vendor = part.vendor?.trim();
+      if (vendor) names.add(vendor);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [parts]);
+
+  const visibleParts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return parts
+      .filter((part) => vendorFilter === "all" || (part.vendor ?? "").trim() === vendorFilter)
+      .filter((part) => {
+        if (!q) return true;
+        const hay = `${part.sku} ${part.name} ${part.size ?? ""} ${part.location ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a, b) => {
+        const vendorCmp = (a.vendor ?? "zzz").localeCompare(b.vendor ?? "zzz");
+        if (vendorCmp !== 0) return vendorCmp;
+        return a.name.localeCompare(b.name);
+      });
+  }, [parts, query, vendorFilter]);
+
+  const deskSummary = useMemo(() => {
+    const pieces = parts.reduce((sum, part) => sum + (part.qty_on_hand ?? 0), 0);
+    return { pieces, vendors: vendors.length };
+  }, [parts, vendors.length]);
 
   useEffect(() => {
     if (!selectedPart) return;
@@ -548,7 +578,7 @@ export default function OpsInventoryWorkspace() {
   return (
     <OpsShell
       title="Inventory"
-      subtitle="What’s on the shelf, what’s promised to jobs, what to reorder"
+      subtitle="Hardware on the shelf — search an item number, pull to a job, or open receiving when a truck hits the dock"
       actions={
         <>
           <Link href="/inspired-closets/ops/inventory/receiving" className={styles.buttonPrimary}>
@@ -604,9 +634,9 @@ export default function OpsInventoryWorkspace() {
             }}
           >
             <p style={{ margin: 0, fontSize: "0.95rem" }}>
-              <strong>Two jobs here:</strong> a truck arrives →{" "}
-              <Link href="/inspired-closets/ops/inventory/receiving">Receiving / scan</Link>
-              . Parts pulled for a client → <strong>To job</strong>. Find the part, hit the button.
+              <strong>{deskSummary.pieces}</strong> pieces on the shelf · truck arrives →{" "}
+              <Link href="/inspired-closets/ops/inventory/receiving">Receiving</Link>
+              . Pull for a client → <strong>To job</strong>.
             </p>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button
@@ -801,13 +831,16 @@ export default function OpsInventoryWorkspace() {
       <section className={styles.panel}>
         <div className={styles.summaryRow}>
           <span>
-            <span className={styles.summaryStrong}>{summary.totalParts}</span> parts
+            <span className={styles.summaryStrong}>{summary.totalParts}</span> SKUs
+          </span>
+          <span>
+            <span className={styles.summaryStrong}>{deskSummary.vendors}</span> vendors
+          </span>
+          <span>
+            <span className={styles.summaryStrong}>{deskSummary.pieces}</span> on hand
           </span>
           <span>
             <span className={styles.summaryStrong}>{summary.lowStock}</span> low stock
-          </span>
-          <span>
-            <span className={styles.summaryStrong}>{summary.excess}</span> excess flagged
           </span>
           <span>
             On-hand value{" "}
@@ -815,21 +848,40 @@ export default function OpsInventoryWorkspace() {
           </span>
         </div>
 
-        <label className={styles.field} style={{ marginBottom: "0.85rem", maxWidth: "24rem" }}>
+        <label className={styles.field} style={{ marginBottom: "0.65rem", maxWidth: "28rem" }}>
           <span className={styles.fieldLabel}>Find a part</span>
           <input
             className={styles.input}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Type the name, size, or bin — e.g. undermount 21"
+            placeholder="Item #, name, vendor — 3564900, valet, Richelieu"
           />
         </label>
+        <div className={styles.filterChips}>
+          <button
+            type="button"
+            className={`${styles.chip} ${vendorFilter === "all" ? styles.chipOn : ""}`}
+            onClick={() => setVendorFilter("all")}
+          >
+            All vendors
+          </button>
+          {vendors.map((vendor) => (
+            <button
+              key={vendor}
+              type="button"
+              className={`${styles.chip} ${vendorFilter === vendor ? styles.chipOn : ""}`}
+              onClick={() => setVendorFilter(vendor)}
+            >
+              {vendor}
+            </button>
+          ))}
+        </div>
 
         {loading ? (
           <p className={styles.empty}>Loading inventory…</p>
-        ) : parts.length === 0 ? (
+        ) : visibleParts.length === 0 ? (
           <p className={styles.empty}>
-            {query.trim()
+            {query.trim() || vendorFilter !== "all"
               ? "No parts match that search."
               : "Nothing here yet — use the Start here box above to load the warehouse count."}
           </p>
@@ -838,6 +890,8 @@ export default function OpsInventoryWorkspace() {
             <thead>
               <tr>
                 <th>Part</th>
+                <th>Item #</th>
+                <th>Vendor</th>
                 <th>Size</th>
                 <th>Bin</th>
                 <th>Available</th>
@@ -848,7 +902,7 @@ export default function OpsInventoryWorkspace() {
               </tr>
             </thead>
             <tbody>
-              {parts.map((part) => {
+              {visibleParts.map((part) => {
                 const low = part.qty_on_hand <= part.reorder_point;
                 const avail = Math.max(0, part.qty_on_hand - part.qty_reserved);
                 return (
@@ -858,8 +912,10 @@ export default function OpsInventoryWorkspace() {
                   >
                     <td>
                       <strong>{part.sku}</strong>
-                      <div style={{ fontSize: "0.8rem", opacity: 0.75 }}>{part.name}</div>
+                      <div className={styles.mutedLine}>{part.name}</div>
                     </td>
+                    <td className={styles.skuMono}>{part.barcode || part.sku}</td>
+                    <td>{part.vendor ?? "—"}</td>
                     <td>{part.size ?? "—"}</td>
                     <td>{part.location ?? "—"}</td>
                     <td>

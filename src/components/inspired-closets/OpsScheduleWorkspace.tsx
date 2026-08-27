@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import OpsInstallCalendar from "@/components/inspired-closets/OpsInstallCalendar";
+import type { IcJobKind } from "@/lib/inspired-closets-ops-jobs";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -37,6 +38,8 @@ type InstallJob = {
   contract_cents?: number;
   notes?: string | null;
   serviceTag?: "SVC" | "G/B" | null;
+  job_kind?: IcJobKind | null;
+  visit_window?: string | null;
   lead_id?: string | null;
   studio_ref?: string | null;
   community_ref?: string | null;
@@ -320,6 +323,8 @@ export default function OpsScheduleWorkspace({
     scheduledAt: string;
     installerId: string | null;
     acknowledgeNoReceiveDate?: boolean;
+    jobKind?: string;
+    visitWindow?: string | null;
   }) {
     setBusy(true);
     setNotice(null);
@@ -334,6 +339,8 @@ export default function OpsScheduleWorkspace({
           scheduled_at: input.scheduledAt,
           installer_id: input.installerId,
           location_type: "on_site",
+          job_kind: input.jobKind ?? null,
+          visit_window: input.visitWindow ?? null,
           notes: input.acknowledgeNoReceiveDate
             ? "Scheduled without Studio receive date (Des acknowledged)."
             : null,

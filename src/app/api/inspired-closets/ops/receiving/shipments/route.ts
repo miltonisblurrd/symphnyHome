@@ -5,6 +5,7 @@ import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
   fixtureItemsToParsed,
   linkItemToOs,
+  loadShipmentItemRows,
   missingReceivingTable,
   notifyReceiving,
   parsePackingSlip,
@@ -107,12 +108,7 @@ export async function GET() {
 
   const shipments = [];
   for (const ship of data ?? []) {
-    const { data: items } = await supabase
-      .from("ic_shipment_items")
-      .select(
-        "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, container_id, source_page, status, vendor_sku, job_id, part_id, note",
-      )
-      .eq("shipment_id", ship.id);
+    const items = await loadShipmentItemRows(ship.id);
     const rollup = shipmentRollup((items ?? []) as ShipmentItemRow[]);
     shipments.push({ ...ship, ...rollup });
   }

@@ -19,6 +19,7 @@ type Item = {
   status: string;
   job_id: string | null;
   part_id: string | null;
+  needs_credit?: boolean;
 };
 
 type Stats = {
@@ -307,9 +308,45 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
           </div>
         </section>
 
+        {(() => {
+          const creditItems = items.filter((item) => item.needs_credit);
+          if (creditItems.length === 0) return null;
+          return (
+            <section className={`${payroll.panel} ${styles.noPrint}`} style={{ marginBottom: "1rem" }}>
+              <p className={payroll.fieldLabel}>Credit later — still using these pieces</p>
+              <p className={payroll.empty} style={{ marginTop: 0 }}>
+                Bryant flags these while scanning. Stock stays on the job. File the vendor credit
+                after the truck.
+              </p>
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                {creditItems.map((item) => (
+                  <li key={item.id} style={{ marginBottom: "0.35rem", fontSize: "0.85rem" }}>
+                    <span className={styles.mono}>{item.item_number}</span>
+                    {" · "}
+                    {item.job_name ?? item.cust_ref ?? "—"}
+                    {item.description ? ` · ${item.description}` : ""}
+                    {" "}
+                    <button
+                      type="button"
+                      className={payroll.buttonGhost}
+                      onClick={() =>
+                        void patchItem(item.id, { action: "clear_credit" }).catch((err: unknown) =>
+                          setNotice(err instanceof Error ? err.message : "Failed"),
+                        )
+                      }
+                    >
+                      Filed
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })()}
+
         {claims.length > 0 ? (
           <section className={`${payroll.panel} ${styles.noPrint}`} style={{ marginBottom: "1rem" }}>
-            <p className={payroll.fieldLabel}>Damage claims</p>
+            <p className={payroll.fieldLabel}>Credits & claims</p>
             <ul>
               {claims.map((claim) => (
                 <li key={claim.id}>
@@ -408,15 +445,13 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                   className={payroll.buttonGhost}
                   onClick={() =>
                     void patchItem(item.id, {
-                      action: "damage",
-                      damaged_qty: 1,
-                      description: "Flagged on receive",
+                      action: item.needs_credit ? "clear_credit" : "credit",
                     }).catch((err: unknown) =>
                       setNotice(err instanceof Error ? err.message : "Failed"),
                     )
                   }
                 >
-                  Damage
+                  {item.needs_credit ? "Credit filed" : "Credit later"}
                 </button>
               </span>
             </div>

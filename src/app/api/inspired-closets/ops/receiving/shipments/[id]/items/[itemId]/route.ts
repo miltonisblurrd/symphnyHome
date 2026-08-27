@@ -124,6 +124,62 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true, item: data, claim });
   }
 
+  if (action === "credit" || action === "clear_credit") {
+    const needsCredit = action === "credit";
+    const { data, error } = await supabase
+      .from("ic_shipment_items")
+      .update({ needs_credit: needsCredit, updated_at: now })
+      .eq("id", itemId)
+      .select("*")
+      .single();
+    if (error) {
+      if (/needs_credit/i.test(error.message)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Run drizzle/0014_ic_job_kind_credit.sql so Bryant can mark credits without scrapping stock.",
+          },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    if (needsCredit) {
+      const { data: existing } = await supabase
+        .from("ic_shipment_claims")
+        .select("id")
+        .eq("item_id", itemId)
+        .eq("claim_type", "CREDIT")
+        .in("status", ["draft", "submitted"])
+        .maybeSingle();
+      if (!existing) {
+        await supabase.from("ic_shipment_claims").insert({
+          shipment_id: id,
+          item_id: itemId,
+          claim_type: "CREDIT",
+          description:
+            typeof body.description === "string" && body.description.trim()
+              ? body.description.trim()
+              : "Vendor credit — still using the piece",
+          damaged_qty: Math.max(1, Number(body.qty) || 1),
+          status: "draft",
+          reorder: false,
+          created_by: actor,
+        });
+      }
+    } else {
+      await supabase
+        .from("ic_shipment_claims")
+        .update({ status: "cancelled", updated_at: now })
+        .eq("item_id", itemId)
+        .eq("claim_type", "CREDIT")
+        .eq("status", "draft");
+    }
+
+    return NextResponse.json({ ok: true, item: data });
+  }
+
   const patch: Record<string, unknown> = { updated_at: now };
   for (const key of [
     "item_number",

@@ -6,6 +6,7 @@ import {
   applyScanToInventory,
   lineStatus,
   linkItemToOs,
+  loadShipmentItemRows,
   matchItem,
   notifyReceiving,
   shipmentRollup,
@@ -22,15 +23,7 @@ async function actorId(): Promise<string | null> {
 }
 
 async function loadItems(shipmentId: string): Promise<ShipmentItemRow[]> {
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("ic_shipment_items")
-    .select(
-      "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, container_id, source_page, status, vendor_sku, job_id, part_id, note",
-    )
-    .eq("shipment_id", shipmentId);
-  if (error) throw error;
-  return (data ?? []) as ShipmentItemRow[];
+  return loadShipmentItemRows(shipmentId);
 }
 
 export async function POST(request: Request, ctx: Ctx) {

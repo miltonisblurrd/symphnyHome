@@ -6,6 +6,9 @@ import {
   MEDIA_KINDS,
   isInstallerRole,
 } from "@/lib/inspired-closets-ops-field";
+import FieldWeekBoard, {
+  type FieldBoardCrew,
+} from "@/components/inspired-closets/FieldWeekBoard";
 import styles from "./field.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -211,7 +214,10 @@ export default function FieldApp() {
   const [issueType, setIssueType] = useState("site_not_ready");
   const [issueText, setIssueText] = useState("");
   const [queueCount, setQueueCount] = useState(0);
-  const [tab, setTab] = useState<"jobs" | "profile">("jobs");
+  const [tab, setTab] = useState<"board" | "jobs" | "profile">("board");
+  const [boardDays, setBoardDays] = useState<Array<{ key: string; dow: string; num: number }>>([]);
+  const [boardCrew, setBoardCrew] = useState<FieldBoardCrew[]>([]);
+  const [boardUnassigned, setBoardUnassigned] = useState<Record<string, FieldBoardCrew["cells"][string]>>({});
 
   const selected = useMemo(
     () => jobs.find((job) => job.id === selectedId) ?? null,
@@ -251,6 +257,22 @@ export default function FieldApp() {
     setSelectedId((current) => current ?? payload.jobs?.[0]?.id ?? null);
     if (payload.installer?.id) {
       await loadProfiles(payload.installer.id);
+    }
+    try {
+      const boardRes = await fetch("/api/inspired-closets/field/board");
+      const boardPayload = (await boardRes.json()) as {
+        ok: boolean;
+        days?: Array<{ key: string; dow: string; num: number }>;
+        installers?: FieldBoardCrew[];
+        unassigned?: FieldBoardCrew["cells"];
+      };
+      if (boardPayload.ok) {
+        setBoardDays(boardPayload.days ?? []);
+        setBoardCrew(boardPayload.installers ?? []);
+        setBoardUnassigned(boardPayload.unassigned ?? {});
+      }
+    } catch {
+      /* board is additive */
     }
   }, [loadProfiles]);
 
@@ -358,7 +380,7 @@ export default function FieldApp() {
         throw new Error("This login is for drivers/installers only.");
       }
       setInstaller(payload.staff);
-      setTab("jobs");
+      setTab("board");
       await loadJobs();
       await loadProfiles(payload.staff.id);
       setNotice({ kind: "ok", text: `Welcome back, ${payload.staff.name}.` });
@@ -387,7 +409,7 @@ export default function FieldApp() {
       }
       setInstaller(payload.staff);
       setNewDriverName("");
-      setTab("jobs");
+      setTab("board");
       await loadProfiles();
       await loadJobs();
       await loadProfiles(payload.staff.id);
@@ -777,11 +799,20 @@ export default function FieldApp() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === "board"}
+          className={`${styles.tabBtn} ${tab === "board" ? styles.tabBtnActive : ""}`}
+          onClick={() => setTab("board")}
+        >
+          This week
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === "jobs"}
           className={`${styles.tabBtn} ${tab === "jobs" ? styles.tabBtnActive : ""}`}
           onClick={() => setTab("jobs")}
         >
-          Today’s jobs
+          My jobs
         </button>
         <button
           type="button"
@@ -842,6 +873,18 @@ export default function FieldApp() {
             ))
           )}
         </>
+      ) : null}
+
+      {tab === "board" ? (
+        <FieldWeekBoard
+          days={boardDays}
+          installers={boardCrew}
+          unassigned={boardUnassigned}
+          onOpenMine={(jobId) => {
+            setSelectedId(jobId);
+            setTab("jobs");
+          }}
+        />
       ) : null}
 
       {tab === "jobs" ? (

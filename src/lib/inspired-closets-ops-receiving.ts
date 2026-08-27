@@ -43,10 +43,53 @@ export type ShipmentItemRow = {
   job_id: string | null;
   part_id: string | null;
   note: string | null;
+  needs_credit?: boolean;
 };
+
+export const SHIPMENT_ITEM_SELECT =
+  "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, needs_credit, container_id, source_page, status, vendor_sku, job_id, part_id, note";
+
+export const SHIPMENT_ITEM_SELECT_LEGACY =
+  "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, container_id, source_page, status, vendor_sku, job_id, part_id, note";
 
 export function missingReceivingTable(message: string): boolean {
   return /relation|schema cache|does not exist|ic_shipment/i.test(message);
+}
+
+export function missingNeedsCreditColumn(message: string): boolean {
+  return /needs_credit/i.test(message);
+}
+
+export async function loadShipmentItemRows(
+  shipmentId: string,
+  options?: { order?: boolean },
+): Promise<ShipmentItemRow[]> {
+  const supabase = getSupabaseAdmin();
+  let query = supabase
+    .from("ic_shipment_items")
+    .select(SHIPMENT_ITEM_SELECT)
+    .eq("shipment_id", shipmentId);
+  if (options?.order) {
+    query = query.order("source_page").order("item_number");
+  }
+  const first = await query;
+  if (first.error && missingNeedsCreditColumn(first.error.message)) {
+    let retry = supabase
+      .from("ic_shipment_items")
+      .select(SHIPMENT_ITEM_SELECT_LEGACY)
+      .eq("shipment_id", shipmentId);
+    if (options?.order) {
+      retry = retry.order("source_page").order("item_number");
+    }
+    const second = await retry;
+    if (second.error) throw second.error;
+    return ((second.data ?? []) as ShipmentItemRow[]).map((row) => ({
+      ...row,
+      needs_credit: false,
+    }));
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as ShipmentItemRow[];
 }
 
 export function normalizeCode(value: string): string {
@@ -89,6 +132,7 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
   const damagedLines = items.filter((row) => row.status === "damaged").length;
   const missingLines = items.filter((row) => row.status === "missing").length;
   const pendingLines = items.filter((row) => row.status === "expected").length;
+  const creditLines = items.filter((row) => Boolean(row.needs_credit)).length;
   const pct = totalQty > 0 ? Math.round((receivedQty / totalQty) * 100) : 0;
 
   const byJob = new Map<
@@ -172,6 +216,7 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
     pending: pendingLines,
     damaged: damagedLines,
     missing: missingLines,
+    credit: creditLines,
     pct,
     by_job: [...byJob.values()].sort((a, b) => a.job_name.localeCompare(b.job_name)),
     by_container: pallets,

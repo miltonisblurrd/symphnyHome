@@ -275,6 +275,13 @@
   cursor: pointer;
 }
 
+.qtyBtns .creditBtn {
+  width: auto;
+  height: auto;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
+}
+
 .palletBar {
   display: flex;
   gap: 0.35rem;
@@ -298,6 +305,51 @@
   background: #1d4ed8;
   border-color: #1d4ed8;
   color: #fff;
+}
+
+.creditBtn {
+  border: 1px solid #fbbf24;
+  background: #422006;
+  color: #fde68a;
+  border-radius: 0.7rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.creditQueue {
+  margin: 0.75rem 1rem 1.25rem;
+  padding: 0.85rem;
+  border-radius: 0.9rem;
+  background: #1c1917;
+  border: 1px solid #44403c;
+}
+
+.creditQueue h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fde68a;
+}
+
+.creditQueue p {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  color: #a8a29e;
+}
+
+.creditRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0;
+  border-top: 1px solid #44403c;
+  font-size: 0.8rem;
 }
 
 @media print {

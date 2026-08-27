@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { JOB_STAGES, type IcJobStage } from "@/lib/inspired-closets-ops-jobs";
+import { JOB_STAGES, isJobKind, type IcJobStage } from "@/lib/inspired-closets-ops-jobs";
 import {
   ensurePaymentMilestones,
   markInstallFortyDue,
@@ -29,6 +29,8 @@ const EDITABLE = new Set([
   "deposit_intake_status",
   "crew_size",
   "estimated_install_days",
+  "job_kind",
+  "visit_window",
   "notes",
   "risk_flag",
   "lead_id",
@@ -206,6 +208,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid stage." }, { status: 400 });
   }
 
+  if (body.job_kind != null && !isJobKind(body.job_kind)) {
+    return NextResponse.json(
+      { ok: false, error: "job_kind must be new_install, go_back, or service." },
+      { status: 400 },
+    );
+  }
+
   const supabase = getSupabaseAdmin();
   const { data: current, error: findError } = await supabase
     .from("ic_jobs")
@@ -258,6 +267,8 @@ export async function PATCH(request: Request) {
       const base = { ...update };
       delete base.crew_size;
       delete base.estimated_install_days;
+      delete base.job_kind;
+      delete base.visit_window;
       const retry = await supabase.from("ic_jobs").update(base).eq("id", id).select("*").single();
       if (retry.error) {
         return NextResponse.json({ ok: false, error: retry.error.message }, { status: 500 });
@@ -265,7 +276,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({
         ok: true,
         job: retry.data,
-        hint: "Run drizzle/0012_ic_inventory_schedule.sql for crew size / duration fields.",
+        hint: "Run drizzle/0014_ic_job_kind_credit.sql for job kind / visit window.",
       });
     }
     return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });

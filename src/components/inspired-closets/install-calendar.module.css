@@ -166,6 +166,9 @@
   --assigned: #9ec0e6;
   --unassigned: #e8a090;
   --svc: #e8c48a;
+  --newJob: #8fbf88;
+  --goBack: #7eadd9;
+  --service: #d97a7a;
   --company: #5c4a3a;
 
   display: grid;
@@ -407,6 +410,26 @@
   color: #3a2a10;
 }
 
+.cardNew {
+  background: var(--newJob);
+  color: #102010;
+}
+
+.cardGoBack {
+  background: var(--goBack);
+  color: #10243a;
+}
+
+.cardService {
+  background: var(--service);
+  color: #3a1010;
+}
+
+.cardOpen {
+  outline: 2px dashed rgba(58, 21, 16, 0.55);
+  outline-offset: -2px;
+}
+
 .cardTitle {
   margin: 0;
   font-size: 0.78rem;
@@ -602,4 +625,67 @@
 .assignBtn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.crewBoard {
+  overflow: auto;
+  padding: 0.5rem 0.65rem 0.85rem;
+}
+
+.crewGrid {
+  display: grid;
+  grid-template-columns: 7.2rem repeat(6, minmax(7.2rem, 1fr));
+  gap: 0.25rem;
+  min-width: 52rem;
+}
+
+.crewHead {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.35rem 0.3rem;
+}
+
+.crewNameCell {
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.45rem 0.4rem;
+  background: #faf7f4;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.crewCell {
+  min-height: 4.6rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  padding: 0.28rem;
+}
+
+.boardLegend {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0 0.65rem 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.legendSwatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.legendSwatch i {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
+  display: inline-block;
 }

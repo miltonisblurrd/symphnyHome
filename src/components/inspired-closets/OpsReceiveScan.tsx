@@ -14,6 +14,7 @@ type Item = {
   received_qty: number;
   container_id: string | null;
   status: string;
+  needs_credit?: boolean;
 };
 
 type Stats = {
@@ -76,6 +77,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   const [pallet, setPallet] = useState<string>("");
   const [query, setQuery] = useState("");
   const [banner, setBanner] = useState<Banner | null>(null);
+  const [lastItem, setLastItem] = useState<Item | null>(null);
   const [scanning, setScanning] = useState(false);
   const [ocrReady, setOcrReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -198,12 +200,14 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       if (!last) return;
       if (last.result === "unknown") {
         beep(false);
+        setLastItem(null);
         setBanner({ title: "Unknown scan", detail: code, warn: true });
         if (typeof navigator !== "undefined" && "vibrate" in navigator) {
           navigator.vibrate([80, 40, 80]);
         }
       } else if (last.result === "already_received") {
         beep(false);
+        setLastItem(last.item);
         setBanner({
           title: "Already in",
           detail: `${last.item?.item_number ?? code} · ${last.item?.job_name ?? ""}`,
@@ -212,6 +216,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       } else {
         beep(true);
         if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(40);
+        setLastItem(last.item);
         setBanner({
           title: last.result === "pallet_mismatch" ? "Checked in · other pallet" : "Checked in",
           detail: `${last.item?.item_number ?? code} · ${last.item?.job_name ?? ""} · ${last.item?.description ?? ""}`,
@@ -278,6 +283,38 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     cancelAnimationFrame(rafRef.current);
   }
 
+  async function markCredit(item: Item, on = true) {
+    try {
+      const response = await fetch(
+        `/api/inspired-closets/ops/receiving/shipments/${shipmentId}/items/${item.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: on ? "credit" : "clear_credit",
+            description: "Vendor credit — still using the piece",
+          }),
+        },
+      );
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not flag credit.");
+      setLastItem({ ...item, needs_credit: on });
+      setBanner({
+        title: on ? "On the credit list" : "Credit cleared",
+        detail: on
+          ? `${item.item_number} stays on the job. File vendor credit after the truck.`
+          : `${item.item_number} off the credit list.`,
+      });
+      await load();
+    } catch (error) {
+      setBanner({
+        title: "Didn't stick",
+        detail: error instanceof Error ? error.message : "Try again",
+        warn: true,
+      });
+    }
+  }
+
   async function bump(item: Item, delta: number) {
     try {
       if (delta > 0) {
@@ -323,6 +360,16 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     }
     return [...map.entries()];
   }, [visible]);
+
+  const creditQueue = useMemo(
+    () =>
+      items.filter((item) => {
+        if (!item.needs_credit) return false;
+        if (pallet && item.container_id !== pallet) return false;
+        return true;
+      }),
+    [items, pallet],
+  );
 
   return (
     <div className={styles.scanPage}>
@@ -374,6 +421,16 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
         <div className={`${styles.banner} ${banner.warn ? styles.bannerWarn : ""}`}>
           <h3>{banner.title}</h3>
           <p>{banner.detail}</p>
+          {lastItem && !lastItem.needs_credit ? (
+            <button
+              type="button"
+              className={styles.creditBtn}
+              style={{ marginTop: "0.55rem" }}
+              onClick={() => void markCredit(lastItem, true)}
+            >
+              Credit later — still using it
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -418,6 +475,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
                   <div className={styles.mono}>{item.item_number}</div>
                   <div style={{ fontSize: "0.78rem", color: "#94a3b8" }}>
                     {item.description ?? "—"} · {item.received_qty}/{item.qty}
+                    {item.needs_credit ? " · credit later" : ""}
                   </div>
                 </div>
                 <div className={styles.qtyBtns}>
@@ -432,11 +490,43 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
                       All
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className={styles.creditBtn}
+                    onClick={() => void markCredit(item, !item.needs_credit)}
+                  >
+                    {item.needs_credit ? "Undo credit" : "Credit"}
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         ))}
+
+      <section className={styles.creditQueue}>
+        <h3>Need credit after this truck</h3>
+        <p>
+          Blue-tape it, keep scanning. These pieces stay on the job — file the vendor list when
+          the last pallet is in.
+        </p>
+        {creditQueue.length === 0 ? (
+          <p>Nothing flagged yet.</p>
+        ) : (
+          creditQueue.map((item) => (
+            <div key={item.id} className={styles.creditRow}>
+              <div>
+                <strong className={styles.mono}>{item.item_number}</strong>
+                <div style={{ color: "#a8a29e", fontSize: "0.75rem" }}>
+                  {item.job_name ?? item.cust_ref ?? "—"} · {item.description ?? ""}
+                </div>
+              </div>
+              <button type="button" className={styles.creditBtn} onClick={() => void markCredit(item, false)}>
+                Done
+              </button>
+            </div>
+          ))
+        )}
+      </section>
     </div>
   );
 }

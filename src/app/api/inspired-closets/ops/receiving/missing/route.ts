@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import {
   PALLET_MISSING_THRESHOLD,
+  SHIPMENT_ITEM_SELECT,
+  SHIPMENT_ITEM_SELECT_LEGACY,
+  missingNeedsCreditColumn,
   missingReceivingTable,
   shipmentRollup,
   type ShipmentItemRow,
@@ -18,15 +21,24 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("ic_shipment_items")
-    .select(
-      "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, container_id, source_page, status, vendor_sku, job_id, part_id, note",
-    )
+    .select(SHIPMENT_ITEM_SELECT)
     .in("status", ["expected", "missing"])
     .order("cust_ref");
 
   if (shipmentId) query = query.eq("shipment_id", shipmentId);
 
-  const { data, error } = await query.limit(2000);
+  let { data, error } = await query.limit(2000);
+  if (error && missingNeedsCreditColumn(error.message)) {
+    let retry = supabase
+      .from("ic_shipment_items")
+      .select(SHIPMENT_ITEM_SELECT_LEGACY)
+      .in("status", ["expected", "missing"])
+      .order("cust_ref");
+    if (shipmentId) retry = retry.eq("shipment_id", shipmentId);
+    const second = await retry.limit(2000);
+    data = (second.data ?? []).map((row) => ({ ...row, needs_credit: false }));
+    error = second.error;
+  }
   if (error) {
     if (missingReceivingTable(error.message)) {
       return NextResponse.json({ ok: true, items: [], shipments: [] });
@@ -49,9 +61,7 @@ export async function GET(request: Request) {
   if (shipmentId) {
     const { data: all } = await supabase
       .from("ic_shipment_items")
-      .select(
-        "id, shipment_id, item_number, so_number, cust_ref, job_name, project_number, description, qty, received_qty, damaged_qty, container_id, source_page, status, vendor_sku, job_id, part_id, note",
-      )
+      .select(SHIPMENT_ITEM_SELECT)
       .eq("shipment_id", shipmentId);
     const stats = shipmentRollup((all ?? []) as ShipmentItemRow[]);
     return NextResponse.json({

@@ -27,6 +27,41 @@ export function stageLabel(stage: string): string {
   return JOB_STAGES.find((item) => item.id === stage)?.label ?? stage;
 }
 
+/** Frank's whiteboard colors: green new / blue go-back / red service. */
+export const JOB_KINDS = [
+  { id: "new_install", label: "New job", tag: null as "SVC" | "G/B" | null },
+  { id: "go_back", label: "Go-back", tag: "G/B" as const },
+  { id: "service", label: "Service", tag: "SVC" as const },
+] as const;
+
+export type IcJobKind = (typeof JOB_KINDS)[number]["id"];
+
+export function isJobKind(value: unknown): value is IcJobKind {
+  return value === "new_install" || value === "go_back" || value === "service";
+}
+
+export function resolveJobKind(job: {
+  job_kind?: unknown;
+  notes?: unknown;
+  stage?: unknown;
+}): IcJobKind {
+  if (isJobKind(job.job_kind)) return job.job_kind;
+  const notes = String(job.notes ?? "").toLowerCase();
+  if (/\b(svc|service)\b/.test(notes) || job.stage === "service") return "service";
+  if (/\b(g\/?b|go[\s-]?back)\b/.test(notes)) return "go_back";
+  return "new_install";
+}
+
+export function jobKindTag(kind: IcJobKind): "SVC" | "G/B" | null {
+  if (kind === "service") return "SVC";
+  if (kind === "go_back") return "G/B";
+  return null;
+}
+
+export function jobKindLabel(kind: IcJobKind): string {
+  return JOB_KINDS.find((item) => item.id === kind)?.label ?? "New job";
+}
+
 type PayrollSeedRow = {
   id: string;
   designer_id: string;

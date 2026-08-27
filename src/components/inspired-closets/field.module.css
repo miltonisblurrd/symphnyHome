@@ -492,3 +492,112 @@
   padding: 2rem 1rem;
   font-size: 0.9rem;
 }
+
+.boardLegend {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin: -0.15rem 0 0.75rem;
+}
+
+.legendDot {
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.crewRow {
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.75rem 0.75rem 0.85rem;
+  margin-bottom: 0.65rem;
+}
+
+.crewRowMine {
+  border-color: #111;
+  box-shadow: 0 0 0 2px rgba(17, 17, 17, 0.08);
+}
+
+.crewName {
+  margin: 0 0 0.55rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.crewDays {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  scroll-snap-type: x proximity;
+}
+
+.crewDay {
+  flex: 0 0 5.6rem;
+  min-height: 4.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.35rem;
+  background: #faf7f4;
+  scroll-snap-align: start;
+}
+
+.crewDayHead {
+  margin: 0 0 0.3rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.crewEmpty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 0.35rem 0;
+}
+
+.boardChip {
+  display: grid;
+  gap: 0.08rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0.35rem;
+  padding: 0.32rem 0.35rem;
+  margin-bottom: 0.28rem;
+  cursor: pointer;
+  font-family: inherit;
+  color: #102010;
+}
+
+.boardChip strong {
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.boardChip span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.chipNew {
+  background: #8fbf88;
+  color: #102010;
+}
+
+.chipGoBack {
+  background: #7eadd9;
+  color: #10243a;
+}
+
+.chipService {
+  background: #d97a7a;
+  color: #3a1010;
+}

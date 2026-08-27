@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
+import { jobKindTag, resolveJobKind } from "@/lib/inspired-closets-ops-jobs";
 import { suggestInstallSchedule } from "@/lib/inspired-closets-ops-schedule";
 
 export const runtime = "nodejs";
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
   const full = await supabase
     .from("ic_jobs")
     .select(
-      "id, client_id, stage, install_date, receive_date, crew_size, estimated_install_days, contract_cents, notes",
+      "id, client_id, stage, install_date, receive_date, crew_size, estimated_install_days, contract_cents, notes, job_kind",
     )
     .is("deleted_at", null)
     .limit(2000);
@@ -65,13 +66,8 @@ export async function POST(request: Request) {
   const forSolver = jobs
     .filter((job) => !["closed", "cancelled"].includes(String(job.stage)))
     .map((job) => {
-      const notes = String(job.notes ?? "").toLowerCase();
-      const serviceTag =
-        /\b(svc|service)\b/.test(notes) || job.stage === "service"
-          ? ("SVC" as const)
-          : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
-            ? ("G/B" as const)
-            : null;
+      const kind = resolveJobKind(job);
+      const serviceTag = jobKindTag(kind);
       const installDate = typeof job.install_date === "string" ? job.install_date : null;
       const inWindow = Boolean(installDate && installDate >= from && installDate < to);
       return {

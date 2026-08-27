@@ -264,6 +264,10 @@ export const icJobs = pgTable("ic_jobs", {
   crewSize: integer("crew_size").default(2),
   /** Whole days on the calendar. */
   estimatedInstallDays: integer("estimated_install_days").default(1),
+  /** Whiteboard: new_install (green) | go_back (blue) | service (red). */
+  jobKind: text("job_kind").default("new_install"),
+  /** Time window as written on the board, e.g. 8-9 or 10-11am. */
+  visitWindow: text("visit_window"),
   notes: text("notes"),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
@@ -673,6 +677,8 @@ export const icShipmentItems = pgTable("ic_shipment_items", {
   jobId: uuid("job_id").references(() => icJobs.id),
   partId: uuid("part_id").references(() => icParts.id),
   note: text("note"),
+  /** Blue-tape credit: still usable, file vendor credit after the truck. */
+  needsCredit: boolean("needs_credit").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -17,6 +17,7 @@ import {
 } from "@/lib/inspired-closets-google-calendar";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
+import { isJobKind, jobKindTag, resolveJobKind } from "@/lib/inspired-closets-ops-jobs";
 
 export const runtime = "nodejs";
 
@@ -145,13 +146,7 @@ export async function GET(request: Request) {
   }
 
   function mapJob(job: Record<string, unknown>) {
-    const notes = String(job.notes ?? "").toLowerCase();
-    const serviceTag =
-      /\b(svc|service)\b/.test(notes) || job.stage === "service"
-        ? "SVC"
-        : /\b(g\/?b|go[\s-]?back)\b/.test(notes)
-          ? "G/B"
-          : null;
+    const kind = resolveJobKind(job);
     const clientId = job.client_id as string | null;
     const designerIdVal = job.designer_id as string | null;
     const installerIdVal = job.installer_id as string | null;
@@ -159,12 +154,14 @@ export async function GET(request: Request) {
     const jobId = job.id as string;
     return {
       ...job,
+      job_kind: kind,
+      visit_window: (job.visit_window as string | null) ?? null,
       materials_cents: Math.max(0, materialsByJob.get(jobId) ?? 0),
       client: clientId ? clientsById.get(clientId) ?? null : null,
       designer: designerIdVal ? staffById.get(designerIdVal) ?? null : null,
       installer: installerIdVal ? staffById.get(installerIdVal) ?? null : null,
       jobCheckOwner: ownerId ? staffById.get(ownerId) ?? null : null,
-      serviceTag,
+      serviceTag: jobKindTag(kind),
     };
   }
 
@@ -235,6 +232,11 @@ export async function POST(request: Request) {
   const installerId = typeof body.installer_id === "string" ? body.installer_id : null;
   const notes = typeof body.notes === "string" ? body.notes : null;
   const communityRef = typeof body.community_ref === "string" ? body.community_ref : null;
+  const jobKind = isJobKind(body.job_kind) ? body.job_kind : null;
+  const visitWindow =
+    typeof body.visit_window === "string" && body.visit_window.trim()
+      ? body.visit_window.trim()
+      : null;
 
   if (kind === "install") {
     if (!jobId) {
@@ -308,17 +310,22 @@ export async function POST(request: Request) {
 
   if (jobId && kind === "install") {
     const installDate = scheduledAt.slice(0, 10);
-    await supabase
-      .from("ic_jobs")
-      .update({
-        stage: "install_scheduled",
-        install_date: installDate,
-        installer_id: installerId,
-        ...(designerId ? { designer_id: designerId } : {}),
-        updated_at: new Date().toISOString(),
-        updated_by: actor,
-      })
-      .eq("id", jobId);
+    const jobUpdate: Record<string, unknown> = {
+      stage: "install_scheduled",
+      install_date: installDate,
+      installer_id: installerId,
+      updated_at: new Date().toISOString(),
+      updated_by: actor,
+    };
+    if (designerId) jobUpdate.designer_id = designerId;
+    if (jobKind) jobUpdate.job_kind = jobKind;
+    if (visitWindow !== null) jobUpdate.visit_window = visitWindow;
+    const jobWrite = await supabase.from("ic_jobs").update(jobUpdate).eq("id", jobId);
+    if (jobWrite.error && /job_kind|visit_window|column|schema cache/i.test(jobWrite.error.message)) {
+      delete jobUpdate.job_kind;
+      delete jobUpdate.visit_window;
+      await supabase.from("ic_jobs").update(jobUpdate).eq("id", jobId);
+    }
 
     const [{ data: jobRow }, { data: installerRow }] = await Promise.all([
       supabase

@@ -3,6 +3,12 @@
 import { useMemo, useState } from "react";
 import styles from "./install-calendar.module.css";
 import OpsJobCheckModal from "@/components/inspired-closets/OpsJobCheckModal";
+import {
+  JOB_KINDS,
+  jobKindTag,
+  resolveJobKind,
+  type IcJobKind,
+} from "@/lib/inspired-closets-ops-jobs";
 
 export type CalStaff = { id: string; name: string; role: string };
 export type CalClient = {
@@ -20,6 +26,8 @@ export type CalInstallJob = {
   contract_cents?: number;
   notes?: string | null;
   serviceTag?: "SVC" | "G/B" | null;
+  job_kind?: IcJobKind | null;
+  visit_window?: string | null;
   lead_id?: string | null;
   studio_ref?: string | null;
   community_ref?: string | null;
@@ -90,6 +98,8 @@ type EventCard = {
   installerName: string;
   installerId: string | null;
   tag: "SVC" | "G/B" | null;
+  kind: IcJobKind;
+  window: string | null;
   assigned: boolean;
   notes: string | null;
   soldDate: string | null;
@@ -124,6 +134,8 @@ export default function OpsInstallCalendar({
     scheduledAt: string;
     installerId: string | null;
     acknowledgeNoReceiveDate?: boolean;
+    jobKind?: IcJobKind;
+    visitWindow?: string | null;
   }) => Promise<void>;
   onAdvanceStage: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   onLogInstallConfirm?: (jobId: string) => Promise<void>;
@@ -132,7 +144,7 @@ export default function OpsInstallCalendar({
   onWeekChange: (iso: string) => void;
 }) {
   const weekStart = useMemo(() => new Date(weekStartIso), [weekStartIso]);
-  const [view, setView] = useState<"calendar" | "list">("calendar");
+  const [view, setView] = useState<"calendar" | "board" | "list">("board");
   const [showQueues, setShowQueues] = useState(false);
   const [showAssigned, setShowAssigned] = useState(true);
   const [showUnassigned, setShowUnassigned] = useState(true);
@@ -143,6 +155,8 @@ export default function OpsInstallCalendar({
   const [scheduleJob, setScheduleJob] = useState<CalInstallJob | null>(null);
   const [scheduleAt, setScheduleAt] = useState("");
   const [scheduleInstaller, setScheduleInstaller] = useState("");
+  const [scheduleKind, setScheduleKind] = useState<IcJobKind>("new_install");
+  const [scheduleWindow, setScheduleWindow] = useState("");
   const [receiveDraft, setReceiveDraft] = useState<Record<string, string>>({});
   const [scheduleWarn, setScheduleWarn] = useState<string | null>(null);
   const [jobCheckJob, setJobCheckJob] = useState<CalInstallJob | null>(null);
@@ -181,7 +195,8 @@ export default function OpsInstallCalendar({
 
   const events = useMemo(() => {
     const cards: EventCard[] = jobs.map((job) => {
-      const tag = job.serviceTag ?? null;
+      const kind = resolveJobKind(job);
+      const tag = job.serviceTag ?? jobKindTag(kind);
       const base = lastName(job.client?.name);
       const title = tag ? `${tag} ${base}` : base;
       const assigned = Boolean(job.installer?.id);
@@ -195,6 +210,8 @@ export default function OpsInstallCalendar({
         installerName: job.installer?.name?.toUpperCase() ?? "UNASSIGNED",
         installerId: job.installer?.id ?? null,
         tag,
+        kind,
+        window: job.visit_window ?? null,
         assigned,
         notes: job.notes ?? null,
         soldDate: job.sold_date ?? null,
@@ -244,10 +261,14 @@ export default function OpsInstallCalendar({
       scheduledAt: when.toISOString(),
       installerId: scheduleInstaller || null,
       acknowledgeNoReceiveDate: !receive,
+      jobKind: scheduleKind,
+      visitWindow: scheduleWindow.trim() || null,
     });
     setScheduleJob(null);
     setScheduleAt("");
     setScheduleInstaller("");
+    setScheduleKind("new_install");
+    setScheduleWindow("");
   }
 
   return (
@@ -365,6 +386,13 @@ export default function OpsInstallCalendar({
               <h2 className={styles.range}>{rangeLabel}</h2>
             </div>
             <div className={styles.viewToggle}>
+              <button
+                type="button"
+                className={view === "board" ? styles.viewOn : styles.viewOff}
+                onClick={() => setView("board")}
+              >
+                Crew board
+              </button>
               <button
                 type="button"
                 className={view === "calendar" ? styles.viewOn : styles.viewOff}
@@ -498,7 +526,75 @@ export default function OpsInstallCalendar({
             </section>
           ) : null}
 
-          {view === "calendar" ? (
+          {view === "board" ? (
+            <>
+              <div className={styles.boardLegend}>
+                <span className={styles.legendSwatch}>
+                  <i style={{ background: "var(--newJob)" }} /> New
+                </span>
+                <span className={styles.legendSwatch}>
+                  <i style={{ background: "var(--goBack)" }} /> Go-back
+                </span>
+                <span className={styles.legendSwatch}>
+                  <i style={{ background: "var(--service)" }} /> Service
+                </span>
+              </div>
+              <div className={styles.crewBoard}>
+                <div className={styles.crewGrid}>
+                  <div className={styles.crewHead}>Crew</div>
+                  {days.slice(0, 6).map((day) => (
+                    <div key={day.key} className={styles.crewHead}>
+                      {day.dow} {day.num}
+                    </div>
+                  ))}
+                  {[
+                    ...installers.map((person) => ({
+                      id: person.id,
+                      name: person.name,
+                      events: events.filter((e) => e.installerId === person.id),
+                    })),
+                    {
+                      id: "unassigned",
+                      name: "Unassigned",
+                      events: events.filter((e) => !e.installerId),
+                    },
+                  ].map((row) => (
+                    <div key={row.id} style={{ display: "contents" }}>
+                      <div className={styles.crewNameCell}>{row.name}</div>
+                      {days.slice(0, 6).map((day) => (
+                        <div key={`${row.id}-${day.key}`} className={styles.crewCell}>
+                          {row.events
+                            .filter((event) => event.date === day.key)
+                            .map((event) => (
+                              <button
+                                key={event.id}
+                                type="button"
+                                className={`${styles.card} ${
+                                  event.kind === "service"
+                                    ? styles.cardService
+                                    : event.kind === "go_back"
+                                      ? styles.cardGoBack
+                                      : styles.cardNew
+                                } ${event.assigned ? "" : styles.cardOpen}`}
+                                onClick={() => {
+                                  setSelected(event);
+                                  setAssignId(event.installerId ?? "");
+                                }}
+                              >
+                                <p className={styles.cardTitle}>{event.title}</p>
+                                {event.window ? (
+                                  <p className={styles.cardLine}>{event.window}</p>
+                                ) : null}
+                              </button>
+                            ))}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : view === "calendar" ? (
             <div className={styles.weekScroll}>
               <div className={styles.weekGrid}>
                 {days.map((day) => {
@@ -519,12 +615,12 @@ export default function OpsInstallCalendar({
                           key={event.id}
                           type="button"
                           className={`${styles.card} ${
-                            event.tag
-                              ? styles.cardSvc
-                              : event.assigned
-                                ? styles.cardAssigned
-                                : styles.cardUnassigned
-                          }`}
+                            event.kind === "service"
+                              ? styles.cardService
+                              : event.kind === "go_back"
+                                ? styles.cardGoBack
+                                : styles.cardNew
+                          } ${event.assigned ? "" : styles.cardOpen}`}
                           onClick={() => {
                             setSelected(event);
                             setAssignId(event.installerId ?? "");
@@ -539,6 +635,9 @@ export default function OpsInstallCalendar({
                           <p className={styles.cardLine}>{event.designer}</p>
                           <p className={styles.cardLine}>{event.amount}</p>
                           <p className={styles.cardLine}>{event.installerName}</p>
+                          {event.window ? (
+                            <p className={styles.cardLine}>{event.window}</p>
+                          ) : null}
                           {event.notes ? (
                             <p className={styles.cardNotes}>{event.notes}</p>
                           ) : null}
@@ -585,7 +684,7 @@ export default function OpsInstallCalendar({
                           <td>{event.designer}</td>
                           <td>{event.amount}</td>
                           <td>{event.installerName}</td>
-                          <td>{event.tag ?? "Install"}</td>
+                          <td>{event.tag ?? "New"}{event.window ? ` · ${event.window}` : ""}</td>
                         </tr>
                       ))}
                   </tbody>
@@ -718,6 +817,8 @@ export default function OpsInstallCalendar({
                           setScheduleJob(job);
                           setScheduleInstaller("");
                           setScheduleAt("");
+                          setScheduleKind(resolveJobKind(job));
+                          setScheduleWindow(job.visit_window ?? "");
                         }}
                       >
                         Schedule install
@@ -890,6 +991,29 @@ export default function OpsInstallCalendar({
                   type="datetime-local"
                   value={scheduleAt}
                   onChange={(e) => setScheduleAt(e.target.value)}
+                />
+              </label>
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Visit type</span>
+                <select
+                  className={styles.select}
+                  value={scheduleKind}
+                  onChange={(e) => setScheduleKind(e.target.value as IcJobKind)}
+                >
+                  {JOB_KINDS.map((kind) => (
+                    <option key={kind.id} value={kind.id}>
+                      {kind.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Time window</span>
+                <input
+                  className={styles.select}
+                  value={scheduleWindow}
+                  onChange={(e) => setScheduleWindow(e.target.value)}
+                  placeholder="8-9, 10-11am…"
                 />
               </label>
               <label className={styles.fieldBlock}>

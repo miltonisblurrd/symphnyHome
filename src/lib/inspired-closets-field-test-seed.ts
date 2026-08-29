@@ -99,8 +99,8 @@ async function findOrCreateJob(
     .is("deleted_at", null)
     .limit(1);
   if (existing?.[0]) {
-    const rest = { ...input };
-    delete rest.studio_ref;
+    const { studio_ref, ...rest } = input;
+    void studio_ref;
     await supabase
       .from("ic_jobs")
       .update({ ...rest, updated_at: new Date().toISOString() })

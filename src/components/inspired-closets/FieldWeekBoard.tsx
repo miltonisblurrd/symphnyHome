@@ -45,7 +45,7 @@ export default function FieldWeekBoard({
 
   return (
     <div>
-      <p className={styles.sectionTitle}>This week · the wall</p>
+      <p className={styles.sectionTitle}>Your week</p>
       <div className={styles.boardLegend} aria-hidden>
         <span className={`${styles.legendDot} ${styles.chipNew}`}>New</span>
         <span className={`${styles.legendDot} ${styles.chipGoBack}`}>Go-back</span>

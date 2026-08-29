@@ -1,10 +1,7 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import {
-  FIELD_JOB_STAGES,
-  IC_STAFF_ID_COOKIE,
-} from "@/lib/inspired-closets-ops-field";
+import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
+import { FIELD_JOB_STAGES } from "@/lib/inspired-closets-ops-field";
 import { markCompletionTenDue } from "@/lib/inspired-closets-ops-billing";
 
 export const runtime = "nodejs";
@@ -14,13 +11,17 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
 
-  const cookieStore = await cookies();
-  const installerId = cookieStore.get(IC_STAFF_ID_COOKIE)?.value;
-  if (!installerId) {
-    return NextResponse.json({ ok: false, error: "Sign in as a driver first." }, { status: 401 });
-  }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
+  const installerId = auth.installer.id;
 
   const supabase = getSupabaseAdmin();
+  const { data: crewRows } = await supabase
+    .from("ic_job_crew")
+    .select("job_id")
+    .eq("installer_id", installerId)
+    .eq("status", "approved");
+  const crewJobIds = new Set((crewRows ?? []).map((row) => row.job_id));
 
   const [{ data: jobs, error }, { data: timeEntries }, { data: clients }, { data: staff }] =
     await Promise.all([
@@ -61,6 +62,7 @@ export async function GET() {
     .filter((job) => {
       // Prefer jobs assigned to this installer; also show unassigned install-ready jobs.
       if (job.installer_id === installerId) return true;
+      if (crewJobIds.has(job.id)) return true;
       if (
         !job.installer_id &&
         (FIELD_JOB_STAGES as readonly string[]).includes(job.stage as string)
@@ -77,13 +79,13 @@ export async function GET() {
         client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
         openClock,
         timeEntries: entries,
-        mine: job.installer_id === installerId,
+        mine: job.installer_id === installerId || crewJobIds.has(job.id),
       };
     });
 
   return NextResponse.json({
     ok: true,
-    installer: staff ?? { id: installerId, name: "Driver" },
+    installer: staff ?? { id: installerId, name: auth.installer.name },
     jobs: enriched,
   });
 }
@@ -94,11 +96,9 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
 
-  const cookieStore = await cookies();
-  const installerId = cookieStore.get(IC_STAFF_ID_COOKIE)?.value;
-  if (!installerId) {
-    return NextResponse.json({ ok: false, error: "Sign in as a driver first." }, { status: 401 });
-  }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
+  const installerId = auth.installer.id;
 
   let body: Record<string, unknown>;
   try {
@@ -124,6 +124,20 @@ export async function PATCH(request: Request) {
   }
   if (!job) {
     return NextResponse.json({ ok: false, error: "Job not found." }, { status: 404 });
+  }
+
+  if (action === "notes") {
+    const fieldNotes = typeof body.field_notes === "string" ? body.field_notes : "";
+    const { data, error } = await supabase
+      .from("ic_jobs")
+      .update({ field_notes: fieldNotes, updated_at: new Date().toISOString() })
+      .eq("id", jobId)
+      .select("*")
+      .single();
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, job: data });
   }
 
   if (action === "claim") {

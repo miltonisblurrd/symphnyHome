@@ -10,13 +10,376 @@
   --ok: #1c5c2c;
   --ok-bg: #e5f4e8;
 
+  --shell-max: 78rem;
+  --shell-gutter: 1.15rem;
+
   min-height: 100dvh;
-  background:
-    radial-gradient(120% 80% at 100% 0%, rgba(130, 31, 45, 0.08), transparent 55%),
-    linear-gradient(180deg, #f7f1ec 0%, var(--ic-bone) 40%, #e9e2db 100%);
+  background: #ece7e2;
   color: var(--ink);
   font-family: "Lato", system-ui, sans-serif;
-  padding: 1rem 1rem 5.5rem;
+  padding: 0 0 2.5rem;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: rgba(130, 31, 45, 0.12);
+}
+
+.pageLogin {
+  padding: 1rem 1rem 2.5rem;
+}
+
+.shell {
+  width: 100%;
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  padding: 0 var(--shell-gutter);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin-bottom: 0;
+  background: #000;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: env(safe-area-inset-top);
+}
+
+.topbarInner {
+  width: 100%;
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  padding: 0.55rem var(--shell-gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.topbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.topbarLogo {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: grid;
+}
+
+.topbarNav {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbarNav::-webkit-scrollbar {
+  display: none;
+}
+
+.topbarLink {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.42rem 0.72rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbarLinkActive {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.topbarActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+}
+
+.menuAnchor {
+  position: relative;
+}
+
+.bellBtn {
+  position: relative;
+  width: 2.35rem;
+  height: 2.35rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.bellBtnOpen,
+.bellBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.bellDot {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--ic-red);
+  color: #fff;
+  font-size: 0.62rem;
+  display: grid;
+  place-items: center;
+}
+
+.avatarBtn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  display: grid;
+}
+
+.avatarFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.avatarPickBtn {
+  position: relative;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  flex-shrink: 0;
+  display: grid;
+}
+
+.avatarPickBtn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.avatarPickBtn:focus-visible {
+  outline: 2px solid var(--ic-red);
+  outline-offset: 3px;
+}
+
+.avatarCam {
+  position: absolute;
+  right: -0.05rem;
+  bottom: -0.05rem;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  pointer-events: none;
+}
+
+.avatarPickBtnXl .avatarCam {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
+.avatarBtn .avatar {
+  width: 2.15rem;
+  height: 2.15rem;
+  font-size: 0.72rem;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 50;
+  width: min(22rem, calc(100vw - 1.5rem));
+  max-height: min(28rem, 70vh);
+  overflow: auto;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
+  padding: 0.45rem 0;
+}
+
+.dropdownNarrow {
+  width: 12.5rem;
+}
+
+.dropdownTitle {
+  margin: 0;
+  padding: 0.35rem 0.9rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dropdownEmpty {
+  margin: 0;
+  padding: 0.7rem 0.9rem 0.9rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.dropdownItem {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  min-height: 2.75rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.75rem 0.9rem;
+  cursor: pointer;
+  color: inherit;
+  touch-action: manipulation;
+}
+
+.dropdownItem:hover {
+  background: #f6f2ee;
+}
+
+.dropdownItem strong {
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.dropdownItem span:last-child {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.body {
+  width: 100%;
+  padding: 1.15rem 0 1.5rem;
+}
+
+.bodyHome {
+  padding-bottom: 2rem;
+}
+
+.bodyMonth {
+  padding-bottom: 1.25rem;
+}
+
+.bodyJobs {
+  padding-bottom: 2rem;
+}
+
+.heroCard {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.heroCard .sectionTitle,
+.heroCard .jobMeta {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.heroName {
+  margin: 0.15rem 0 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.liveLine {
+  margin: 0.65rem 0 0;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #b7e4c7;
+}
+
+.thread {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.threadItem {
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.85rem 1rem;
+}
+
+.threadItemUnread {
+  border-color: rgba(130, 31, 45, 0.35);
+  box-shadow: 0 0 0 3px rgba(130, 31, 45, 0.06);
+}
+
+.heroCard .btnGhost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  padding: 0.85rem 1rem;
+}
+
+.meHead {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.docLink {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--ic-red);
+}
+
+@media (min-width: 481px) {
+  .quickCol,
+  .jobsListCol {
+    position: sticky;
+    top: 4.4rem;
+  }
+
+  .tabBar {
+    display: none;
+  }
 }
 
 .top {
@@ -105,6 +468,12 @@
   color: var(--muted);
 }
 
+.jobMeta a {
+  color: var(--ic-red);
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .badgeRow {
   display: flex;
   flex-wrap: wrap;
@@ -143,11 +512,13 @@
 .btnOk {
   border-radius: 0.75rem;
   padding: 0.85rem 0.75rem;
+  min-height: 2.75rem;
   font-size: 0.88rem;
   font-weight: 800;
   border: 1px solid transparent;
   cursor: pointer;
   text-align: center;
+  touch-action: manipulation;
 }
 
 .btn {
@@ -204,6 +575,7 @@
   border: 1px solid var(--line);
   border-radius: 0.65rem;
   padding: 0.75rem 0.8rem;
+  min-height: 2.75rem;
   font-size: 1rem;
   background: var(--ic-white);
   color: var(--ink);
@@ -300,6 +672,12 @@
   height: 4.25rem;
 }
 
+.avatarXl {
+  width: 6.4rem;
+  height: 6.4rem;
+  border-width: 3px;
+}
+
 .avatarFallback {
   display: grid;
   place-items: center;
@@ -311,6 +689,10 @@
 
 .avatarLg.avatarFallback {
   font-size: 1.25rem;
+}
+
+.avatarXl.avatarFallback {
+  font-size: 1.7rem;
 }
 
 .profileMain {
@@ -390,6 +772,9 @@
 }
 
 .avatarUpload {
+  border: none;
+  background: none;
+  padding: 0;
   font-size: 0.68rem;
   font-weight: 800;
   color: var(--ic-red);
@@ -398,8 +783,9 @@
   text-underline-offset: 2px;
 }
 
-.avatarUpload input {
-  display: none;
+.avatarUpload:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .tabRow {
@@ -449,26 +835,7 @@
   border-top: 1px solid var(--line);
 }
 
-.dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 0.65rem 1rem calc(0.65rem + env(safe-area-inset-bottom));
-  background: rgba(247, 241, 236, 0.92);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--line);
-  display: flex;
-  gap: 0.5rem;
-  justify-content: space-between;
-  z-index: 20;
-}
-
 .offlineBanner {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  margin: -1rem -1rem 0.85rem;
   padding: 0.55rem 1rem;
   background: #3d2b00;
   color: #ffe8a3;
@@ -487,10 +854,9 @@
 }
 
 .empty {
-  text-align: center;
   color: var(--muted);
-  padding: 2rem 1rem;
-  font-size: 0.9rem;
+  padding: 0.15rem 0 0.9rem;
+  font-size: 0.88rem;
 }
 
 .boardLegend {
@@ -512,7 +878,7 @@
   border: 1px solid var(--line);
   border-radius: 0.9rem;
   padding: 0.75rem 0.75rem 0.85rem;
-  margin-bottom: 0.65rem;
+  margin: 0 0 0.65rem;
 }
 
 .crewRowMine {
@@ -600,4 +966,939 @@
 .chipService {
   background: #d97a7a;
   color: #3a1010;
+}
+
+.homeGrid {
+  display: grid;
+  gap: 1rem;
+}
+
+.profileCol {
+  grid-area: profile;
+  min-width: 0;
+}
+
+.homeCal {
+  grid-area: cal;
+  min-width: 0;
+}
+
+.feedCol {
+  grid-area: feed;
+  min-width: 0;
+}
+
+.quickCol {
+  grid-area: quick;
+  min-width: 0;
+}
+
+.leftStack {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.dashCard {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 1.15rem;
+  padding: 1.15rem 1.15rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  min-width: 0;
+}
+
+.profileHero {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  text-align: left;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.profileCopy {
+  display: grid;
+  justify-items: start;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.profileNameLg {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.profileRole {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.statusPill {
+  margin-top: 0.35rem;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: #f1eee9;
+  color: #5a554e;
+}
+
+.statusOn {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.statList {
+  margin: 0;
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem 0 0;
+}
+
+.statList div {
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.statList div:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.statList dt {
+  margin: 0;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.statList dd {
+  margin: 0.22rem 0 0;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.statHint {
+  margin: 0.18rem 0 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.profileActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.packetBtn {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.colLabel {
+  margin: 0 0 0.85rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.feedCol .colLabel + .colLabel,
+.quickCol .colLabel + .colLabel,
+.quickCol .statList + .colLabel {
+  margin-top: 1.15rem;
+}
+
+.feedList {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.feedCard {
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.9rem 0.95rem 1rem;
+  background: #faf8f6;
+  scroll-margin-top: 5rem;
+}
+
+.feedCardUnread {
+  background: #fff;
+  border-color: rgba(130, 31, 45, 0.22);
+}
+
+.feedCardFocus {
+  box-shadow: 0 0 0 3px rgba(130, 31, 45, 0.22);
+}
+
+.feedCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.45rem;
+}
+
+.feedTag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.feedTagCompany {
+  background: var(--ic-red);
+  color: #fff;
+}
+
+.feedTagPersonal {
+  background: #1f3a5f;
+  color: #fff;
+}
+
+.feedAuthor {
+  margin: 0.5rem 0 0;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.recentList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+}
+
+.recentItem {
+  display: grid;
+  gap: 0.12rem;
+  width: 100%;
+  min-height: 2.75rem;
+  text-align: left;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  padding: 0.85rem 0;
+  cursor: pointer;
+  color: inherit;
+  touch-action: manipulation;
+}
+
+.recentList li:first-child .recentItem {
+  border-top: none;
+  padding-top: 0.15rem;
+}
+
+.recentItem strong {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.recentItem span {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.calTitle {
+  margin: 0;
+}
+
+.calHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+
+.calToggle {
+  display: inline-flex;
+  padding: 0.16rem;
+  border-radius: 999px;
+  background: #f1eee9;
+}
+
+.calToggleBtn {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.calToggleBtnOn {
+  background: #111;
+  color: #fff;
+}
+
+.calNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.calNavBtn {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.calRange {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.calWeek {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.calWeekRow {
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.5rem 0.6rem 0.55rem;
+  background: #faf8f6;
+}
+
+.calWeekLabel {
+  margin: 0 0 0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.calWeekLabel span {
+  color: var(--ic-red);
+}
+
+.calEmpty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.calJob {
+  display: grid;
+  gap: 0.08rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #8fbf88;
+  color: #102010;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  margin-top: 0.28rem;
+  cursor: pointer;
+}
+
+.calJob strong {
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.calJob span {
+  font-size: 0.66rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.calMonthJobs {
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.calDow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.15rem;
+  margin-bottom: 0.3rem;
+}
+
+.calDow span {
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.calGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.15rem;
+}
+
+.calCell {
+  min-height: 2.15rem;
+  border-radius: 0.4rem;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.12rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: #faf8f6;
+}
+
+.calCellMute {
+  opacity: 0.35;
+}
+
+.calCellPto {
+  background: #fdeae6;
+}
+
+.calToday {
+  box-shadow: inset 0 0 0 1.5px #111;
+}
+
+.calDot {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: var(--ic-red);
+}
+
+.monthPage {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 1.15rem;
+  padding: 1rem 1.1rem 1.2rem;
+  min-height: calc(100dvh - 6.25rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.monthPageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.monthPageTitle {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.monthPageDow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0;
+  padding: 0 0 0.45rem;
+}
+
+.monthPageDow span {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.monthPageGrid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: minmax(7.25rem, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: #fff;
+}
+
+.monthPageCell {
+  min-width: 0;
+  min-height: 7.25rem;
+  padding: 0.4rem 0.4rem 0.45rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.28rem;
+  background: #fff;
+}
+
+.monthPageCell:nth-child(7n) {
+  border-right: none;
+}
+
+.monthPageCellMute {
+  background: #f7f4f1;
+  color: rgba(0, 0, 0, 0.38);
+}
+
+.monthPagePto {
+  background: #fdeae6;
+}
+
+.monthPageToday {
+  box-shadow: inset 0 0 0 2px #111;
+}
+
+.monthPageNum {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.monthPageNum span {
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ic-red);
+}
+
+.monthPageJob {
+  display: grid;
+  gap: 0.04rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0.35rem;
+  padding: 0.28rem 0.35rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.monthPageJob strong {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.monthPageJob span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.monthPageMobile {
+  display: none;
+}
+
+.monthCompactGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+
+.monthCompactDay {
+  min-height: 2.75rem;
+  border: none;
+  border-radius: 0.55rem;
+  background: #faf8f6;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.12rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.monthCompactOn {
+  background: #111;
+  color: #fff;
+}
+
+.monthCompactOn .calDot {
+  background: #fff;
+}
+
+.monthAgenda {
+  margin-top: 1rem;
+}
+
+.monthAgendaPto {
+  margin: -0.35rem 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ic-red);
+}
+
+.monthAgendaJob {
+  border-top: none;
+  border-radius: 0.7rem;
+  background: #faf8f6;
+  padding: 0.85rem 0.9rem;
+  margin-bottom: 0.45rem;
+}
+
+.photoPick {
+  display: grid;
+  place-items: center;
+  margin-top: 0.75rem;
+  min-height: 3rem;
+  border-radius: 0.75rem;
+  border: 1px dashed rgba(0, 0, 0, 0.22);
+  background: #faf8f6;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.photoPick input {
+  display: none;
+}
+
+.tabBar {
+  display: none;
+}
+
+.tabBarIcon {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.jobsGrid {
+  display: grid;
+  gap: 1rem;
+}
+
+.jobsPacketCol {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  grid-area: packet;
+}
+
+.jobsListCol {
+  grid-area: list;
+  min-width: 0;
+}
+
+@media (min-width: 481px) {
+  .homeGrid {
+    grid-template-columns: minmax(16.5rem, 0.9fr) minmax(0, 1.35fr) minmax(16rem, 0.85fr);
+    grid-template-areas:
+      "profile feed quick"
+      "cal feed quick";
+    align-items: start;
+  }
+
+  .jobsGrid,
+  .jobsGridPacketFirst {
+    grid-template-columns: minmax(0, 1.7fr) minmax(17rem, 0.72fr);
+    grid-template-areas: "packet list";
+    align-items: start;
+  }
+}
+
+.packetHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.crewLine {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.jobsPastLabel {
+  margin-top: 1.15rem;
+}
+
+.jobListActive strong {
+  color: var(--ic-red);
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1.15rem;
+  background: rgba(0, 0, 0, 0.46);
+}
+
+.modalCard {
+  width: min(28rem, 100%);
+  max-height: min(88vh, 52rem);
+  overflow: auto;
+  background: #fff;
+  border-radius: 1.15rem;
+  padding: 1.15rem 1.2rem 1.3rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.2);
+}
+
+.modalWide {
+  width: min(46rem, 100%);
+}
+
+.modalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.modalClose {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  min-height: 2.75rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex: 0 0 auto;
+  touch-action: manipulation;
+}
+
+.modalCrew {
+  margin-bottom: 0.65rem;
+}
+
+@media (max-width: 480px) {
+  .homeGrid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "profile"
+      "quick"
+      "cal"
+      "feed";
+  }
+
+  .jobsGrid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "list"
+      "packet";
+  }
+
+  .jobsGridPacketFirst {
+    grid-template-areas:
+      "packet"
+      "list";
+  }
+
+  .page {
+    --shell-gutter: 0.85rem;
+    padding-bottom: 0;
+  }
+
+  .topbarNav {
+    display: none;
+  }
+
+  .topbarInner {
+    padding: 0.45rem var(--shell-gutter);
+  }
+
+  .bellBtn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .avatarBtn .avatar {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 0.78rem;
+  }
+
+  .dropdown {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 3.65rem);
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: min(70dvh, 28rem);
+  }
+
+  .dropdownNarrow {
+    left: auto;
+    width: 14.5rem;
+  }
+
+  .body {
+    padding: 0.85rem 0 calc(5.4rem + env(safe-area-inset-bottom));
+  }
+
+  .dashCard {
+    padding: 1rem 0.95rem 1.05rem;
+    border-radius: 1rem;
+  }
+
+  .profileCol .avatarXl {
+    width: 4.4rem;
+    height: 4.4rem;
+  }
+
+  .profileCol .avatarXl.avatarFallback {
+    font-size: 1.2rem;
+  }
+
+  .profileNameLg {
+    font-size: 1.05rem;
+  }
+
+  .profileStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding-top: 0.85rem;
+  }
+
+  .profileStats div,
+  .profileStats div:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .profileStats dd {
+    font-size: 0.86rem;
+  }
+
+  .profileActions {
+    gap: 0.45rem;
+  }
+
+  .packetHead {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .packetHead .btnGhost {
+    width: 100%;
+  }
+
+  .twoCol {
+    grid-template-columns: 1fr;
+  }
+
+  .calToggleBtn {
+    min-height: 2.1rem;
+    padding: 0.35rem 0.75rem;
+  }
+
+  .feedCardTop {
+    flex-wrap: wrap;
+  }
+
+  .monthPage {
+    padding: 0.85rem 0.85rem 1rem;
+    min-height: 0;
+  }
+
+  .monthPageTitle {
+    font-size: 1.15rem;
+  }
+
+  .monthPageDesktop {
+    display: none;
+  }
+
+  .monthPageMobile {
+    display: block;
+  }
+
+  .monthPageDow span {
+    font-size: 0.62rem;
+  }
+
+  .modalBackdrop {
+    align-items: end;
+    place-items: end center;
+    padding: 0;
+  }
+
+  .modalCard,
+  .modalWide {
+    width: 100%;
+    max-height: min(92dvh, 52rem);
+    border-radius: 1.15rem 1.15rem 0 0;
+    padding: 1.1rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom));
+  }
+
+  .tabBar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    background: #000;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 0.28rem 0.35rem calc(0.28rem + env(safe-area-inset-bottom));
+  }
+
+  .tabBarBtn {
+    display: grid;
+    justify-items: center;
+    gap: 0.2rem;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.42rem 0.2rem 0.3rem;
+    min-height: 3.35rem;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .tabBarBtnOn {
+    color: #fff;
+  }
+
+  .tabBarIcon {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
 }

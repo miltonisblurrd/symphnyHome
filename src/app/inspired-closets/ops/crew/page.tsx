@@ -1,9 +1,9 @@
-import OpsCrewMetricsWorkspace from "@/components/inspired-closets/OpsCrewMetricsWorkspace";
+import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Inspired Closets OS · Crew metrics",
+  title: "Inspired Closets OS · Install Workers",
 };
 
 export default function InspiredClosetsOpsCrewPage() {
-  return <OpsCrewMetricsWorkspace />;
+  redirect("/inspired-closets/ops/installers");
 }

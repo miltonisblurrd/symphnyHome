@@ -8,6 +8,7 @@ import OpsWeekCalendar, {
 } from "@/components/inspired-closets/OpsWeekCalendar";
 import type { IcJobKind } from "@/lib/inspired-closets-ops-jobs";
 import { CONSULT_OUTCOMES } from "@/lib/inspired-closets-ops-appointments";
+import { installerOffOn, eachDateInclusive } from "@/lib/inspired-closets-field-dates";
 import {
   classifyAppointment,
   classifyJob,
@@ -85,7 +86,15 @@ type ApiResponse = {
   kinds?: Option[];
   locations?: Option[];
   statuses?: Option[];
-  appointment?: Appointment;
+  timeOff?: Array<{
+    id: string;
+    installer_id: string;
+    installerName: string;
+    kind: string;
+    start_date: string;
+    end_date: string;
+    status: string;
+  }>;
 };
 
 const CALENDAR_TABS = ["all", "appointments", "installs", "showroom", "gobacks"] as const;
@@ -215,6 +224,7 @@ export default function OpsScheduleWorkspace({
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [reschedule, setReschedule] = useState<Record<string, { at: string; reason: string }>>({});
   const [weekStart, setWeekStart] = useState(() => startOfWeek());
+  const [timeOff, setTimeOff] = useState<NonNullable<ApiResponse["timeOff"]>>([]);
   const [form, setForm] = useState({
     ...EMPTY_EVENT,
     lead_id: presetLeadId ?? "",
@@ -253,6 +263,7 @@ export default function OpsScheduleWorkspace({
       setLeads(payload.leads ?? []);
       setKinds(payload.kinds ?? []);
       setLocations(payload.locations ?? []);
+      setTimeOff(payload.timeOff ?? []);
       setListUpdatedAt(new Date());
     } catch (error) {
       if (!opts?.silent) {
@@ -359,8 +370,20 @@ export default function OpsScheduleWorkspace({
         meta: [job.installer?.name, job.designer?.name].filter(Boolean).join(" · ") || undefined,
       });
     }
+    for (const row of timeOff) {
+      for (const day of eachDateInclusive(row.start_date, row.end_date)) {
+        events.push({
+          id: `off-${row.id}-${day}`,
+          lane: "timeoff",
+          date: day,
+          timeLabel: row.kind === "sick" ? "Sick" : "PTO",
+          title: row.installerName,
+          meta: "Off — not bookable",
+        });
+      }
+    }
     return events;
-  }, [appointments, uncoveredJobs]);
+  }, [appointments, timeOff, uncoveredJobs]);
 
   const visibleEvents = useMemo(() => {
     if (mainTab === "all") return calendarEvents;
@@ -737,11 +760,16 @@ export default function OpsScheduleWorkspace({
                   onChange={(e) => void assignInstaller(job.id, e.target.value || null)}
                 >
                   <option value="">Unassigned</option>
-                  {installers.map((person) => (
-                    <option key={person.id} value={person.id}>
-                      {person.name}
-                    </option>
-                  ))}
+                  {installers.map((person) => {
+                    const day = job.install_date ?? "";
+                    const off = day ? installerOffOn(person.id, day, timeOff) : false;
+                    return (
+                      <option key={person.id} value={person.id} disabled={off}>
+                        {person.name}
+                        {off ? " (PTO/sick)" : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </td>
               <td>{job.stage}</td>
@@ -959,11 +987,16 @@ export default function OpsScheduleWorkspace({
                 onChange={(e) => setForm((f) => ({ ...f, installer_id: e.target.value }))}
               >
                 <option value="">Unassigned</option>
-                {installers.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
+                {installers.map((person) => {
+                  const day = form.scheduled_at ? form.scheduled_at.slice(0, 10) : "";
+                  const off = day ? installerOffOn(person.id, day, timeOff) : false;
+                  return (
+                    <option key={person.id} value={person.id} disabled={off}>
+                      {person.name}
+                      {off ? " (PTO/sick)" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             {form.kind === "install" ? (

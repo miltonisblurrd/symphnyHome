@@ -1,9 +1,5 @@
-import FieldApp from "@/components/inspired-closets/FieldApp";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Inspired Closets OS · Field",
-};
-
-export default function InspiredClosetsFieldPage() {
-  return <FieldApp />;
+export default function InspiredClosetsFieldRedirectPage() {
+  redirect("/inspired-closets/installers");
 }

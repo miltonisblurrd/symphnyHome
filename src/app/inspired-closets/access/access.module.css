@@ -12,7 +12,7 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 1.25rem;
+  padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
   background: var(--ic-bone);
   font-family: var(--font-gavin-sans), "Lato", system-ui, sans-serif;
   color: var(--ink);
@@ -120,6 +120,29 @@
 }
 
 .button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.buttonGhost {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--ic-white);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 2.75rem;
+}
+
+.buttonGhost:hover:not(:disabled) {
+  border-color: rgba(0, 0, 0, 0.22);
+}
+
+.buttonGhost:disabled {
   opacity: 0.65;
   cursor: not-allowed;
 }

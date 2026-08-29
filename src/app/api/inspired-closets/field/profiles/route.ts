@@ -1,7 +1,6 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
 
 export const runtime = "nodejs";
 
@@ -31,13 +30,14 @@ function initials(name: string): string {
     .join("");
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   if (!isDbConfigured()) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
 
-  const { searchParams } = new URL(request.url);
-  const staffId = searchParams.get("id");
+  const staffId = auth.installer.id;
   const supabase = getSupabaseAdmin();
 
   let staffQuery = supabase
@@ -146,11 +146,9 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
 
-  const cookieStore = await cookies();
-  const actorId = cookieStore.get(IC_STAFF_ID_COOKIE)?.value;
-  if (!actorId) {
-    return NextResponse.json({ ok: false, error: "Sign in first." }, { status: 401 });
-  }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
+  const actorId = auth.installer.id;
 
   let body: Record<string, unknown>;
   try {
@@ -196,19 +194,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
 
-  const cookieStore = await cookies();
-  const actorId = cookieStore.get(IC_STAFF_ID_COOKIE)?.value;
-  if (!actorId) {
-    return NextResponse.json({ ok: false, error: "Sign in first." }, { status: 401 });
-  }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
+  const actorId = auth.installer.id;
 
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ ok: false, error: "file is required." }, { status: 400 });
   }
+  if (file.size > 8 * 1024 * 1024) {
+    return NextResponse.json({ ok: false, error: "Keep the photo under 8 MB." }, { status: 400 });
+  }
+  if (file.type && !file.type.startsWith("image/")) {
+    return NextResponse.json({ ok: false, error: "Choose a photo." }, { status: 400 });
+  }
 
+  const allowed = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  if (!allowed.has(ext)) {
+    return NextResponse.json({ ok: false, error: "Use a JPG, PNG, or HEIC photo." }, { status: 400 });
+  }
   const path = `${actorId}/${Date.now()}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
   const supabase = getSupabaseAdmin();

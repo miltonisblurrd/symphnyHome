@@ -196,6 +196,7 @@ export async function GET(request: Request) {
 
   const installJobs = (jobsResult.data ?? [])
     .filter((job) => {
+      if (job.community_ref === "FIELD-TEST") return false;
       if (designerId && job.designer_id !== designerId) return false;
       // Date-only bounds: from inclusive, to exclusive (weekStart + 7 days).
       if (from && job.install_date && job.install_date < from.slice(0, 10)) return false;
@@ -212,6 +213,17 @@ export async function GET(request: Request) {
     .filter((job) => !designerId || job.designer_id === designerId)
     .map((job) => mapJob(job as Record<string, unknown>));
 
+  const timeOffResult = await supabase
+    .from("ic_time_off")
+    .select("id, installer_id, kind, start_date, end_date, status")
+    .eq("status", "approved")
+    .limit(500);
+
+  const timeOff = (timeOffResult.error ? [] : timeOffResult.data ?? []).map((row) => ({
+    ...row,
+    installerName: staffById.get(row.installer_id)?.name ?? "Installer",
+  }));
+
   return NextResponse.json({
     ok: true,
     kinds: APPOINTMENT_KINDS,
@@ -226,6 +238,7 @@ export async function GET(request: Request) {
     clients: clientsResult.data ?? [],
     leads,
     googleCalendar: getGoogleCalendarStatus(),
+    timeOff,
   });
 }
 

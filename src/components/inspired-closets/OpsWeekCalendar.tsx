@@ -6,7 +6,7 @@ import styles from "./ops-payroll.module.css";
 
 export type WeekCalEvent = {
   id: string;
-  lane: CalendarLane;
+  lane: CalendarLane | "timeoff";
   date: string;
   timeLabel: string;
   title: string;
@@ -26,11 +26,12 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-const LANE_CLASS: Record<CalendarLane, string> = {
+const LANE_CLASS: Record<CalendarLane | "timeoff", string> = {
   appointment: styles.calChipAppointment,
   install: styles.calChipInstall,
   showroom: styles.calChipShowroom,
   goback: styles.calChipGoback,
+  timeoff: styles.calChipTimeoff,
 };
 
 export default function OpsWeekCalendar({
@@ -86,6 +87,7 @@ export default function OpsWeekCalendar({
               {lane.label}
             </span>
           ))}
+          <span className={`${styles.calLegendChip} ${styles.calChipTimeoff}`}>PTO / sick</span>
         </div>
         <button
           type="button"

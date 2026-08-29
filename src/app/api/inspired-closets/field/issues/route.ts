@@ -1,7 +1,6 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
 
 export const runtime = "nodejs";
 
@@ -9,6 +8,8 @@ export async function GET(request: Request) {
   if (!isDbConfigured()) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
 
   const jobId = new URL(request.url).searchParams.get("jobId");
   const supabase = getSupabaseAdmin();
@@ -31,11 +32,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
 
-  const cookieStore = await cookies();
-  const installerId = cookieStore.get(IC_STAFF_ID_COOKIE)?.value;
-  if (!installerId) {
-    return NextResponse.json({ ok: false, error: "Sign in as a driver first." }, { status: 401 });
-  }
+  const auth = await requireFieldInstaller();
+  if (!auth.ok) return auth.response;
+  const installerId = auth.installer.id;
 
   let body: Record<string, unknown>;
   try {

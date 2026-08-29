@@ -75,8 +75,15 @@
 }
 
 .logoPlaqueCompact {
-  min-height: 2.8rem;
-  padding: 0.45rem 0.55rem;
+  width: auto;
+  min-height: 0;
+  padding: 0.32rem 0.4rem;
+  flex: 0 0 auto;
+}
+
+.logoPlaqueCompact .logoImage {
+  width: 2.4rem;
+  max-height: 2.2rem;
 }
 
 .logoImage {

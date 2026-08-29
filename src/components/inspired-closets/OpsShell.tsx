@@ -29,8 +29,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
       { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▣" },
-      { href: "/inspired-closets/ops/crew", label: "Crew", icon: "◎" },
-      { href: "/inspired-closets/field", label: "Field app", icon: "◦" },
+      { href: "/inspired-closets/ops/installers", label: "Install Workers", icon: "◎" },
     ],
   },
   {
@@ -55,6 +54,12 @@ function isActive(pathname: string, href: string): boolean {
     return (
       pathname.startsWith("/inspired-closets/ops/projects") ||
       pathname.startsWith("/inspired-closets/ops/jobs")
+    );
+  }
+  if (href === "/inspired-closets/ops/installers") {
+    return (
+      pathname.startsWith("/inspired-closets/ops/installers") ||
+      pathname.startsWith("/inspired-closets/ops/crew")
     );
   }
   if (href === "/inspired-closets/ops/inventory") {

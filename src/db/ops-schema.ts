@@ -71,6 +71,8 @@ export const icStaff = pgTable("ic_staff", {
   active: boolean("active").notNull().default(true),
   /** Legacy identifier, e.g. payroll workbook tab name ("REB 26"). */
   workbookTab: text("workbook_tab"),
+  /** Field app login. Never returned to the client. */
+  passwordHash: text("password_hash"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -300,6 +302,7 @@ export const icJobs = pgTable("ic_jobs", {
   proposalPath: text("proposal_path"),
   proposalFilename: text("proposal_filename"),
   notes: text("notes"),
+  fieldNotes: text("field_notes"),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
   updatedBy: uuid("updated_by").references(() => icStaff.id),
@@ -651,6 +654,95 @@ export type IcStockMovement = typeof icStockMovements.$inferSelect;
 export type IcJobMaterial = typeof icJobMaterials.$inferSelect;
 export type IcTimeEntry = typeof icTimeEntries.$inferSelect;
 export type IcJobMedia = typeof icJobMedia.$inferSelect;
+
+export const icStaffPay = pgTable("ic_staff_pay", {
+  staffId: uuid("staff_id")
+    .primaryKey()
+    .references(() => icStaff.id),
+  classification: text("classification"),
+  lastPayCents: integer("last_pay_cents").notNull().default(0),
+  lastPayDate: date("last_pay_date"),
+  nextPayDate: date("next_pay_date"),
+  bankLast4: text("bank_last4"),
+  routingLast4: text("routing_last4"),
+  bankStatus: text("bank_status").notNull().default("none"),
+  bankUpdatedAt: timestamp("bank_updated_at", { withTimezone: true }),
+  homeAddress: text("home_address"),
+  emergencyName: text("emergency_name"),
+  emergencyPhone: text("emergency_phone"),
+  emergencyRelation: text("emergency_relation"),
+  truckLabel: text("truck_label"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icTimeOff = pgTable("ic_time_off", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  installerId: uuid("installer_id")
+    .notNull()
+    .references(() => icStaff.id),
+  kind: text("kind").notNull().default("pto"),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  note: text("note"),
+  status: text("status").notNull().default("requested"),
+  decidedBy: uuid("decided_by").references(() => icStaff.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icFieldNotices = pgTable("ic_field_notices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  installerId: uuid("installer_id")
+    .notNull()
+    .references(() => icStaff.id),
+  kind: text("kind").notNull().default("notice"),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  relatedId: uuid("related_id"),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icCompanyUpdates = pgTable("ic_company_updates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  authorId: uuid("author_id").references(() => icStaff.id),
+  authorName: text("author_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const icJobCrew = pgTable("ic_job_crew", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id),
+  installerId: uuid("installer_id")
+    .notNull()
+    .references(() => icStaff.id),
+  status: text("status").notNull().default("requested"),
+  requestedBy: uuid("requested_by").references(() => icStaff.id),
+  decidedBy: uuid("decided_by").references(() => icStaff.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icStaffDocuments = pgTable("ic_staff_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  staffId: uuid("staff_id").references(() => icStaff.id),
+  kind: text("kind").notNull().default("other"),
+  title: text("title").notNull(),
+  publicUrl: text("public_url"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type IcStaffPay = typeof icStaffPay.$inferSelect;
+export type IcTimeOff = typeof icTimeOff.$inferSelect;
+export type IcFieldNotice = typeof icFieldNotices.$inferSelect;
+export type IcCompanyUpdate = typeof icCompanyUpdates.$inferSelect;
+export type IcJobCrew = typeof icJobCrew.$inferSelect;
+export type IcStaffDocument = typeof icStaffDocuments.$inferSelect;
 export const icShipmentStatusEnum = pgEnum("ic_shipment_status", [
   "parsing",
   "ready",

@@ -91,7 +91,9 @@ export async function GET(request: Request) {
 
   const staffById = new Map((staffResult.data ?? []).map((member) => [member.id, member]));
   const clientsById = new Map((clientsResult.data ?? []).map((client) => [client.id, client]));
-  const jobs = (jobsResult.data ?? []).map((job) => ({
+  const jobs = (jobsResult.data ?? [])
+    .filter((job) => job.community_ref !== "FIELD-TEST")
+    .map((job) => ({
     ...job,
     client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
     designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,

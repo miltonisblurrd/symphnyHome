@@ -57,10 +57,11 @@ export default function OpsRoleGate({ children }: { children: ReactNode }) {
         <p style={{ margin: 0, color: "#821f2d", fontWeight: 800, fontSize: "0.75rem" }}>
           INSPIRED CLOSETS OS
         </p>
-        <h1 style={{ margin: "0.5rem 0 0", fontSize: "1.5rem" }}>Driver mode is on</h1>
+        <h1 style={{ margin: "0.5rem 0 0", fontSize: "1.5rem" }}>An installer is signed in on this browser</h1>
         <p style={{ margin: "0.5rem 0 1.25rem", color: "rgba(0,0,0,0.6)", maxWidth: "28rem" }}>
-          You’re signed in as <strong>{driverName}</strong>. Drivers can’t open Jobs, Inventory, or
-          Payroll. Leave driver mode to use the office tools.
+          This tab thinks you’re <strong>{driverName}</strong> in Installers. Office tools stay on the
+          desk login (Gavin, Craig, Des). Clear this leftover cookie — Installers in the other tab
+          stays signed in.
         </p>
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
           <button
@@ -76,10 +77,10 @@ export default function OpsRoleGate({ children }: { children: ReactNode }) {
               cursor: "pointer",
             }}
           >
-            Leave driver mode
+            Use office tools
           </button>
           <Link
-            href="/inspired-closets/field"
+            href="/inspired-closets/installers"
             style={{
               background: "#fff",
               color: "#111",
@@ -90,7 +91,7 @@ export default function OpsRoleGate({ children }: { children: ReactNode }) {
               textDecoration: "none",
             }}
           >
-            Back to Field
+            Back to Installers
           </Link>
         </div>
       </div>

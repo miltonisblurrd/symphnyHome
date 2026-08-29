@@ -5,6 +5,7 @@ import styles from "./gavin-dashboard.module.css";
 
 type InspiredClosetsLogoProps = {
   location?: string;
+  compact?: boolean;
 };
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
@@ -14,11 +15,12 @@ const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
  */
 export default function InspiredClosetsLogo({
   location = "Inspired Closets Las Vegas",
+  compact = false,
 }: InspiredClosetsLogoProps) {
   const [failed, setFailed] = useState(false);
 
   return (
-    <div className={styles.logoPlaque}>
+    <div className={`${styles.logoPlaque} ${compact ? styles.logoPlaqueCompact : ""}`}>
       {!failed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -34,7 +36,7 @@ export default function InspiredClosetsLogo({
           <span className={styles.logoFallbackScript}>Inspired</span>
         </div>
       )}
-      <p className={styles.logoLocation}>{location}</p>
+      {compact ? null : <p className={styles.logoLocation}>{location}</p>}
     </div>
   );
 }

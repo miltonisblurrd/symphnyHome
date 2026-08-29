@@ -143,7 +143,7 @@ export default function OpsInventoryWorkspace() {
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [partForm, setPartForm] = useState({ ...EMPTY_PART });
   const [moveForm, setMoveForm] = useState({
-    type: "receive" as "receive" | "allocate" | "return" | "adjust" | "scrap" | "sell_excess",
+    type: "adjust" as "receive" | "allocate" | "return" | "adjust" | "scrap" | "sell_excess",
     qty: "",
     job_id: "",
     note: "",
@@ -176,20 +176,24 @@ export default function OpsInventoryWorkspace() {
       const params = new URLSearchParams();
       if (filter !== "all") params.set("filter", filter);
 
-      const [partsRes, jobsRes, attentionRes] = await Promise.all([
-        fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`),
-        fetch("/api/inspired-closets/ops/jobs"),
-        fetch("/api/inspired-closets/ops/inventory/attention"),
-      ]);
+      const partsReq = fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`);
+      const jobsReq = fetch("/api/inspired-closets/ops/jobs");
+      const attentionReq = fetch("/api/inspired-closets/ops/inventory/attention");
+
+      const partsRes = await partsReq;
       const partsPayload = (await partsRes.json()) as ApiResponse;
-      const jobsPayload = (await jobsRes.json()) as ApiResponse;
-      const attentionPayload = (await attentionRes.json()) as ApiResponse;
       if (!partsPayload.ok) throw new Error(partsPayload.error ?? "Failed to load parts.");
       setParts(partsPayload.parts ?? []);
       setCategories(partsPayload.categories ?? []);
       setSummary(
         partsPayload.summary ?? { totalParts: 0, lowStock: 0, excess: 0, valueCents: 0 },
       );
+      setSelectedPartId((current) => current || partsPayload.parts?.[0]?.id || "");
+      setLoading(false);
+
+      const [jobsRes, attentionRes] = await Promise.all([jobsReq, attentionReq]);
+      const jobsPayload = (await jobsRes.json()) as ApiResponse;
+      const attentionPayload = (await attentionRes.json()) as ApiResponse;
       if (jobsPayload.ok) {
         setJobs(
           (jobsPayload.jobs ?? []).filter(
@@ -198,13 +202,11 @@ export default function OpsInventoryWorkspace() {
         );
       }
       if (attentionPayload.ok) setAttention(attentionPayload.attention ?? null);
-      setSelectedPartId((current) => current || partsPayload.parts?.[0]?.id || "");
     } catch (error) {
       setNotice({
         kind: "error",
         text: error instanceof Error ? error.message : "Failed to load inventory.",
       });
-    } finally {
       setLoading(false);
     }
   }, [filter]);
@@ -954,12 +956,12 @@ export default function OpsInventoryWorkspace() {
                         style={{ marginRight: "0.35rem" }}
                         onClick={() => {
                           setSelectedPartId(part.id);
-                          setMoveForm({ type: "receive", qty: "", job_id: "", note: "" });
+                          setMoveForm({ type: "adjust", qty: "", job_id: "", note: "" });
                           setMoveModalOpen(true);
                           setDetailOpen(false);
                         }}
                       >
-                        + Receive
+                        + Qty
                       </button>
                       <button
                         type="button"
@@ -1008,8 +1010,10 @@ export default function OpsInventoryWorkspace() {
               className={styles.fieldLabel}
               style={{ gridColumn: "1 / -1", margin: 0, fontSize: "0.95rem" }}
             >
-              {moveForm.type === "receive"
-                ? `Receiving stock · ${partTitle(selectedPart)}`
+              {moveForm.type === "adjust"
+                ? `Update qty · ${partTitle(selectedPart)}`
+                : moveForm.type === "receive"
+                ? `Stock arrived · ${partTitle(selectedPart)}`
                 : moveForm.type === "allocate"
                   ? `Sending to a job · ${partTitle(selectedPart)} (${Math.max(
                       0,

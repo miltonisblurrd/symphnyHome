@@ -13,17 +13,32 @@ export type WeekCalEvent = {
   meta?: string;
 };
 
-function addDays(base: Date, days: number): Date {
-  const d = new Date(base);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
 function ymd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+}
+
+function addMonths(d: Date, months: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + months, 1, 0, 0, 0, 0);
+}
+
+function monthGrid(monthStart: Date): Date[] {
+  const first = startOfMonth(monthStart);
+  const weekday = first.getDay();
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() + mondayOffset);
+  return Array.from({ length: 42 }, (_, i) => {
+    const day = new Date(gridStart);
+    day.setDate(gridStart.getDate() + i);
+    return day;
+  });
 }
 
 const LANE_CLASS: Record<CalendarLane | "timeoff", string> = {
@@ -43,8 +58,8 @@ export default function OpsWeekCalendar({
   weekStartIso: string;
   onWeekChange: (iso: string) => void;
 }) {
-  const weekStart = useMemo(() => new Date(weekStartIso), [weekStartIso]);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const monthStart = useMemo(() => startOfMonth(new Date(weekStartIso)), [weekStartIso]);
+  const days = useMemo(() => monthGrid(monthStart), [monthStart]);
   const byDay = useMemo(() => {
     const map = new Map<string, WeekCalEvent[]>();
     for (const event of events) {
@@ -58,8 +73,8 @@ export default function OpsWeekCalendar({
     return map;
   }, [events]);
 
-  const end = addDays(weekStart, 6);
-  const range = `${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const range = monthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const monthIndex = monthStart.getMonth();
 
   return (
     <div className={styles.panel} style={{ marginBottom: "1rem" }}>
@@ -68,7 +83,7 @@ export default function OpsWeekCalendar({
           <button
             type="button"
             className={styles.buttonGhost}
-            onClick={() => onWeekChange(addDays(weekStart, -7).toISOString())}
+            onClick={() => onWeekChange(addMonths(monthStart, -1).toISOString())}
           >
             ‹
           </button>
@@ -76,7 +91,7 @@ export default function OpsWeekCalendar({
           <button
             type="button"
             className={styles.buttonGhost}
-            onClick={() => onWeekChange(addDays(weekStart, 7).toISOString())}
+            onClick={() => onWeekChange(addMonths(monthStart, 1).toISOString())}
           >
             ›
           </button>
@@ -92,20 +107,30 @@ export default function OpsWeekCalendar({
         <button
           type="button"
           className={styles.buttonGhost}
-          onClick={() => onWeekChange(startOfWeekIso())}
+          onClick={() => onWeekChange(startOfMonth(new Date()).toISOString())}
         >
-          This week
+          This month
         </button>
       </div>
       <div className={styles.calWeekScroll}>
         <div className={styles.calWeekGrid}>
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
+            <p key={label} className={styles.calMonthDow}>
+              {label}
+            </p>
+          ))}
           {days.map((day) => {
             const key = ymd(day);
             const items = byDay.get(key) ?? [];
+            const inMonth = day.getMonth() === monthIndex;
             return (
-              <div key={key} className={styles.calWeekDay}>
+              <div
+                key={key}
+                className={`${styles.calWeekDay} ${styles.calMonthDay} ${
+                  inMonth ? "" : styles.calMonthDayMute
+                }`}
+              >
                 <p className={styles.calWeekDayHead}>
-                  {day.toLocaleDateString("en-US", { weekday: "short" })}{" "}
                   <strong>{day.getDate()}</strong>
                 </p>
                 {items.length === 0 ? (
@@ -126,13 +151,4 @@ export default function OpsWeekCalendar({
       </div>
     </div>
   );
-}
-
-function startOfWeekIso(): string {
-  const date = new Date();
-  const day = date.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
-  return date.toISOString();
 }

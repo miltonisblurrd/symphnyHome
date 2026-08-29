@@ -327,6 +327,22 @@ a.buttonGhost {
   padding: 0.4rem;
 }
 
+.calMonthDow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
+
+.calMonthDay {
+  min-height: 7.5rem;
+}
+
+.calMonthDayMute {
+  opacity: 0.45;
+}
+
 .calWeekDayHead {
   margin: 0 0 0.45rem;
   font-size: 0.72rem;

@@ -118,23 +118,23 @@ const TAB_CLASS: Record<CalendarTab, string> = {
 const TAB_COPY: Record<CalendarTab, { label: string; subtitle: string }> = {
   all: {
     label: "All",
-    subtitle: "Every appointment, install, showroom visit, and go-back this week.",
+    subtitle: "Every appointment, install, showroom visit, and go-back this month.",
   },
   appointments: {
     label: "Appointments",
-    subtitle: "Design consults this week. Log the outcome after the visit so Des gets Slack.",
+    subtitle: "Design consults this month. Log the outcome after the visit so Des gets Slack.",
   },
   installs: {
     label: "Installs",
-    subtitle: "Installs this week — calendar on top, list underneath.",
+    subtitle: "Installs this month — calendar on top, list underneath.",
   },
   showroom: {
     label: "Showroom",
-    subtitle: "Showroom visits this week — calendar on top, list underneath.",
+    subtitle: "Showroom visits this month — calendar on top, list underneath.",
   },
   gobacks: {
     label: "Go-backs",
-    subtitle: "Go-backs this week — calendar on top, list underneath.",
+    subtitle: "Go-backs this month — calendar on top, list underneath.",
   },
 };
 
@@ -154,12 +154,8 @@ function isCalendarTab(value: string | null | undefined): value is CalendarTab {
   return CALENDAR_TABS.includes(value as CalendarTab);
 }
 
-function startOfWeek(d = new Date()): string {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
+function startOfMonth(d = new Date()): string {
+  const date = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
   return date.toISOString();
 }
 
@@ -223,7 +219,7 @@ export default function OpsScheduleWorkspace({
   const [eventOpen, setEventOpen] = useState(false);
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [reschedule, setReschedule] = useState<Record<string, { at: string; reason: string }>>({});
-  const [weekStart, setWeekStart] = useState(() => startOfWeek());
+  const [weekStart, setWeekStart] = useState(() => startOfMonth());
   const [timeOff, setTimeOff] = useState<NonNullable<ApiResponse["timeOff"]>>([]);
   const [form, setForm] = useState({
     ...EMPTY_EVENT,
@@ -250,7 +246,8 @@ export default function OpsScheduleWorkspace({
     if (!opts?.silent) setLoading(true);
     try {
       const from = weekStart;
-      const to = addDays(weekStart, 7).toISOString();
+      const monthCursor = new Date(weekStart);
+      const to = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1).toISOString();
       const params = new URLSearchParams({ from, to });
       const response = await fetch(`/api/inspired-closets/ops/appointments?${params.toString()}`);
       const payload = (await response.json()) as ApiResponse;
@@ -566,7 +563,7 @@ export default function OpsScheduleWorkspace({
 
   function renderAppointmentTable(rows: Appointment[]) {
     if (rows.length === 0) {
-      return <p className={styles.empty}>Nothing this week.</p>;
+      return <p className={styles.empty}>Nothing this month.</p>;
     }
     return (
       <table className={styles.table} style={{ minWidth: "48rem" }}>
@@ -851,7 +848,7 @@ export default function OpsScheduleWorkspace({
           {mainTab === "appointments" ? (
             <div className={styles.panel}>
               <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-                Appointments this week
+                Appointments this month
               </p>
               {renderAppointmentTable(appointmentLaneAppts)}
             </div>
@@ -860,16 +857,16 @@ export default function OpsScheduleWorkspace({
           {mainTab === "installs" ? (
             <div className={styles.panel}>
               <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-                Installs this week
+                Installs this month
               </p>
-              {renderJobishTable(installAppts, installLaneJobs, "No installs this week.", true)}
+              {renderJobishTable(installAppts, installLaneJobs, "No installs this month.", true)}
             </div>
           ) : null}
 
           {mainTab === "showroom" ? (
             <div className={styles.panel}>
               <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-                Showroom this week
+                Showroom this month
               </p>
               {renderAppointmentTable(showroomAppts)}
             </div>
@@ -878,9 +875,9 @@ export default function OpsScheduleWorkspace({
           {mainTab === "gobacks" ? (
             <div className={styles.panel}>
               <p className={styles.subtitle} style={{ marginBottom: "0.75rem" }}>
-                Go-backs this week
+                Go-backs this month
               </p>
-              {renderJobishTable(gobackAppts, gobackLaneJobs, "No go-backs this week.", false)}
+              {renderJobishTable(gobackAppts, gobackLaneJobs, "No go-backs this month.", false)}
             </div>
           ) : null}
         </>

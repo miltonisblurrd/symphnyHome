@@ -180,12 +180,6 @@ function formatTimeLabel(value: string | null | undefined): string {
   return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-function addDays(iso: string, days: number): Date {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
 function eventKindLabel(row: Appointment, kinds: Option[]): string {
   if (row.location_type === "showroom") return "Showroom";
   return kinds.find((k) => k.id === row.kind)?.label ?? row.kind;

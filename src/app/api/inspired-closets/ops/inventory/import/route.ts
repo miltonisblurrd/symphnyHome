@@ -94,7 +94,7 @@ export async function POST(request: Request) {
         ok: false,
         error:
           result.errors[0] ??
-          "Nothing imported. Use the Warehouse count tab (sku, name, size, qty).",
+          "Nothing imported. Need a header row with name (item_number and color optional).",
         ...result,
         total: rows.length,
       },

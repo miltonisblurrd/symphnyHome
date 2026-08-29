@@ -17,9 +17,8 @@ export const PART_CATEGORIES = [
 ] as const;
 
 export const IMPORT_TEMPLATE_CSV = [
-  "sku,name,size,category,location,qty,unit_cost,reorder_point,vendor",
-  "UM-21,Undermount slide,21 in,drawer_slides,A12,12,8.50,4,Stow",
-  "UM-18,Undermount slide,18 in,drawer_slides,A12,0,8.50,4,Stow",
+  "name,color,size,vendor,item_number,qty",
+  "Jewelry tray,BLACK,22W X 16-5/8D,STOW,,1",
 ].join("\n");
 
 export type StockMovementInput = {
@@ -102,18 +101,18 @@ export async function applyStockMovement(input: StockMovementInput) {
 
   if (input.movementType === "reserve" && absQty > avail) {
     throw new Error(
-      `Not enough available for ${part.sku}${part.size ? ` (${part.size})` : ""}. On hand ${onHand}, reserved ${reserved}, available ${avail}, requested ${absQty}. Order it.`,
+      `Not enough available for ${partLabel(part)}. On hand ${onHand}, reserved ${reserved}, available ${avail}, requested ${absQty}. Order it.`,
     );
   }
   if (input.movementType === "unreserve" && absQty > reserved) {
-    throw new Error(`Cannot unreserve ${absQty} of ${part.sku} — only ${reserved} reserved.`);
+    throw new Error(`Cannot unreserve ${absQty} of ${partLabel(part)} — only ${reserved} reserved.`);
   }
 
   const delta = qtyDelta(input.movementType, input.qty);
   const nextQty = onHand + delta;
   if (nextQty < 0) {
     throw new Error(
-      `Not enough stock for ${part.sku}. On hand: ${onHand}, requested: ${Math.abs(delta)}.`,
+      `Not enough stock for ${partLabel(part)}. On hand: ${onHand}, requested: ${Math.abs(delta)}.`,
     );
   }
 
@@ -175,8 +174,9 @@ export async function applyStockMovement(input: StockMovementInput) {
 }
 
 export type ImportPartRow = {
-  sku: string;
+  sku?: string;
   name: string;
+  color?: string | null;
   size?: string | null;
   category?: string | null;
   location?: string | null;
@@ -185,8 +185,121 @@ export type ImportPartRow = {
   reorder_point?: number;
   vendor?: string | null;
   barcode?: string | null;
+  item_number?: string | null;
   notes?: string | null;
 };
+
+export function splitNameAndColor(name: string): { name: string; color: string | null } {
+  const trimmed = name.trim();
+  const sep = trimmed.indexOf(" · ");
+  if (sep < 0) return { name: trimmed, color: null };
+  return {
+    name: trimmed.slice(0, sep).trim(),
+    color: trimmed.slice(sep + 3).trim() || null,
+  };
+}
+
+/** Item # is digits only. Anything else — vendor codes, IC- slugs, dashes — stays blank. */
+export function realItemNumber(value: unknown): string | null {
+  const digits = String(value ?? "").trim();
+  if (!digits || !/^\d+$/.test(digits)) return null;
+  return digits;
+}
+
+export function itemNumberOf(row: ImportPartRow): string | null {
+  return realItemNumber(row.item_number) ?? realItemNumber(row.barcode);
+}
+
+/** Hidden unique key for the database. Never show this in Name or Item #. */
+export function hiddenPartSku(): string {
+  return crypto.randomUUID();
+}
+
+export function partLabel(part: {
+  name?: string | null;
+  color?: string | null;
+  size?: string | null;
+}): string {
+  return [part.name, part.color, part.size]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
+type AdminClient = ReturnType<typeof getSupabaseAdmin>;
+
+function sameText(a: unknown, b: unknown): boolean {
+  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+}
+
+async function findExistingPart(
+  supabase: AdminClient,
+  input: {
+    sku: string;
+    itemNumber: string | null;
+    name: string;
+    color: string | null;
+    size: string | null;
+    vendor: string | null;
+  },
+) {
+  if (input.itemNumber) {
+    const { data: byCode } = await supabase
+      .from("ic_parts")
+      .select("*")
+      .is("deleted_at", null)
+      .eq("barcode", input.itemNumber)
+      .maybeSingle();
+    if (byCode) return byCode;
+  }
+
+  const { data: bySku } = await supabase
+    .from("ic_parts")
+    .select("*")
+    .is("deleted_at", null)
+    .eq("sku", input.sku)
+    .maybeSingle();
+  if (bySku) return bySku;
+
+  let query = supabase.from("ic_parts").select("*").is("deleted_at", null).eq("name", input.name);
+  if (input.size) query = query.eq("size", input.size);
+  if (input.vendor) query = query.eq("vendor", input.vendor);
+  const { data: matches } = await query.limit(20);
+  const pool = (matches ?? []).filter((part) => sameText(part.color, input.color));
+  return pool.length === 1 ? pool[0] : null;
+}
+
+async function writePartRow(
+  supabase: AdminClient,
+  mode: "insert" | "update",
+  payload: Record<string, unknown>,
+  id?: string,
+) {
+  const attempts: Record<string, unknown>[] = [payload];
+  const { color: droppedColor, ...withoutColor } = payload;
+  const { size: _size, ...withoutSize } = payload;
+  const { color: _c2, size: _s2, ...withoutBoth } = payload;
+  void _size;
+  void _c2;
+  void _s2;
+  attempts.push(
+    { ...withoutColor, location: payload.location || droppedColor || null },
+    withoutSize,
+    { ...withoutBoth, location: payload.location || droppedColor || null },
+  );
+
+  let lastError: { message: string } | null = null;
+  for (const attempt of attempts) {
+    const result =
+      mode === "insert"
+        ? await supabase.from("ic_parts").insert(attempt).select("*").single()
+        : await supabase.from("ic_parts").update(attempt).eq("id", id).select("*").single();
+    if (!result.error) return result;
+    lastError = result.error;
+    if (!/column.*(color|size)/i.test(result.error.message)) break;
+  }
+  return { data: null, error: lastError };
+}
 
 export async function importParts(
   rows: ImportPartRow[],
@@ -198,30 +311,40 @@ export async function importParts(
   const errors: string[] = [];
 
   for (const raw of rows) {
-    const sku = String(raw.sku ?? "").trim().toUpperCase();
-    const name = String(raw.name ?? "").trim();
-    if (!sku || !name) {
-      errors.push(`Skipped a row without sku/name.`);
+    const rawName = String(raw.name ?? "").trim();
+    const colorFromColumn = String(raw.color ?? "").trim();
+    const split = colorFromColumn ? { name: rawName, color: colorFromColumn } : splitNameAndColor(rawName);
+    const name = split.name;
+    const color = colorFromColumn || split.color;
+    const itemNumber = itemNumberOf(raw);
+    const sku = hiddenPartSku();
+    if (!name) {
+      errors.push(`Skipped a row without a name.`);
       continue;
     }
     try {
-      const { data: existing } = await supabase
-        .from("ic_parts")
-        .select("*")
-        .eq("sku", sku)
-        .is("deleted_at", null)
-        .maybeSingle();
+      const size = raw.size?.trim() || null;
+      const vendor = raw.vendor?.trim() || null;
+      const existing = await findExistingPart(supabase, {
+        sku,
+        itemNumber,
+        name,
+        color,
+        size,
+        vendor,
+      });
 
       const qty = Math.max(0, Math.round(raw.qty ?? 0));
       const patch = {
         name,
-        size: raw.size?.trim() || null,
+        color,
+        size,
         category: raw.category?.trim() || "hardware",
         location: raw.location?.trim() || null,
         unit_cost_cents: raw.unit_cost_cents ?? 0,
         reorder_point: raw.reorder_point ?? 0,
-        vendor: raw.vendor?.trim() || null,
-        barcode: raw.barcode?.trim() || null,
+        vendor,
+        barcode: itemNumber,
         notes: raw.notes?.trim() || null,
         updated_at: new Date().toISOString(),
         ...(actorId ? { updated_by: actorId } : {}),
@@ -235,18 +358,7 @@ export async function importParts(
           qty_reserved: 0,
           created_by: actorId ?? null,
         };
-        let { data: part, error } = await supabase
-          .from("ic_parts")
-          .insert(insertPayload)
-          .select("*")
-          .single();
-        if (error && /column.*size/i.test(error.message)) {
-          const { size: _size, ...withoutSize } = insertPayload;
-          void _size;
-          const retry = await supabase.from("ic_parts").insert(withoutSize).select("*").single();
-          part = retry.data;
-          error = retry.error;
-        }
+        const { data: part, error } = await writePartRow(supabase, "insert", insertPayload);
         if (error) throw error;
         if (!part) throw new Error("Insert returned no part.");
         if (qty > 0) {
@@ -263,17 +375,8 @@ export async function importParts(
       } else {
         const onHand = existing.qty_on_hand as number;
         const delta = qty - onHand;
-        const { error } = await supabase.from("ic_parts").update(patch).eq("id", existing.id);
-        if (error) {
-          if (/column.*size/i.test(error.message)) {
-            const { size, ...withoutSize } = patch;
-            void size;
-            const retry = await supabase.from("ic_parts").update(withoutSize).eq("id", existing.id);
-            if (retry.error) throw retry.error;
-          } else {
-            throw error;
-          }
-        }
+        const { error } = await writePartRow(supabase, "update", patch, existing.id);
+        if (error) throw error;
         if (delta !== 0) {
           await applyStockMovement({
             partId: existing.id,

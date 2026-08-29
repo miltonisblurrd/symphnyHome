@@ -502,11 +502,14 @@ export const icParts = pgTable("ic_parts", {
   id: uuid("id").primaryKey().defaultRandom(),
   sku: text("sku").notNull().unique(),
   name: text("name").notNull(),
+  /** Finish / color. Lives in its own column — never concatenated onto name. */
+  color: text("color"),
   /** Size / variant so "undermount slide" is never the wrong length. */
   size: text("size"),
   category: text("category").notNull().default("hardware"),
   /** Bin / aisle / shelf label in the warehouse. */
   location: text("location"),
+  /** Vendor / Richelieu item number. Blank is allowed — do not invent one. */
   barcode: text("barcode"),
   unitCostCents: integer("unit_cost_cents").notNull().default(0),
   qtyOnHand: integer("qty_on_hand").notNull().default(0),

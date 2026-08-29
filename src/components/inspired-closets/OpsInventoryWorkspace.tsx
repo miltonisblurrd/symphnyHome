@@ -9,6 +9,7 @@ type Part = {
   id: string;
   sku: string;
   name: string;
+  color: string | null;
   size: string | null;
   category: string;
   location: string | null;
@@ -107,11 +108,11 @@ function dollarsInputToCents(value: string): number {
 }
 
 const EMPTY_PART = {
-  sku: "",
+  item_number: "",
   name: "",
+  color: "",
   size: "",
   category: "hardware",
-  location: "",
   qty: "",
   unit_cost: "",
   reorder_point: "5",
@@ -119,6 +120,10 @@ const EMPTY_PART = {
   notes: "",
   is_excess: false,
 };
+
+function partTitle(part: { name: string; color?: string | null; size?: string | null }): string {
+  return [part.name, part.color, part.size].filter(Boolean).join(" · ");
+}
 
 export default function OpsInventoryWorkspace() {
   const [parts, setParts] = useState<Part[]>([]);
@@ -147,7 +152,8 @@ export default function OpsInventoryWorkspace() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [attention, setAttention] = useState<Attention | null>(null);
   const [editForm, setEditForm] = useState({
-    location: "",
+    name: "",
+    color: "",
     barcode: "",
     unit_cost: "",
     reorder_point: "",
@@ -227,7 +233,7 @@ export default function OpsInventoryWorkspace() {
       .filter((part) => vendorFilter === "all" || (part.vendor ?? "").trim() === vendorFilter)
       .filter((part) => {
         if (!q) return true;
-        const hay = `${part.sku} ${part.name} ${part.size ?? ""} ${part.location ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
+        const hay = `${part.name} ${part.color ?? ""} ${part.size ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
         return hay.includes(q);
       })
       .sort((a, b) => {
@@ -245,7 +251,8 @@ export default function OpsInventoryWorkspace() {
   useEffect(() => {
     if (!selectedPart) return;
     setEditForm({
-      location: selectedPart.location ?? "",
+      name: selectedPart.name ?? "",
+      color: selectedPart.color ?? "",
       barcode: selectedPart.barcode ?? "",
       unit_cost: (selectedPart.unit_cost_cents / 100).toFixed(2),
       reorder_point: String(selectedPart.reorder_point),
@@ -320,11 +327,11 @@ export default function OpsInventoryWorkspace() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sku: partForm.sku,
+          item_number: partForm.item_number || null,
           name: partForm.name,
+          color: partForm.color || null,
           size: partForm.size || null,
           category: partForm.category,
-          location: partForm.location || null,
           qty_on_hand: Number(partForm.qty) || 0,
           unit_cost_cents: dollarsInputToCents(partForm.unit_cost),
           reorder_point: Number(partForm.reorder_point) || 0,
@@ -336,7 +343,7 @@ export default function OpsInventoryWorkspace() {
       const payload = (await response.json()) as ApiResponse;
       if (!payload.ok) throw new Error(payload.error ?? "Failed to add part.");
       setPartForm({ ...EMPTY_PART });
-      setNotice({ kind: "info", text: `Added ${payload.part?.sku}.` });
+      setNotice({ kind: "info", text: `Added ${payload.part?.name ?? "part"}.` });
       if (payload.part?.id) setSelectedPartId(payload.part.id);
       await load();
     } catch (error) {
@@ -381,10 +388,10 @@ export default function OpsInventoryWorkspace() {
         kind: "info",
         text:
           moveForm.type === "receive"
-            ? `Received ${qty} × ${selectedPart?.sku ?? "part"}. Stock is up to date.`
+            ? `Received ${qty} × ${selectedPart ? partTitle(selectedPart) : "part"}. Stock is up to date.`
             : moveForm.type === "allocate"
-              ? `${qty} × ${selectedPart?.sku ?? "part"} put on the job. Materials cost updated.`
-              : `${moveForm.type} recorded for ${selectedPart?.sku ?? "part"}.`,
+              ? `${qty} × ${selectedPart ? partTitle(selectedPart) : "part"} put on the job. Materials cost updated.`
+              : `${moveForm.type} recorded for ${selectedPart ? partTitle(selectedPart) : "part"}.`,
       });
       await load();
       if (selectedPartId) {
@@ -449,8 +456,11 @@ export default function OpsInventoryWorkspace() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: selectedPartId,
-          location: editForm.location || null,
-          barcode: editForm.barcode || null,
+          name: editForm.name.trim(),
+          color: editForm.color || null,
+          barcode: editForm.barcode && /^\d+$/.test(editForm.barcode.trim())
+            ? editForm.barcode.trim()
+            : null,
           unit_cost_cents: dollarsInputToCents(editForm.unit_cost),
           reorder_point: Number(editForm.reorder_point) || 0,
           vendor: editForm.vendor || null,
@@ -732,7 +742,7 @@ export default function OpsInventoryWorkspace() {
               <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
                 {attention.lowStock.slice(0, 6).map((part) => (
                   <li key={part.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {part.sku} · {part.name} · on hand {part.qty_on_hand} / reorder{" "}
+                    {part.name} · on hand {part.qty_on_hand} / reorder{" "}
                     {part.reorder_point} · {centsToDisplay(part.value_cents)}
                   </li>
                 ))}
@@ -748,7 +758,7 @@ export default function OpsInventoryWorkspace() {
                     key={`${row.part_id}-${idx}`}
                     style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}
                   >
-                    {row.sku} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
+                    {row.name} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
                   </li>
                 ))}
               </ul>
@@ -803,7 +813,8 @@ export default function OpsInventoryWorkspace() {
             Upload more counts (same sheet as the first upload)
           </p>
           <p className={styles.empty} style={{ marginTop: 0 }}>
-            Re-uploading a SKU trues up its count — it never duplicates.
+            Re-uploading the same item number — or the same name + color + size — updates the
+            count. Blank item numbers stay blank.
           </p>
           {importControls()}
         </section>
@@ -831,7 +842,7 @@ export default function OpsInventoryWorkspace() {
       <section className={styles.panel}>
         <div className={styles.summaryRow}>
           <span>
-            <span className={styles.summaryStrong}>{summary.totalParts}</span> SKUs
+            <span className={styles.summaryStrong}>{summary.totalParts}</span> parts
           </span>
           <span>
             <span className={styles.summaryStrong}>{deskSummary.vendors}</span> vendors
@@ -854,7 +865,7 @@ export default function OpsInventoryWorkspace() {
             className={styles.input}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Item #, name, vendor — 3564900, valet, Richelieu"
+            placeholder="Name, color, item #, vendor — valet, black, 3564900"
           />
         </label>
         <div className={styles.filterChips}>
@@ -889,13 +900,12 @@ export default function OpsInventoryWorkspace() {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Part</th>
+                <th>Name</th>
                 <th>Item #</th>
+                <th>Color</th>
                 <th>Vendor</th>
                 <th>Size</th>
-                <th>Bin</th>
                 <th>Available</th>
-                <th>On hand</th>
                 <th>On jobs</th>
                 <th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
@@ -904,24 +914,23 @@ export default function OpsInventoryWorkspace() {
             <tbody>
               {visibleParts.map((part) => {
                 const low = part.qty_on_hand <= part.reorder_point;
-                const avail = Math.max(0, part.qty_on_hand - part.qty_reserved);
                 return (
                   <tr
                     key={part.id}
                     className={low || part.is_excess ? styles.rowHeld : undefined}
                   >
                     <td>
-                      <strong>{part.sku}</strong>
-                      <div className={styles.mutedLine}>{part.name}</div>
+                      <strong>{part.name}</strong>
                     </td>
-                    <td className={styles.skuMono}>{part.barcode || part.sku}</td>
+                    <td className={styles.skuMono}>
+                      {part.barcode && /^\d+$/.test(part.barcode) ? part.barcode : ""}
+                    </td>
+                    <td>{part.color ?? ""}</td>
                     <td>{part.vendor ?? "—"}</td>
                     <td>{part.size ?? "—"}</td>
-                    <td>{part.location ?? "—"}</td>
-                    <td>
-                      <strong>{avail}</strong>
+                    <td className={low ? styles.marginBelow : undefined}>
+                      <strong>{part.qty_on_hand}</strong>
                     </td>
-                    <td className={low ? styles.marginBelow : undefined}>{part.qty_on_hand}</td>
                     <td>{part.qty_reserved}</td>
                     <td>
                       {low ? (
@@ -1000,14 +1009,13 @@ export default function OpsInventoryWorkspace() {
               style={{ gridColumn: "1 / -1", margin: 0, fontSize: "0.95rem" }}
             >
               {moveForm.type === "receive"
-                ? `Receiving stock · ${selectedPart.sku}`
+                ? `Receiving stock · ${partTitle(selectedPart)}`
                 : moveForm.type === "allocate"
-                  ? `Sending to a job · ${selectedPart.sku} (${Math.max(
+                  ? `Sending to a job · ${partTitle(selectedPart)} (${Math.max(
                       0,
                       selectedPart.qty_on_hand - selectedPart.qty_reserved,
                     )} available)`
-                  : `${moveForm.type} · ${selectedPart.sku}`}
-              {selectedPart.size ? ` · ${selectedPart.size}` : ""}
+                  : `${moveForm.type} · ${partTitle(selectedPart)}`}
             </p>
             <label className={styles.field}>
               <span className={styles.fieldLabel}>What happened?</span>
@@ -1097,19 +1105,20 @@ export default function OpsInventoryWorkspace() {
             <div
               className={styles.modal}
               role="dialog"
-              aria-label={`Details ${selectedPart.sku}`}
+              aria-label={`Details ${selectedPart.name}`}
               onClick={(event) => event.stopPropagation()}
             >
               <div className={styles.modalHead}>
                 <div>
-                  <h3 className={styles.modalTitle}>
-                    {selectedPart.sku}
-                    {selectedPart.size ? ` · ${selectedPart.size}` : ""}
-                  </h3>
+                  <h3 className={styles.modalTitle}>{selectedPart.name}</h3>
                   <p className={styles.modalSub}>
-                    {selectedPart.name} · available{" "}
-                    {Math.max(0, selectedPart.qty_on_hand - selectedPart.qty_reserved)} · on
-                    hand {selectedPart.qty_on_hand} · on jobs {selectedPart.qty_reserved} ·{" "}
+                    {[selectedPart.color, selectedPart.size, selectedPart.barcode]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {selectedPart.color || selectedPart.size || selectedPart.barcode
+                      ? " · "
+                      : ""}
+                    available {selectedPart.qty_on_hand} ·{" "}
                     {centsToDisplay(selectedPart.qty_on_hand * selectedPart.unit_cost_cents)} on
                     shelf
                   </p>
@@ -1124,28 +1133,38 @@ export default function OpsInventoryWorkspace() {
               </div>
             <form className={styles.formGrid} onSubmit={savePartEdit}>
               <label className={styles.field}>
+                <span className={styles.fieldLabel}>Name</span>
+                <input
+                  className={styles.input}
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  required
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Item #</span>
+                <input
+                  className={styles.input}
+                  value={editForm.barcode}
+                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+                  placeholder="Leave blank if there isn’t one"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Color</span>
+                <input
+                  className={styles.input}
+                  value={editForm.color}
+                  onChange={(e) => setEditForm({ ...editForm, color: e.target.value })}
+                />
+              </label>
+              <label className={styles.field}>
                 <span className={styles.fieldLabel}>Size</span>
                 <input
                   className={styles.input}
                   value={editForm.size}
                   onChange={(e) => setEditForm({ ...editForm, size: e.target.value })}
                   placeholder="21 in"
-                />
-              </label>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Bin / location</span>
-                <input
-                  className={styles.input}
-                  value={editForm.location}
-                  onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
-                />
-              </label>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Barcode</span>
-                <input
-                  className={styles.input}
-                  value={editForm.barcode}
-                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
                 />
               </label>
               <label className={styles.field}>
@@ -1195,7 +1214,7 @@ export default function OpsInventoryWorkspace() {
             </form>
 
             <div style={{ marginTop: "1rem" }}>
-              <p className={styles.fieldLabel}>Movement history · {selectedPart.sku}</p>
+              <p className={styles.fieldLabel}>Movement history · {selectedPart.name}</p>
               {movements.length === 0 ? (
                 <p className={styles.empty}>No movements yet for this part.</p>
               ) : (
@@ -1233,23 +1252,31 @@ export default function OpsInventoryWorkspace() {
               Add one part by hand
             </p>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>SKU</span>
-            <input
-              className={styles.input}
-              value={partForm.sku}
-              onChange={(event) => setPartForm({ ...partForm, sku: event.target.value })}
-              placeholder="DS-18-SOFT"
-              required
-            />
-          </label>
-          <label className={styles.field}>
             <span className={styles.fieldLabel}>Name</span>
             <input
               className={styles.input}
               value={partForm.name}
               onChange={(event) => setPartForm({ ...partForm, name: event.target.value })}
-              placeholder="18in soft-close drawer slide"
+              placeholder="Jewelry tray"
               required
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Item #</span>
+            <input
+              className={styles.input}
+              value={partForm.item_number}
+              onChange={(event) => setPartForm({ ...partForm, item_number: event.target.value })}
+              placeholder="Leave blank if there isn’t one"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Color</span>
+            <input
+              className={styles.input}
+              value={partForm.color}
+              onChange={(event) => setPartForm({ ...partForm, color: event.target.value })}
+              placeholder="black"
             />
           </label>
           <label className={styles.field}>
@@ -1274,15 +1301,6 @@ export default function OpsInventoryWorkspace() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Bin / location</span>
-            <input
-              className={styles.input}
-              value={partForm.location}
-              onChange={(event) => setPartForm({ ...partForm, location: event.target.value })}
-              placeholder="Aisle B / Shelf 3"
-            />
           </label>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Opening qty</span>

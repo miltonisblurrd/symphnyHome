@@ -52,7 +52,12 @@ function detectDelimiter(headerLine: string): string {
 function headerIndex(header: string[]): Record<string, number> {
   const map: Record<string, number> = {};
   header.forEach((name, i) => {
-    const key = name.trim().toLowerCase().replace(/\s+/g, "_");
+    const key = name
+      .trim()
+      .toLowerCase()
+      .replace(/#/g, " number")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "");
     if (key) map[key] = i;
   });
   return map;
@@ -60,10 +65,14 @@ function headerIndex(header: string[]): Record<string, number> {
 
 function looksLikeHeader(cells: string[]): boolean {
   const joined = cells.map((c) => c.trim().toLowerCase()).join(" ");
-  return (
-    joined.includes("sku") &&
-    (joined.includes("name") || joined.includes("qty") || joined.includes("size"))
-  );
+  const hasName = joined.includes("name");
+  const hasKey =
+    joined.includes("item") ||
+    joined.includes("sku") ||
+    joined.includes("qty") ||
+    joined.includes("color") ||
+    joined.includes("size");
+  return hasName && hasKey;
 }
 
 function rowFromCells(idx: Record<string, number>, cells: string[]): ImportPartRow {
@@ -76,9 +85,11 @@ function rowFromCells(idx: Record<string, number>, cells: string[]): ImportPartR
     }
     return "";
   };
+  const itemNumber = get("item_number", "item", "item_no", "itemno");
   return {
-    sku: get("sku"),
+    sku: undefined,
     name: get("name"),
+    color: get("color", "finish") || null,
     size: get("size") || null,
     category: get("category") || "hardware",
     location: get("location", "bin") || null,
@@ -86,7 +97,8 @@ function rowFromCells(idx: Record<string, number>, cells: string[]): ImportPartR
     unit_cost_cents: dollarsToCents(get("unit_cost", "unit_cost_cents", "cost") || "0"),
     reorder_point: Number(get("reorder_point", "reorder") || 0) || 0,
     vendor: get("vendor") || null,
-    barcode: get("barcode") || null,
+    barcode: itemNumber || null,
+    item_number: itemNumber || null,
     notes: get("notes") || null,
   };
 }
@@ -121,7 +133,11 @@ export function parseCountSheetText(text: string): ImportPartRow[] {
   const grid: string[][] = htmlRows ?? [];
   if (!htmlRows) {
     const headerLine =
-      lines.find((line) => /sku/i.test(line) && (/,|\t|;/.test(line) || /name/i.test(line))) ??
+      lines.find(
+        (line) =>
+          /name/i.test(line) &&
+          (/,|\t|;/.test(line) || /item|sku|qty|color/i.test(line)),
+      ) ??
       lines[0] ??
       "";
     const delimiter = detectDelimiter(headerLine);
@@ -133,14 +149,14 @@ export function parseCountSheetText(text: string): ImportPartRow[] {
   const headerAt = grid.findIndex(looksLikeHeader);
   if (headerAt < 0) {
     throw new Error(
-      "Need a header row with sku. If this is the demo Excel, copy the Warehouse count tab — or upload the .xlsx file.",
+      "Need a header row with name (and optional item_number, color, size, qty). Upload the warehouse count CSV or Excel.",
     );
   }
   const idx = headerIndex(grid[headerAt] ?? []);
   const rows: ImportPartRow[] = [];
   for (const cells of grid.slice(headerAt + 1)) {
     const row = rowFromCells(idx, cells);
-    if (!row.sku && !row.name) continue;
+    if (!row.name) continue;
     rows.push(row);
   }
   return rows;
@@ -284,7 +300,7 @@ function gridToRows(grid: string[][]): ImportPartRow[] {
       idx,
       (cells ?? []).map((c) => String(c ?? "")),
     );
-    if (!row.sku && !row.name) continue;
+    if (!row.name) continue;
     rows.push(row);
   }
   return rows;
@@ -333,6 +349,6 @@ export function parseXlsxBuffer(buf: Buffer): ImportPartRow[] {
     if (rows.length) return rows;
   }
   throw new Error(
-    "No parts found in that Excel file. Use the Warehouse count tab (header row: sku, name, size, qty).",
+    "No parts found in that Excel file. Use a header row with name, and optional item_number, color, size, qty.",
   );
 }

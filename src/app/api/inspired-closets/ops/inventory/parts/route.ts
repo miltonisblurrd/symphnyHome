@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { PART_CATEGORIES } from "@/lib/inspired-closets-ops-inventory";
+import { hiddenPartSku, PART_CATEGORIES, realItemNumber } from "@/lib/inspired-closets-ops-inventory";
 
 export const runtime = "nodejs";
 
 const EDITABLE = new Set([
-  "sku",
   "name",
+  "color",
   "size",
   "category",
   "location",
@@ -46,10 +46,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  let parts = data ?? [];
+  let parts = (data ?? []).map((part) => ({
+    ...part,
+    color: part.color ?? part.location ?? null,
+    barcode: realItemNumber(part.barcode),
+  }));
   if (q) {
     parts = parts.filter((part) => {
-      const hay = `${part.sku} ${part.name} ${part.size ?? ""} ${part.location ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
+      const hay = `${part.sku} ${part.name} ${part.color ?? ""} ${part.size ?? ""} ${part.barcode ?? ""} ${part.vendor ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
   }
@@ -89,24 +93,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
   }
 
-  const sku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!sku || !name) {
-    return NextResponse.json({ ok: false, error: "sku and name are required." }, { status: 400 });
+  if (!name) {
+    return NextResponse.json({ ok: false, error: "name is required." }, { status: 400 });
   }
+
+  const color = typeof body.color === "string" ? body.color.trim() || null : null;
+  const size = typeof body.size === "string" ? body.size.trim() || null : null;
+  const vendor = typeof body.vendor === "string" ? body.vendor.trim() || null : null;
+  const itemNumber = realItemNumber(
+    typeof body.item_number === "string"
+      ? body.item_number
+      : typeof body.barcode === "string"
+        ? body.barcode
+        : null,
+  );
+  const sku = hiddenPartSku();
 
   const insert: Record<string, unknown> = {
     sku,
     name,
-    size: typeof body.size === "string" ? body.size.trim() || null : null,
+    color,
+    size,
     category: typeof body.category === "string" ? body.category : "hardware",
     location: typeof body.location === "string" ? body.location.trim() || null : null,
-    barcode: typeof body.barcode === "string" ? body.barcode.trim() || null : null,
+    barcode: itemNumber,
     unit_cost_cents: typeof body.unit_cost_cents === "number" ? body.unit_cost_cents : 0,
     qty_on_hand: typeof body.qty_on_hand === "number" ? Math.max(0, body.qty_on_hand) : 0,
     reorder_point: typeof body.reorder_point === "number" ? body.reorder_point : 0,
     is_excess: Boolean(body.is_excess),
-    vendor: typeof body.vendor === "string" ? body.vendor.trim() || null : null,
+    vendor,
     notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
   };
 
@@ -117,9 +133,22 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from("ic_parts").insert(insert).select("*").single();
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  let { data, error } = await supabase.from("ic_parts").insert(insert).select("*").single();
+  if (error && /column.*color/i.test(error.message)) {
+    const { color: droppedColor, ...withoutColor } = insert;
+    const retry = await supabase
+      .from("ic_parts")
+      .insert({ ...withoutColor, location: insert.location || droppedColor || null })
+      .select("*")
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error || !data) {
+    return NextResponse.json(
+      { ok: false, error: error?.message ?? "Insert returned no part." },
+      { status: 500 },
+    );
   }
 
   // If starting with on-hand qty, write an opening receive movement.
@@ -180,7 +209,14 @@ export async function PATCH(request: Request) {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
   for (const [key, value] of Object.entries(body)) {
     if (!EDITABLE.has(key)) continue;
-    const next = key === "sku" && typeof value === "string" ? value.trim().toUpperCase() : value;
+    let next: unknown = value;
+    if (key === "barcode") next = realItemNumber(value);
+    else if (
+      typeof value === "string" &&
+      (key === "color" || key === "size" || key === "vendor" || key === "notes" || key === "location" || key === "name")
+    ) {
+      next = value.trim() || null;
+    }
     if (current[key] === next) continue;
     update[key] = next;
     changes[key] = { from: current[key], to: next };

@@ -153,6 +153,43 @@ a.buttonGhost {
   margin-bottom: 0;
 }
 
+.pulseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr));
+  gap: 0.65rem;
+}
+
+.pulseCard {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.85rem 0.95rem;
+  min-width: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pulseCard:hover {
+  border-color: var(--ic-red);
+}
+
+.pulseCardAlert .statCardValue {
+  color: var(--ic-red);
+}
+
+.pulseList {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.pulseList li {
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+}
+
 .filterWrap {
   position: relative;
 }

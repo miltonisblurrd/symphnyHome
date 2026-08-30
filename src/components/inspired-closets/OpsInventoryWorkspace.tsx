@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import styles from "./ops-payroll.module.css";
+
+type AttentionKey =
+  | "low"
+  | "excess"
+  | "unallocated"
+  | "missing"
+  | "unstaged"
+  | "slip"
+  | "nojob";
 
 type Part = {
   id: string;
@@ -135,7 +143,8 @@ export default function OpsInventoryWorkspace() {
     excess: 0,
     valueCents: 0,
   });
-  const [filter, setFilter] = useState<"all" | "low" | "excess">("all");
+  const [filter, setFilter] = useState<"all" | "low">("all");
+  const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
   const [selectedPartId, setSelectedPartId] = useState<string>("");
@@ -167,8 +176,8 @@ export default function OpsInventoryWorkspace() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [showSetup, setShowSetup] = useState(false);
-  const [showAttention, setShowAttention] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [attentionKey, setAttentionKey] = useState<AttentionKey | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,6 +198,7 @@ export default function OpsInventoryWorkspace() {
         partsPayload.summary ?? { totalParts: 0, lowStock: 0, excess: 0, valueCents: 0 },
       );
       setSelectedPartId((current) => current || partsPayload.parts?.[0]?.id || "");
+      setListUpdatedAt(new Date());
       setLoading(false);
 
       const [jobsRes, attentionRes] = await Promise.all([jobsReq, attentionReq]);
@@ -250,6 +260,79 @@ export default function OpsInventoryWorkspace() {
     return { pieces, vendors: vendors.length };
   }, [parts, vendors.length]);
 
+  const noJobLines = (attention?.receivingUnassigned ?? []).reduce(
+    (sum, row) => sum + row.lines,
+    0,
+  );
+  const pulseCards: Array<{
+    key: AttentionKey;
+    label: string;
+    value: string;
+    alert: boolean;
+  }> = [
+    {
+      key: "low",
+      label: "Low stock",
+      value: String(attention?.lowStock.length ?? 0),
+      alert: (attention?.lowStock.length ?? 0) > 0,
+    },
+    {
+      key: "excess",
+      label: "Excess value",
+      value: centsToDisplay(attention?.excessValueCents ?? 0),
+      alert: (attention?.excessCount ?? 0) > 0,
+    },
+    {
+      key: "unallocated",
+      label: "Receives w/o allocate",
+      value: String(attention?.unallocatedReceives.length ?? 0),
+      alert: (attention?.unallocatedReceives.length ?? 0) > 0,
+    },
+    {
+      key: "missing",
+      label: "Installs missing materials",
+      value: String(attention?.missingMaterials.length ?? 0),
+      alert: (attention?.missingMaterials.length ?? 0) > 0,
+    },
+    {
+      key: "unstaged",
+      label: "Unstaged next 3 days",
+      value: String((attention?.unstagedInstalls ?? []).length),
+      alert: (attention?.unstagedInstalls ?? []).length > 0,
+    },
+    {
+      key: "slip",
+      label: "Slip lines still out",
+      value: String(attention?.receivingOpenLines ?? 0),
+      alert: (attention?.receivingOpenLines ?? 0) > 0,
+    },
+    {
+      key: "nojob",
+      label: "Received with no job",
+      value: String(noJobLines),
+      alert: noJobLines > 0,
+    },
+  ];
+
+  const attentionCopy: Record<AttentionKey, { title: string; empty: string }> = {
+    low: { title: "Low stock (below reorder)", empty: "Nothing is below reorder right now." },
+    excess: { title: "Excess / dead stock", empty: "No parts flagged as excess." },
+    unallocated: {
+      title: "Receives this week still unallocated",
+      empty: "Every receive this week is allocated.",
+    },
+    missing: {
+      title: "Jobs with $0 materials (likely missing allocate)",
+      empty: "Install jobs have material against them.",
+    },
+    unstaged: {
+      title: "Installs in the next 3 days with parts not staged/packed",
+      empty: "Nothing unstaged in the next 3 days.",
+    },
+    slip: { title: "Packing-slip jobs still short", empty: "No open slip lines." },
+    nojob: { title: "On a slip with no OS job", empty: "Every slip line is tied to a job." },
+  };
+
   useEffect(() => {
     if (!selectedPart) return;
     setEditForm({
@@ -265,13 +348,16 @@ export default function OpsInventoryWorkspace() {
   }, [selectedPart]);
 
   useEffect(() => {
-    if (!detailOpen) return;
+    if (!detailOpen && !setupOpen && !attentionKey) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDetailOpen(false);
+      if (event.key !== "Escape") return;
+      setDetailOpen(false);
+      setSetupOpen(false);
+      setAttentionKey(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailOpen]);
+  }, [detailOpen, setupOpen, attentionKey]);
 
   useEffect(() => {
     if (!selectedPartId) {
@@ -347,6 +433,7 @@ export default function OpsInventoryWorkspace() {
       setPartForm({ ...EMPTY_PART });
       setNotice({ kind: "info", text: `Added ${payload.part?.name ?? "part"}.` });
       if (payload.part?.id) setSelectedPartId(payload.part.id);
+      setSetupOpen(false);
       await load();
     } catch (error) {
       setNotice({
@@ -530,6 +617,7 @@ export default function OpsInventoryWorkspace() {
         text: `Imported — ${payload.created ?? 0} new, ${payload.updated ?? 0} updated${extra}.`,
       });
       setImportCsv("");
+      setSetupOpen(false);
       await load();
     } catch (error) {
       setNotice({
@@ -588,22 +676,7 @@ export default function OpsInventoryWorkspace() {
   return (
     <OpsShell
       title="Inventory"
-      subtitle="Hardware on the shelf — search an item number, pull to a job, or open receiving when a truck hits the dock"
-      actions={
-        <>
-          <Link href="/inspired-closets/ops/inventory/receiving" className={styles.buttonPrimary}>
-            Receiving / scan
-          </Link>
-          <button
-            type="button"
-            className={styles.buttonGhost}
-            onClick={() => void load()}
-            disabled={loading}
-          >
-            Refresh
-          </button>
-        </>
-      }
+      subtitle="Hardware on the shelf — search an item number, pull to a job, or upload a new count"
     >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
@@ -611,233 +684,65 @@ export default function OpsInventoryWorkspace() {
         </p>
       ) : null}
 
-      {!loading && parts.length === 0 && !query.trim() && filter === "all" ? (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-          <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.15rem" }}>
-            Start here: load what’s in the warehouse
-          </h2>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            Hit <strong>Choose Excel / CSV</strong> and pick the warehouse count file. After
-            this, daily work is <strong>Receiving / scan</strong> when a truck arrives and{" "}
-            <strong>To job</strong> when parts are pulled.
-          </p>
-          {importControls()}
-          <div className={styles.formActions}>
+      <section style={{ marginBottom: "1rem" }}>
+        <p className={styles.subtitle} style={{ marginBottom: "0.65rem" }}>
+          Needs attention · what’s leaking money
+        </p>
+        <div className={styles.pulseGrid}>
+          {pulseCards.map((card) => (
             <button
+              key={card.key}
               type="button"
-              className={styles.buttonGhost}
-              onClick={() => setShowSetup((v) => !v)}
+              className={`${styles.pulseCard} ${card.alert ? styles.pulseCardAlert : ""}`}
+              onClick={() => setAttentionKey(card.key)}
             >
-              {showSetup ? "Hide single-part form" : "Or add one part by hand"}
+              <p className={styles.statCardLabel}>{card.label}</p>
+              <p className={styles.statCardValue}>{card.value}</p>
             </button>
-          </div>
-        </section>
-      ) : (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <p style={{ margin: 0, fontSize: "0.95rem" }}>
-              <strong>{deskSummary.pieces}</strong> pieces on the shelf · truck arrives →{" "}
-              <Link href="/inspired-closets/ops/inventory/receiving">Receiving</Link>
-              . Pull for a client → <strong>To job</strong>.
-            </p>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                onClick={() => setShowAttention((v) => !v)}
-              >
-                {showAttention ? "Hide" : "Needs attention"}
-                {attention
-                  ? ` (${
-                      attention.lowStock.length +
-                      attention.missingMaterials.length +
-                      (attention.unstagedInstalls ?? []).length +
-                      (attention.receivingOpenLines ?? 0)
-                    })`
-                  : ""}
-              </button>
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                onClick={() => setShowSetup((v) => !v)}
-              >
-                {showSetup ? "Hide setup" : "Add parts / upload count"}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
+          ))}
+        </div>
+      </section>
 
-      {showAttention && attention ? (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-          <p className={styles.subtitle} style={{ marginBottom: "0.65rem" }}>
-            Needs attention · what’s leaking money
+      <div className={styles.listToolbar}>
+        <nav className={styles.tabs} aria-label="Inventory views">
+          {(
+            [
+              ["all", "All parts"],
+              ["low", "Low stock"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`${styles.tab} ${filter === id ? styles.tabActive : ""}`}
+              onClick={() => setFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className={styles.toolbarRight}>
+          <p className={styles.updatedStamp}>
+            {listUpdatedAt
+              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}`
+              : loading
+                ? "Updating…"
+                : "—"}
           </p>
-          <div className={styles.summaryRow}>
-            <span>
-              Low stock{" "}
-              <span className={styles.summaryStrong}>{attention.lowStock.length}</span>
-            </span>
-            <span>
-              Excess value{" "}
-              <span className={styles.summaryStrong}>
-                {centsToDisplay(attention.excessValueCents)}
-              </span>{" "}
-              ({attention.excessCount} parts)
-            </span>
-            <span>
-              Receives w/o allocate{" "}
-              <span className={styles.summaryStrong}>
-                {attention.unallocatedReceives.length}
-              </span>
-            </span>
-            <span>
-              Installs missing materials{" "}
-              <span className={styles.summaryStrong}>
-                {attention.missingMaterials.length}
-              </span>
-            </span>
-            <span>
-              Unstaged next 3 days{" "}
-              <span className={styles.summaryStrong}>
-                {(attention.unstagedInstalls ?? []).length}
-              </span>
-            </span>
-            <span>
-              Slip lines still out{" "}
-              <span className={styles.summaryStrong}>{attention.receivingOpenLines ?? 0}</span>
-            </span>
-            <span>
-              Received with no job{" "}
-              <span className={styles.summaryStrong}>
-                {(attention.receivingUnassigned ?? []).reduce((sum, row) => sum + row.lines, 0)}
-              </span>
-            </span>
-          </div>
-          {attention.missingMaterials.length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>Jobs with $0 materials (likely missing allocate)</p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {attention.missingMaterials.slice(0, 8).map((job) => (
-                  <li key={job.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {job.client_name} · {job.stage.replace(/_/g, " ")} ·{" "}
-                    {centsToDisplay(job.contract_cents)}
-                    {job.install_date ? ` · install ${job.install_date}` : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {attention.lowStock.length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>Low stock (below reorder)</p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {attention.lowStock.slice(0, 6).map((part) => (
-                  <li key={part.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {part.name} · on hand {part.qty_on_hand} / reorder{" "}
-                    {part.reorder_point} · {centsToDisplay(part.value_cents)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {attention.unallocatedReceives.length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>Receives this week still unallocated</p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {attention.unallocatedReceives.slice(0, 6).map((row, idx) => (
-                  <li
-                    key={`${row.part_id}-${idx}`}
-                    style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}
-                  >
-                    {row.name} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {(attention.unstagedInstalls ?? []).length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>
-                Installs in the next 3 days with parts not staged/packed
-              </p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {(attention.unstagedInstalls ?? []).slice(0, 8).map((job) => (
-                  <li key={job.id} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {job.client_name}
-                    {job.install_date ? ` · ${job.install_date}` : ""} · {job.unstaged}{" "}
-                    unstaged
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {(attention.receivingShortJobs ?? []).length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>Packing-slip jobs still short</p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {(attention.receivingShortJobs ?? []).slice(0, 8).map((job) => (
-                  <li key={job.cust_ref} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {job.job_name} · {job.open} lines not fully received
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {(attention.receivingUnassigned ?? []).length > 0 ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <p className={styles.fieldLabel}>On a slip with no OS job</p>
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                {(attention.receivingUnassigned ?? []).slice(0, 8).map((row) => (
-                  <li key={row.label} style={{ marginBottom: "0.25rem", fontSize: "0.85rem" }}>
-                    {row.label} · {row.lines} lines
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {showSetup && !(parts.length === 0 && !query.trim() && filter === "all") ? (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-          <p className={styles.subtitle} style={{ marginBottom: "0.5rem" }}>
-            Upload more counts (same sheet as the first upload)
-          </p>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            Re-uploading the same item number — or the same name + color + size — updates the
-            count. Blank item numbers stay blank.
-          </p>
-          {importControls()}
-        </section>
-      ) : null}
-
-      <nav className={styles.tabs}>
-        {(
-          [
-            ["all", "All parts"],
-            ["low", "Low stock"],
-            ["excess", "Excess / dead stock"],
-          ] as const
-        ).map(([id, label]) => (
           <button
-            key={id}
             type="button"
-            className={`${styles.tab} ${filter === id ? styles.tabActive : ""}`}
-            onClick={() => setFilter(id)}
+            className={styles.buttonPrimary}
+            onClick={() => setSetupOpen(true)}
           >
-            {label}
+            Add parts / upload count
           </button>
-        ))}
-      </nav>
+        </div>
+      </div>
 
       <section className={styles.panel}>
         <div className={styles.summaryRow}>
@@ -894,7 +799,7 @@ export default function OpsInventoryWorkspace() {
           <p className={styles.empty}>
             {query.trim() || vendorFilter !== "all"
               ? "No parts match that search."
-              : "Nothing here yet — use the Start here box above to load the warehouse count."}
+              : "Nothing here yet — use Add parts / upload count."}
           </p>
         ) : (
           <table className={styles.table}>
@@ -1248,130 +1153,278 @@ export default function OpsInventoryWorkspace() {
           </div>
         ) : null}
 
-        {showSetup ? (
-          <form className={styles.formGrid} onSubmit={addPart}>
-            <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-              Add one part by hand
-            </p>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Name</span>
-            <input
-              className={styles.input}
-              value={partForm.name}
-              onChange={(event) => setPartForm({ ...partForm, name: event.target.value })}
-              placeholder="Jewelry tray"
-              required
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Item #</span>
-            <input
-              className={styles.input}
-              value={partForm.item_number}
-              onChange={(event) => setPartForm({ ...partForm, item_number: event.target.value })}
-              placeholder="Leave blank if there isn’t one"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Color</span>
-            <input
-              className={styles.input}
-              value={partForm.color}
-              onChange={(event) => setPartForm({ ...partForm, color: event.target.value })}
-              placeholder="black"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Size</span>
-            <input
-              className={styles.input}
-              value={partForm.size}
-              onChange={(event) => setPartForm({ ...partForm, size: event.target.value })}
-              placeholder="21 in"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Category</span>
-            <select
-              className={styles.input}
-              value={partForm.category}
-              onChange={(event) => setPartForm({ ...partForm, category: event.target.value })}
-            >
-              {(categories.length ? categories : ["hardware"]).map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Opening qty</span>
-            <input
-              className={styles.input}
-              value={partForm.qty}
-              onChange={(event) => setPartForm({ ...partForm, qty: event.target.value })}
-              placeholder="0"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Unit cost</span>
-            <input
-              className={styles.input}
-              value={partForm.unit_cost}
-              onChange={(event) => setPartForm({ ...partForm, unit_cost: event.target.value })}
-              placeholder="$0"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Reorder point</span>
-            <input
-              className={styles.input}
-              value={partForm.reorder_point}
-              onChange={(event) =>
-                setPartForm({ ...partForm, reorder_point: event.target.value })
-              }
-              placeholder="5"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Vendor</span>
-            <input
-              className={styles.input}
-              value={partForm.vendor}
-              onChange={(event) => setPartForm({ ...partForm, vendor: event.target.value })}
-              placeholder="Stow / Alibaba / other"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Notes</span>
-            <input
-              className={styles.input}
-              value={partForm.notes}
-              onChange={(event) => setPartForm({ ...partForm, notes: event.target.value })}
-              placeholder="Optional"
-            />
-          </label>
-          <label className={styles.field} style={{ alignContent: "end" }}>
-            <span className={styles.fieldLabel}>Excess stock?</span>
-            <label style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={partForm.is_excess}
-                onChange={(event) =>
-                  setPartForm({ ...partForm, is_excess: event.target.checked })
-                }
-              />
-              Flag as excess / dead stock
-            </label>
-          </label>
-          <div className={styles.formActions}>
-            <button type="submit" className={styles.buttonPrimary} disabled={saving}>
-              {saving ? "Saving…" : "Add part"}
-            </button>
-          </div>
-          </form>
-        ) : null}
       </section>
+
+      {setupOpen ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onClick={() => setSetupOpen(false)}
+        >
+          <div
+            className={styles.modal}
+            role="dialog"
+            aria-label="Add parts / upload count"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHead}>
+              <div>
+                <h3 className={styles.modalTitle}>Add parts / upload count</h3>
+                <p className={styles.modalSub}>
+                  Upload more counts (same sheet as the first upload)
+                </p>
+              </div>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setSetupOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className={styles.empty} style={{ marginTop: 0 }}>
+              Re-uploading the same item number — or the same name + color + size — updates the
+              count. Blank item numbers stay blank.
+            </p>
+            {importControls()}
+            <form className={styles.formGrid} onSubmit={addPart} style={{ marginTop: "1.1rem" }}>
+              <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                Add one part by hand
+              </p>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Name</span>
+                <input
+                  className={styles.input}
+                  value={partForm.name}
+                  onChange={(event) => setPartForm({ ...partForm, name: event.target.value })}
+                  placeholder="Jewelry tray"
+                  required
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Item #</span>
+                <input
+                  className={styles.input}
+                  value={partForm.item_number}
+                  onChange={(event) =>
+                    setPartForm({ ...partForm, item_number: event.target.value })
+                  }
+                  placeholder="Leave blank if there isn’t one"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Color</span>
+                <input
+                  className={styles.input}
+                  value={partForm.color}
+                  onChange={(event) => setPartForm({ ...partForm, color: event.target.value })}
+                  placeholder="black"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Size</span>
+                <input
+                  className={styles.input}
+                  value={partForm.size}
+                  onChange={(event) => setPartForm({ ...partForm, size: event.target.value })}
+                  placeholder="21 in"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Category</span>
+                <select
+                  className={styles.input}
+                  value={partForm.category}
+                  onChange={(event) =>
+                    setPartForm({ ...partForm, category: event.target.value })
+                  }
+                >
+                  {(categories.length ? categories : ["hardware"]).map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Opening qty</span>
+                <input
+                  className={styles.input}
+                  value={partForm.qty}
+                  onChange={(event) => setPartForm({ ...partForm, qty: event.target.value })}
+                  placeholder="0"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Unit cost</span>
+                <input
+                  className={styles.input}
+                  value={partForm.unit_cost}
+                  onChange={(event) =>
+                    setPartForm({ ...partForm, unit_cost: event.target.value })
+                  }
+                  placeholder="$0"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Reorder point</span>
+                <input
+                  className={styles.input}
+                  value={partForm.reorder_point}
+                  onChange={(event) =>
+                    setPartForm({ ...partForm, reorder_point: event.target.value })
+                  }
+                  placeholder="5"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Vendor</span>
+                <input
+                  className={styles.input}
+                  value={partForm.vendor}
+                  onChange={(event) => setPartForm({ ...partForm, vendor: event.target.value })}
+                  placeholder="Stow / Alibaba / other"
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Notes</span>
+                <input
+                  className={styles.input}
+                  value={partForm.notes}
+                  onChange={(event) => setPartForm({ ...partForm, notes: event.target.value })}
+                  placeholder="Optional"
+                />
+              </label>
+              <div className={styles.formActions}>
+                <button type="submit" className={styles.buttonPrimary} disabled={saving}>
+                  {saving ? "Saving…" : "Add part"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {attentionKey ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onClick={() => setAttentionKey(null)}
+        >
+          <div
+            className={styles.modal}
+            role="dialog"
+            aria-label={attentionCopy[attentionKey].title}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHead}>
+              <div>
+                <h3 className={styles.modalTitle}>{attentionCopy[attentionKey].title}</h3>
+              </div>
+              <button
+                type="button"
+                className={styles.buttonGhost}
+                onClick={() => setAttentionKey(null)}
+              >
+                Close
+              </button>
+            </div>
+            {attentionKey === "low" ? (
+              attention?.lowStock.length ? (
+                <ul className={styles.pulseList}>
+                  {attention.lowStock.map((part) => (
+                    <li key={part.id}>
+                      {part.name} · on hand {part.qty_on_hand} / reorder {part.reorder_point} ·{" "}
+                      {centsToDisplay(part.value_cents)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.low.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "excess" ? (
+              attention?.excessCount ? (
+                <p className={styles.empty} style={{ marginTop: 0 }}>
+                  {attention.excessCount} parts flagged ·{" "}
+                  {centsToDisplay(attention.excessValueCents)} on the shelf.
+                </p>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.excess.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "unallocated" ? (
+              attention?.unallocatedReceives.length ? (
+                <ul className={styles.pulseList}>
+                  {attention.unallocatedReceives.map((row, idx) => (
+                    <li key={`${row.part_id}-${idx}`}>
+                      {row.name} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.unallocated.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "missing" ? (
+              attention?.missingMaterials.length ? (
+                <ul className={styles.pulseList}>
+                  {attention.missingMaterials.map((job) => (
+                    <li key={job.id}>
+                      {job.client_name} · {job.stage.replace(/_/g, " ")} ·{" "}
+                      {centsToDisplay(job.contract_cents)}
+                      {job.install_date ? ` · install ${job.install_date}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.missing.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "unstaged" ? (
+              (attention?.unstagedInstalls ?? []).length ? (
+                <ul className={styles.pulseList}>
+                  {(attention?.unstagedInstalls ?? []).map((job) => (
+                    <li key={job.id}>
+                      {job.client_name}
+                      {job.install_date ? ` · ${job.install_date}` : ""} · {job.unstaged}{" "}
+                      unstaged
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.unstaged.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "slip" ? (
+              (attention?.receivingShortJobs ?? []).length ? (
+                <ul className={styles.pulseList}>
+                  {(attention?.receivingShortJobs ?? []).map((job) => (
+                    <li key={job.cust_ref}>
+                      {job.job_name} · {job.open} lines not fully received
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.slip.empty}</p>
+              )
+            ) : null}
+            {attentionKey === "nojob" ? (
+              (attention?.receivingUnassigned ?? []).length ? (
+                <ul className={styles.pulseList}>
+                  {(attention?.receivingUnassigned ?? []).map((row) => (
+                    <li key={row.label}>
+                      {row.label} · {row.lines} lines
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.empty}>{attentionCopy.nojob.empty}</p>
+              )
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </OpsShell>
   );
 }

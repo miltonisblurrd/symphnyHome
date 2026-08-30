@@ -181,6 +181,7 @@ export type ImportPartRow = {
   category?: string | null;
   location?: string | null;
   qty?: number;
+  qty_reserved?: number;
   unit_cost_cents?: number;
   reorder_point?: number;
   vendor?: string | null;
@@ -199,11 +200,15 @@ export function splitNameAndColor(name: string): { name: string; color: string |
   };
 }
 
-/** Item # is digits only. Anything else — vendor codes, IC- slugs, dashes — stays blank. */
+/** Item # is exactly what the sheet has. Blank stays blank. Never show a hidden UUID or IC- slug. */
 export function realItemNumber(value: unknown): string | null {
-  const digits = String(value ?? "").trim();
-  if (!digits || !/^\d+$/.test(digits)) return null;
-  return digits;
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+    return null;
+  }
+  if (/^IC-/i.test(raw)) return null;
+  return raw;
 }
 
 export function itemNumberOf(row: ImportPartRow): string | null {
@@ -243,16 +248,6 @@ async function findExistingPart(
     vendor: string | null;
   },
 ) {
-  if (input.itemNumber) {
-    const { data: byCode } = await supabase
-      .from("ic_parts")
-      .select("*")
-      .is("deleted_at", null)
-      .eq("barcode", input.itemNumber)
-      .maybeSingle();
-    if (byCode) return byCode;
-  }
-
   const { data: bySku } = await supabase
     .from("ic_parts")
     .select("*")
@@ -261,11 +256,21 @@ async function findExistingPart(
     .maybeSingle();
   if (bySku) return bySku;
 
-  let query = supabase.from("ic_parts").select("*").is("deleted_at", null).eq("name", input.name);
-  if (input.size) query = query.eq("size", input.size);
-  if (input.vendor) query = query.eq("vendor", input.vendor);
-  const { data: matches } = await query.limit(20);
-  const pool = (matches ?? []).filter((part) => sameText(part.color, input.color));
+  const { data: matches } = await supabase
+    .from("ic_parts")
+    .select("*")
+    .is("deleted_at", null)
+    .eq("name", input.name)
+    .limit(80);
+  const pool = (matches ?? []).filter((part) => {
+    const color = (part.color ?? part.location ?? null) as string | null;
+    return (
+      sameText(color, input.color) &&
+      sameText(part.size, input.size) &&
+      sameText(part.vendor, input.vendor) &&
+      sameText(part.barcode, input.itemNumber)
+    );
+  });
   return pool.length === 1 ? pool[0] : null;
 }
 
@@ -355,7 +360,7 @@ export async function importParts(
           sku,
           ...patch,
           qty_on_hand: qty,
-          qty_reserved: 0,
+          qty_reserved: Math.max(0, Math.round(raw.qty_reserved ?? 0)),
           created_by: actorId ?? null,
         };
         const { data: part, error } = await writePartRow(supabase, "insert", insertPayload);
@@ -375,7 +380,13 @@ export async function importParts(
       } else {
         const onHand = existing.qty_on_hand as number;
         const delta = qty - onHand;
-        const { error } = await writePartRow(supabase, "update", patch, existing.id);
+        const reserved = Math.max(0, Math.round(raw.qty_reserved ?? (existing.qty_reserved as number) ?? 0));
+        const { error } = await writePartRow(
+          supabase,
+          "update",
+          { ...patch, qty_reserved: reserved },
+          existing.id,
+        );
         if (error) throw error;
         if (delta !== 0) {
           await applyStockMovement({

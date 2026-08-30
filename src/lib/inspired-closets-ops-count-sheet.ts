@@ -26,7 +26,20 @@ function splitDelimitedLine(line: string, delimiter: string): string[] {
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
     if (ch === '"') {
-      quoted = !quoted;
+      if (!quoted && cur === "") {
+        quoted = true;
+        continue;
+      }
+      if (quoted && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+        continue;
+      }
+      if (quoted) {
+        quoted = false;
+        continue;
+      }
+      cur += ch;
       continue;
     }
     if (ch === "," && !quoted) {
@@ -38,6 +51,16 @@ function splitDelimitedLine(line: string, delimiter: string): string[] {
   }
   out.push(cur.trim());
   return out;
+}
+
+/** QTY may be "6" or "5 boxes". Keep the count; do not invent one. */
+export function parseSheetQty(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const direct = Number(trimmed);
+  if (Number.isFinite(direct)) return Math.round(direct);
+  const match = trimmed.match(/-?\d+/);
+  return match ? Number(match[0]) : 0;
 }
 
 function detectDelimiter(headerLine: string): string {
@@ -93,7 +116,8 @@ function rowFromCells(idx: Record<string, number>, cells: string[]): ImportPartR
     size: get("size") || null,
     category: get("category") || "hardware",
     location: get("location", "bin") || null,
-    qty: Number(get("qty", "qty_on_hand", "count") || 0) || 0,
+    qty: parseSheetQty(get("qty", "qty_on_hand", "count", "available")),
+    qty_reserved: parseSheetQty(get("on_job", "on_jobs", "qty_reserved")),
     unit_cost_cents: dollarsToCents(get("unit_cost", "unit_cost_cents", "cost") || "0"),
     reorder_point: Number(get("reorder_point", "reorder") || 0) || 0,
     vendor: get("vendor") || null,

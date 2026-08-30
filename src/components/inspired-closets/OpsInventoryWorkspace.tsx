@@ -460,9 +460,7 @@ export default function OpsInventoryWorkspace() {
           id: selectedPartId,
           name: editForm.name.trim(),
           color: editForm.color || null,
-          barcode: editForm.barcode && /^\d+$/.test(editForm.barcode.trim())
-            ? editForm.barcode.trim()
-            : null,
+          barcode: editForm.barcode.trim() || null,
           unit_cost_cents: dollarsInputToCents(editForm.unit_cost),
           reorder_point: Number(editForm.reorder_point) || 0,
           vendor: editForm.vendor || null,
@@ -925,7 +923,7 @@ export default function OpsInventoryWorkspace() {
                       <strong>{part.name}</strong>
                     </td>
                     <td className={styles.skuMono}>
-                      {part.barcode && /^\d+$/.test(part.barcode) ? part.barcode : ""}
+                      {part.barcode ?? ""}
                     </td>
                     <td>{part.color ?? ""}</td>
                     <td>{part.vendor ?? "—"}</td>

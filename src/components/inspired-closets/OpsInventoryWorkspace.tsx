@@ -348,16 +348,17 @@ export default function OpsInventoryWorkspace() {
   }, [selectedPart]);
 
   useEffect(() => {
-    if (!detailOpen && !setupOpen && !attentionKey) return;
+    if (!detailOpen && !setupOpen && !attentionKey && !moveModalOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setDetailOpen(false);
       setSetupOpen(false);
       setAttentionKey(null);
+      setMoveModalOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailOpen, setupOpen, attentionKey]);
+  }, [detailOpen, setupOpen, attentionKey, moveModalOpen]);
 
   useEffect(() => {
     if (!selectedPartId) {
@@ -899,108 +900,130 @@ export default function OpsInventoryWorkspace() {
         )}
 
         {moveModalOpen && selectedPart ? (
-          <form
-            className={styles.formGrid}
-            onSubmit={runMovement}
-            style={{
-              marginTop: "1rem",
-              padding: "1rem",
-              border: "2px solid currentColor",
-              borderRadius: "0.75rem",
-            }}
+          <div
+            className={styles.modalBackdrop}
+            role="presentation"
+            onClick={() => setMoveModalOpen(false)}
           >
-            <p
-              className={styles.fieldLabel}
-              style={{ gridColumn: "1 / -1", margin: 0, fontSize: "0.95rem" }}
+            <div
+              className={styles.modal}
+              role="dialog"
+              aria-label={
+                moveForm.type === "allocate"
+                  ? `To job · ${partTitle(selectedPart)}`
+                  : moveForm.type === "adjust"
+                    ? `Update qty · ${partTitle(selectedPart)}`
+                    : `${moveForm.type} · ${partTitle(selectedPart)}`
+              }
+              onClick={(event) => event.stopPropagation()}
             >
-              {moveForm.type === "adjust"
-                ? `Update qty · ${partTitle(selectedPart)}`
-                : moveForm.type === "receive"
-                ? `Stock arrived · ${partTitle(selectedPart)}`
-                : moveForm.type === "allocate"
-                  ? `Sending to a job · ${partTitle(selectedPart)} (${Math.max(
-                      0,
-                      selectedPart.qty_on_hand - selectedPart.qty_reserved,
-                    )} available)`
-                  : `${moveForm.type} · ${partTitle(selectedPart)}`}
-            </p>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>What happened?</span>
-              <select
-                className={styles.input}
-                value={moveForm.type}
-                onChange={(event) =>
-                  setMoveForm({
-                    ...moveForm,
-                    type: event.target.value as typeof moveForm.type,
-                  })
-                }
-              >
-                <option value="receive">Stock arrived (receive)</option>
-                <option value="allocate">Pulled for a job (allocate)</option>
-                <option value="return">Came back from a job (return)</option>
-                <option value="adjust">Fix the count (+/-)</option>
-                <option value="scrap">Damaged / scrap</option>
-                <option value="sell_excess">Sold excess</option>
-              </select>
-            </label>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>How many?</span>
-              <input
-                className={styles.input}
-                value={moveForm.qty}
-                onChange={(event) => setMoveForm({ ...moveForm, qty: event.target.value })}
-                placeholder={moveForm.type === "adjust" ? "+5 or -2" : "1"}
-                autoFocus
-                required
-              />
-            </label>
-            {(moveForm.type === "allocate" || moveForm.type === "return") && (
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Which job?</span>
-                <select
-                  className={styles.input}
-                  value={moveForm.job_id}
-                  onChange={(event) => setMoveForm({ ...moveForm, job_id: event.target.value })}
-                  required
+              <div className={styles.modalHead}>
+                <div>
+                  <h3 className={styles.modalTitle}>
+                    {moveForm.type === "adjust"
+                      ? `Update qty · ${partTitle(selectedPart)}`
+                      : moveForm.type === "receive"
+                        ? `Stock arrived · ${partTitle(selectedPart)}`
+                        : moveForm.type === "allocate"
+                          ? `Sending to a job · ${partTitle(selectedPart)}`
+                          : `${moveForm.type} · ${partTitle(selectedPart)}`}
+                  </h3>
+                  {moveForm.type === "allocate" ? (
+                    <p className={styles.modalSub}>
+                      {Math.max(0, selectedPart.qty_on_hand - selectedPart.qty_reserved)} available
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  onClick={() => setMoveModalOpen(false)}
                 >
-                  <option value="">Select open job…</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.client?.name ?? "Client"} · {job.stage}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {jobMaterialTotal != null ? (
-              <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
-                Materials on this job so far:{" "}
-                <span className={styles.summaryStrong}>{centsToDisplay(jobMaterialTotal)}</span>
-              </p>
-            ) : null}
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Note (optional)</span>
-              <input
-                className={styles.input}
-                value={moveForm.note}
-                onChange={(event) => setMoveForm({ ...moveForm, note: event.target.value })}
-                placeholder="Pallet #, Stow invoice…"
-              />
-            </label>
-            <div className={styles.formActions}>
-              <button type="submit" className={styles.buttonPrimary} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                onClick={() => setMoveModalOpen(false)}
-              >
-                Cancel
-              </button>
+                  Close
+                </button>
+              </div>
+              <form className={styles.formGrid} onSubmit={runMovement}>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>What happened?</span>
+                  <select
+                    className={styles.input}
+                    value={moveForm.type}
+                    onChange={(event) =>
+                      setMoveForm({
+                        ...moveForm,
+                        type: event.target.value as typeof moveForm.type,
+                      })
+                    }
+                  >
+                    <option value="receive">Stock arrived (receive)</option>
+                    <option value="allocate">Pulled for a job (allocate)</option>
+                    <option value="return">Came back from a job (return)</option>
+                    <option value="adjust">Fix the count (+/-)</option>
+                    <option value="scrap">Damaged / scrap</option>
+                    <option value="sell_excess">Sold excess</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>How many?</span>
+                  <input
+                    className={styles.input}
+                    value={moveForm.qty}
+                    onChange={(event) => setMoveForm({ ...moveForm, qty: event.target.value })}
+                    placeholder={moveForm.type === "adjust" ? "+5 or -2" : "1"}
+                    autoFocus
+                    required
+                  />
+                </label>
+                {(moveForm.type === "allocate" || moveForm.type === "return") && (
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Which job?</span>
+                    <select
+                      className={styles.input}
+                      value={moveForm.job_id}
+                      onChange={(event) =>
+                        setMoveForm({ ...moveForm, job_id: event.target.value })
+                      }
+                      required
+                    >
+                      <option value="">Select open job…</option>
+                      {jobs.map((job) => (
+                        <option key={job.id} value={job.id}>
+                          {job.client?.name ?? "Client"} · {job.stage}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {jobMaterialTotal != null ? (
+                  <p className={styles.fieldLabel} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                    Materials on this job so far:{" "}
+                    <span className={styles.summaryStrong}>{centsToDisplay(jobMaterialTotal)}</span>
+                  </p>
+                ) : null}
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Note (optional)</span>
+                  <input
+                    className={styles.input}
+                    value={moveForm.note}
+                    onChange={(event) => setMoveForm({ ...moveForm, note: event.target.value })}
+                    placeholder="Pallet #, Stow invoice…"
+                  />
+                </label>
+                <div className={styles.formActions}>
+                  <button type="submit" className={styles.buttonPrimary} disabled={saving}>
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.buttonGhost}
+                    onClick={() => setMoveModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
             </div>
-          </form>
+          </div>
         ) : null}
 
         {detailOpen && selectedPart ? (

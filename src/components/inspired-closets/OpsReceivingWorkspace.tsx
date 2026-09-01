@@ -40,6 +40,7 @@ export default function OpsReceivingWorkspace() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [relinking, setRelinking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const [missing, setMissing] = useState<
@@ -139,6 +140,39 @@ export default function OpsReceivingWorkspace() {
     }
   }
 
+  async function relinkAll() {
+    setRelinking(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/receiving/shipments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "relink_all" }),
+      });
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        relinked?: { shipments: number; linked_jobs: number; unassigned: number };
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not link jobs.");
+      await load();
+      const result = payload.relinked;
+      setNotice({
+        kind: "info",
+        text: result
+          ? `Linked ${result.linked_jobs} job lines across ${result.shipments} trucks. ${result.unassigned} still have no project.`
+          : "Jobs linked.",
+      });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not link jobs.",
+      });
+    } finally {
+      setRelinking(false);
+    }
+  }
+
   return (
     <OpsShell
       title="Receiving"
@@ -201,6 +235,14 @@ export default function OpsReceivingWorkspace() {
               onClick={() => jsonRef.current?.click()}
             >
               Import parsed JSON
+            </button>
+            <button
+              type="button"
+              className={payroll.buttonGhost}
+              disabled={relinking || uploading}
+              onClick={() => void relinkAll()}
+            >
+              {relinking ? "Linking jobs…" : "Link slips to projects"}
             </button>
           </div>
         </section>

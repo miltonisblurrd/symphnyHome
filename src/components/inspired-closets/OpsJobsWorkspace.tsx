@@ -50,6 +50,9 @@ type Job = {
   client: Client | null;
   designer: Staff | null;
   installer?: Staff | null;
+  receiving_open_qty?: number;
+  receiving_received_qty?: number;
+  receiving_total_qty?: number;
 };
 
 type ApiResponse = {
@@ -619,6 +622,7 @@ export default function OpsJobsWorkspace() {
                 <th>Client</th>
                 <th>Designer</th>
                 <th>Stage</th>
+                <th>Truck</th>
                 <th>Sold</th>
                 <th>Install</th>
                 <th>Contract</th>
@@ -651,6 +655,22 @@ export default function OpsJobsWorkspace() {
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    {(job.receiving_total_qty ?? 0) > 0 ? (
+                      <span
+                        title={
+                          (job.receiving_open_qty ?? 0) > 0
+                            ? "Still short on the packing slip"
+                            : "All slip pieces received"
+                        }
+                      >
+                        {job.receiving_received_qty}/{job.receiving_total_qty}
+                        {(job.receiving_open_qty ?? 0) > 0 ? " short" : " in"}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td>{job.sold_date ?? "—"}</td>
                   <td>

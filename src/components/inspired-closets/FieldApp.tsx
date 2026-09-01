@@ -44,6 +44,24 @@ type TimeEntry = {
   clock_in_lng: string | null;
 };
 
+type PacketMaterial = {
+  id: string;
+  qty: number;
+  status: string;
+  name: string;
+  sku: string;
+  size: string | null;
+};
+
+type PacketSlip = {
+  id: string;
+  item_number: string;
+  description: string | null;
+  qty: number;
+  received_qty: number;
+  status: string;
+};
+
 type Job = {
   id: string;
   stage: string;
@@ -57,6 +75,8 @@ type Job = {
   client: { id: string; name: string; address: string | null; phone: string | null } | null;
   openClock: TimeEntry | null;
   timeEntries?: TimeEntry[];
+  packet_materials?: PacketMaterial[];
+  packet_slip?: PacketSlip[];
 };
 
 type Media = { id: string; kind: string; public_url: string | null; caption: string | null };
@@ -1505,6 +1525,39 @@ export default function FieldApp() {
                   ) : (
                     <p className={styles.crewLine}>Just you so far.</p>
                   )}
+                  <section className={styles.packetParts}>
+                    <h3 className={styles.jobName}>Parts</h3>
+                    {(workJob.packet_materials ?? []).length > 0 ? (
+                      <ul className={styles.packetPartList}>
+                        {(workJob.packet_materials ?? []).map((line) => (
+                          <li key={line.id}>
+                            <strong>{line.name}</strong>
+                            {line.size ? ` · ${line.size}` : ""}
+                            {` · ${line.qty}`}
+                            {` · ${line.status}`}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {(workJob.packet_slip ?? []).length > 0 ? (
+                      <ul className={styles.packetPartList}>
+                        {(workJob.packet_slip ?? []).map((line) => (
+                          <li key={line.id}>
+                            #{line.item_number}
+                            {line.description ? ` · ${line.description}` : ""}
+                            {` · ${line.received_qty}/${line.qty} on the truck`}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {(workJob.packet_materials ?? []).length === 0 &&
+                    (workJob.packet_slip ?? []).length === 0 ? (
+                      <p className={styles.jobMeta}>
+                        Warehouse hasn&apos;t kitted this job yet. Parts show here after Receiving and To
+                        job.
+                      </p>
+                    ) : null}
+                  </section>
                   <button
                     type="button"
                     className={`${styles.btn} ${styles.packetBtn}`}

@@ -199,6 +199,7 @@ export default function OpsCrewMetricsWorkspace() {
   const [detailTab, setDetailTab] = useState<DetailTab>("details");
   const [fieldPassword, setFieldPassword] = useState("");
   const [fieldPhone, setFieldPhone] = useState("");
+  const [syncingRoster, setSyncingRoster] = useState(false);
   const [updateTitle, setUpdateTitle] = useState("");
   const [updateBody, setUpdateBody] = useState("");
   const [payLast, setPayLast] = useState("");
@@ -303,6 +304,39 @@ export default function OpsCrewMetricsWorkspace() {
     setSelectedId(null);
     setDetailTab("details");
     setFieldPassword("");
+  }
+
+  async function syncRosterFromJobs() {
+    setSyncingRoster(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/installers/sync", { method: "POST" });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        created?: string[];
+        jobs_assigned?: number;
+        crew_rows?: number;
+        roster?: Array<{ name: string; jobs: number }>;
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not create installers from jobs.");
+      const created = (payload.created ?? []).join(", ");
+      const names = (payload.roster ?? []).map((row) => `${row.name} (${row.jobs})`).join(", ");
+      setNotice({
+        kind: "info",
+        text: created
+          ? `Created ${created}. ${payload.jobs_assigned ?? 0} jobs attached. Set phone + password on each file so they can sign in.`
+          : `Jobs attached${names ? `: ${names}` : ""}. Set phone + password on each file so they can sign in.`,
+      });
+      await loadList();
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not create installers from jobs.",
+      });
+    } finally {
+      setSyncingRoster(false);
+    }
   }
 
   async function saveFieldAccess() {
@@ -840,6 +874,14 @@ export default function OpsCrewMetricsWorkspace() {
           ))}
         </nav>
         <div className={styles.toolbarRight}>
+          <button
+            type="button"
+            className={styles.buttonGhost}
+            disabled={syncingRoster || loading}
+            onClick={() => void syncRosterFromJobs()}
+          >
+            {syncingRoster ? "Creating accounts…" : "Create accounts from jobs"}
+          </button>
           <p className={styles.updatedStamp}>
             {listUpdatedAt
               ? `Updated ${listUpdatedAt.toLocaleString("en-US", {

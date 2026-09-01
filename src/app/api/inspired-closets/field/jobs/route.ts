@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
+import { isFieldTestInstaller } from "@/lib/inspired-closets-field-test-seed";
+import { jobBelongsOnField } from "@/lib/inspired-closets-ops-installer-roster";
 import { FIELD_JOB_STAGES } from "@/lib/inspired-closets-ops-field";
 import { markCompletionTenDue } from "@/lib/inspired-closets-ops-billing";
 
@@ -22,6 +24,9 @@ export async function GET() {
     .eq("installer_id", installerId)
     .eq("status", "approved");
   const crewJobIds = new Set((crewRows ?? []).map((row) => row.job_id));
+  const jobFilter = crewJobIds.size
+    ? `installer_id.eq.${installerId},id.in.(${[...crewJobIds].join(",")})`
+    : `installer_id.eq.${installerId}`;
 
   const [{ data: jobs, error }, { data: timeEntries }, { data: clients }, { data: staff }] =
     await Promise.all([
@@ -30,6 +35,7 @@ export async function GET() {
         .select("*")
         .is("deleted_at", null)
         .in("stage", [...FIELD_JOB_STAGES, "install_complete", "final_payment"])
+        .or(jobFilter)
         .order("install_date", { ascending: true, nullsFirst: false })
         .limit(200),
       supabase
@@ -58,30 +64,80 @@ export async function GET() {
     entriesByJob.set(entry.job_id, list);
   }
 
-  const enriched = (jobs ?? [])
-    .filter((job) => {
-      // Prefer jobs assigned to this installer; also show unassigned install-ready jobs.
-      if (job.installer_id === installerId) return true;
-      if (crewJobIds.has(job.id)) return true;
-      if (
-        !job.installer_id &&
-        (FIELD_JOB_STAGES as readonly string[]).includes(job.stage as string)
-      ) {
-        return true;
-      }
-      return false;
-    })
-    .map((job) => {
-      const entries = entriesByJob.get(job.id) ?? [];
-      const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
-      return {
-        ...job,
-        client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
-        openClock,
-        timeEntries: entries,
-        mine: job.installer_id === installerId || crewJobIds.has(job.id),
-      };
+  const isTestInstaller = isFieldTestInstaller(auth.installer);
+  const visibleJobs = (jobs ?? []).filter((job) =>
+    jobBelongsOnField({
+      installerId,
+      isTestInstaller,
+      job,
+      crewJobIds,
+      jobId: job.id,
+    }),
+  );
+  const packetJobIds = visibleJobs.map((job) => job.id);
+  const [{ data: materialRows, error: materialsError }, { data: slipRows }] = await Promise.all([
+    packetJobIds.length
+      ? supabase.from("ic_job_materials").select("id, job_id, qty, status, part_id").in("job_id", packetJobIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    packetJobIds.length
+      ? supabase
+          .from("ic_shipment_items")
+          .select("id, job_id, item_number, description, qty, received_qty, status")
+          .in("job_id", packetJobIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+  ]);
+  const materialList =
+    materialsError && /does not exist|schema cache/i.test(materialsError.message)
+      ? []
+      : (materialRows ?? []);
+  const partIds = [...new Set(materialList.map((row) => String(row.part_id ?? "")).filter(Boolean))];
+  const { data: parts } = partIds.length
+    ? await supabase.from("ic_parts").select("id, sku, name, size").in("id", partIds)
+    : { data: [] };
+  const partsById = new Map((parts ?? []).map((part) => [part.id, part]));
+  const materialsByJob = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of materialList) {
+    const jobId = String(row.job_id);
+    const part = partsById.get(String(row.part_id ?? ""));
+    const list = materialsByJob.get(jobId) ?? [];
+    list.push({
+      id: row.id,
+      qty: row.qty,
+      status: row.status,
+      name: part?.name ?? "Part",
+      sku: part?.sku ?? "",
+      size: part?.size ?? null,
     });
+    materialsByJob.set(jobId, list);
+  }
+  const slipsByJob = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of slipRows ?? []) {
+    const jobId = String(row.job_id);
+    const list = slipsByJob.get(jobId) ?? [];
+    list.push({
+      id: row.id,
+      item_number: row.item_number,
+      description: row.description,
+      qty: row.qty,
+      received_qty: row.received_qty,
+      status: row.status,
+    });
+    slipsByJob.set(jobId, list);
+  }
+
+  const enriched = visibleJobs.map((job) => {
+    const entries = entriesByJob.get(job.id) ?? [];
+    const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
+    return {
+      ...job,
+      client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
+      openClock,
+      timeEntries: entries,
+      mine: job.installer_id === installerId || crewJobIds.has(job.id),
+      packet_materials: materialsByJob.get(job.id) ?? [],
+      packet_slip: slipsByJob.get(job.id) ?? [],
+    };
+  });
 
   return NextResponse.json({
     ok: true,

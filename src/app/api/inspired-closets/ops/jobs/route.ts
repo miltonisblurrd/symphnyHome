@@ -5,7 +5,7 @@ import {
   ensurePaymentMilestones,
   markInstallFortyDue,
 } from "@/lib/inspired-closets-ops-billing";
-import { installBlockedByReceiving } from "@/lib/inspired-closets-ops-receiving";
+import { installBlockedByReceiving, receivingRollupByJobIds } from "@/lib/inspired-closets-ops-receiving";
 
 export const runtime = "nodejs";
 
@@ -91,14 +91,20 @@ export async function GET(request: Request) {
 
   const staffById = new Map((staffResult.data ?? []).map((member) => [member.id, member]));
   const clientsById = new Map((clientsResult.data ?? []).map((client) => [client.id, client]));
-  const jobs = (jobsResult.data ?? [])
-    .filter((job) => job.community_ref !== "FIELD-TEST")
-    .map((job) => ({
-    ...job,
-    client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
-    designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
-    installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
-  }));
+  const visible = (jobsResult.data ?? []).filter((job) => job.community_ref !== "FIELD-TEST");
+  const receivingByJob = await receivingRollupByJobIds(visible.map((job) => job.id));
+  const jobs = visible.map((job) => {
+    const receiving = receivingByJob.get(job.id);
+    return {
+      ...job,
+      client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
+      designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
+      installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
+      receiving_open_qty: receiving?.open_qty ?? 0,
+      receiving_received_qty: receiving?.received_qty ?? 0,
+      receiving_total_qty: receiving?.total_qty ?? 0,
+    };
+  });
 
   return NextResponse.json({
     ok: true,

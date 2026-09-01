@@ -4,6 +4,7 @@ import {
   APPOINTMENT_KINDS,
   APPOINTMENT_LOCATIONS,
 } from "@/lib/inspired-closets-ops-appointments";
+import Link from "next/link";
 import { PAYMENT_MILESTONES } from "@/lib/inspired-closets-ops-billing";
 import { JOB_KINDS } from "@/lib/inspired-closets-ops-jobs";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
@@ -45,6 +46,9 @@ export type ProjectJob = {
   designer: Staff | null;
   installer?: Staff | null;
   jobCheckOwner?: Staff | null;
+  receiving_open_qty?: number;
+  receiving_received_qty?: number;
+  receiving_total_qty?: number;
 };
 
 export type ProjectLead = {
@@ -226,6 +230,19 @@ export default function OpsProjectFile({
       </div>
 
       {loading && !file ? <p className={styles.empty}>Loading project…</p> : null}
+
+      {(job.receiving_total_qty ?? 0) > 0 ? (
+        <p
+          className={`${styles.notice} ${(job.receiving_open_qty ?? 0) > 0 ? styles.noticeError : ""}`}
+          style={{ marginTop: 0 }}
+        >
+          {(job.receiving_open_qty ?? 0) > 0
+            ? `Not install-ready — ${job.receiving_received_qty ?? 0}/${job.receiving_total_qty} pieces received. Finish Receiving before calling this job ready.`
+            : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
+          {" "}
+          <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
+        </p>
+      ) : null}
 
       <div className={styles.detailSection} style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
         <p className={styles.detailSectionTitle}>Project</p>

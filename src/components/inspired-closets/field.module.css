@@ -1648,6 +1648,23 @@
   color: var(--muted);
 }
 
+.packetParts {
+  margin: 0.85rem 0 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.packetPartList {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.packetPartList li + li {
+  margin-top: 0.2rem;
+}
+
 .jobsPastLabel {
   margin-top: 1.15rem;
 }

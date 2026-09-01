@@ -451,6 +451,54 @@ export async function installBlockedByReceiving(jobId: string): Promise<{
   };
 }
 
+export async function receivingRollupByJobIds(
+  jobIds: string[],
+): Promise<Map<string, { open_qty: number; received_qty: number; total_qty: number }>> {
+  const out = new Map<string, { open_qty: number; received_qty: number; total_qty: number }>();
+  if (jobIds.length === 0) return out;
+  const supabase = getSupabaseAdmin();
+  for (let i = 0; i < jobIds.length; i += 200) {
+    const slice = jobIds.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from("ic_shipment_items")
+      .select("job_id, qty, received_qty")
+      .in("job_id", slice);
+    if (error) {
+      if (missingReceivingTable(error.message)) return out;
+      return out;
+    }
+    for (const row of data ?? []) {
+      if (!row.job_id) continue;
+      const current = out.get(row.job_id) ?? { open_qty: 0, received_qty: 0, total_qty: 0 };
+      const qty = Number(row.qty) || 0;
+      const received = Number(row.received_qty) || 0;
+      current.total_qty += qty;
+      current.received_qty += received;
+      current.open_qty += Math.max(0, qty - received);
+      out.set(row.job_id, current);
+    }
+  }
+  return out;
+}
+
+export async function reverseReceiveScan(input: {
+  partId: string | null;
+  qty: number;
+  jobId: string | null;
+  actorId: string | null;
+  note?: string | null;
+}): Promise<void> {
+  if (!input.partId || input.qty <= 0) return;
+  await applyStockMovement({
+    partId: input.partId,
+    movementType: "adjust",
+    qty: -input.qty,
+    jobId: input.jobId,
+    note: input.note ?? "Undo receive scan",
+    actorId: input.actorId,
+  });
+}
+
 export async function applyScanToInventory(input: {
   item: ShipmentItemRow;
   qty: number;

@@ -42,3 +42,6 @@ next-env.d.ts
 # wrangler files
 .wrangler
 .dev.vars*
+
+# Stow / customer PDFs forwarded from Gavin (PII — do not commit)
+/docs/stow-inbox/

@@ -72,6 +72,8 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
   const [query, setQuery] = useState("");
   const [manual, setManual] = useState({ item_number: "", description: "", qty: "1", cust_ref: "" });
   const [relinking, setRelinking] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ item_number: "", qty: "", cust_ref: "", description: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -424,11 +426,78 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                   {item.part_id ? " · in inventory" : " · not in inventory yet"}
                   {item.job_id ? "" : " · no job"}
                 </div>
+                {editingId === item.id ? (
+                  <div style={{ display: "grid", gap: "0.35rem", marginTop: "0.45rem" }}>
+                    <input
+                      className={payroll.input}
+                      value={editDraft.item_number}
+                      onChange={(e) => setEditDraft({ ...editDraft, item_number: e.target.value })}
+                      placeholder="Item #"
+                    />
+                    <input
+                      className={payroll.input}
+                      value={editDraft.description}
+                      onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                      placeholder="Description"
+                    />
+                    <input
+                      className={payroll.input}
+                      value={editDraft.cust_ref}
+                      onChange={(e) => setEditDraft({ ...editDraft, cust_ref: e.target.value })}
+                      placeholder="Client / job as on the slip"
+                    />
+                    <input
+                      className={payroll.input}
+                      value={editDraft.qty}
+                      onChange={(e) => setEditDraft({ ...editDraft, qty: e.target.value })}
+                      placeholder="Qty"
+                    />
+                    <div style={{ display: "flex", gap: "0.35rem" }}>
+                      <button
+                        type="button"
+                        className={payroll.buttonPrimary}
+                        onClick={() =>
+                          void patchItem(item.id, {
+                            item_number: editDraft.item_number.trim(),
+                            description: editDraft.description.trim() || null,
+                            cust_ref: editDraft.cust_ref.trim() || null,
+                            job_name: editDraft.cust_ref.trim() || null,
+                            qty: Number(editDraft.qty) || item.qty,
+                          })
+                            .then(() => setEditingId(null))
+                            .catch((err: unknown) =>
+                              setNotice(err instanceof Error ? err.message : "Failed"),
+                            )
+                        }
+                      >
+                        Save
+                      </button>
+                      <button type="button" className={payroll.buttonGhost} onClick={() => setEditingId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </span>
               <span>
                 {item.received_qty}/{item.qty}
               </span>
-              <span style={{ display: "flex", gap: "0.3rem" }}>
+              <span style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={payroll.buttonGhost}
+                  onClick={() => {
+                    setEditingId(item.id);
+                    setEditDraft({
+                      item_number: item.item_number,
+                      qty: String(item.qty),
+                      cust_ref: item.cust_ref || item.job_name || "",
+                      description: item.description ?? "",
+                    });
+                  }}
+                >
+                  Fix
+                </button>
                 <button
                   type="button"
                   className={payroll.buttonGhost}

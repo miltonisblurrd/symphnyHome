@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { applyStockMovement } from "@/lib/inspired-closets-ops-inventory";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
-import { lineStatus, notifyReceiving } from "@/lib/inspired-closets-ops-receiving";
+import { lineStatus, linkItemToOs, notifyReceiving, reverseReceiveScan } from "@/lib/inspired-closets-ops-receiving";
 
 export const runtime = "nodejs";
 
@@ -45,7 +45,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
   const now = new Date().toISOString();
 
   if (action === "unreceive") {
-    const next = Math.max(0, (item.received_qty as number) - Math.max(1, Number(body.qty) || 1));
+    const qty = Math.max(1, Number(body.qty) || 1);
+    const previous = item.received_qty as number;
+    const next = Math.max(0, previous - qty);
+    const reversed = previous - next;
     const status = lineStatus(next, item.qty as number, item.damaged_qty as number);
     const { data, error } = await supabase
       .from("ic_shipment_items")
@@ -54,7 +57,24 @@ export async function PATCH(request: Request, ctx: Ctx) {
       .select("*")
       .single();
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true, item: data });
+    let stockWarning: string | null = null;
+    if (reversed > 0 && item.part_id) {
+      try {
+        await reverseReceiveScan({
+          partId: item.part_id as string,
+          qty: reversed,
+          jobId: (item.job_id as string) || null,
+          actorId: actor,
+          note: `Undo receive scan · ${item.item_number}`,
+        });
+      } catch (stockError) {
+        stockWarning =
+          stockError instanceof Error
+            ? stockError.message
+            : "Slip undone; inventory could not reverse.";
+      }
+    }
+    return NextResponse.json({ ok: true, item: data, stock_warning: stockWarning });
   }
 
   if (action === "missing" || action === "expected") {
@@ -203,5 +223,34 @@ export async function PATCH(request: Request, ctx: Ctx) {
     .select("*")
     .single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+  const shouldRelink =
+    "cust_ref" in body || "job_name" in body || "item_number" in body || "vendor_sku" in body;
+  if (shouldRelink && data) {
+    try {
+      const links = await linkItemToOs({
+        item_number: String(data.item_number ?? ""),
+        vendor_sku: data.vendor_sku ? String(data.vendor_sku) : null,
+        cust_ref: data.cust_ref ? String(data.cust_ref) : null,
+        job_name: data.job_name ? String(data.job_name) : null,
+        description: data.description ? String(data.description) : null,
+        qty: Number(data.qty) || 1,
+      });
+      const repair: Record<string, unknown> = {};
+      if (links.job_id && links.job_id !== data.job_id) repair.job_id = links.job_id;
+      if (links.part_id && links.part_id !== data.part_id) repair.part_id = links.part_id;
+      if (Object.keys(repair).length) {
+        const { data: relinked } = await supabase
+          .from("ic_shipment_items")
+          .update({ ...repair, updated_at: new Date().toISOString() })
+          .eq("id", itemId)
+          .select("*")
+          .single();
+        return NextResponse.json({ ok: true, item: relinked ?? data });
+      }
+    } catch {
+      /* keep the edited line even if match fails */
+    }
+  }
   return NextResponse.json({ ok: true, item: data });
 }

@@ -5,6 +5,7 @@ import {
   FIELD_TEST_UPDATES,
   isFieldTestInstaller,
 } from "@/lib/inspired-closets-field-test-seed";
+import { isFieldTestJob } from "@/lib/inspired-closets-ops-installer-roster";
 
 export const runtime = "nodejs";
 
@@ -54,7 +55,7 @@ export async function GET() {
   ] = await Promise.all([
     supabase
       .from("ic_jobs")
-      .select("id, installer_id, stage, install_date, visit_window, notes, field_notes, client_id, job_kind")
+      .select("id, installer_id, stage, install_date, visit_window, notes, field_notes, client_id, job_kind, community_ref")
       .or(
         crewJobIds.length
           ? `installer_id.eq.${installer.id},id.in.(${crewJobIds.join(",")})`
@@ -99,8 +100,11 @@ export async function GET() {
   ]);
 
   const clientsById = new Map((clients ?? []).map((c) => [c.id, c]));
+  const isTestInstaller = isFieldTestInstaller(installer);
   const activeStages = new Set(["install_scheduled", "install_in_progress", "ordered", "job_check"]);
-  const mappedJobs = (jobs ?? []).map((job) => {
+  const mappedJobs = (jobs ?? [])
+    .filter((job) => (isTestInstaller ? isFieldTestJob(job) : !isFieldTestJob(job)))
+    .map((job) => {
     const client = job.client_id ? clientsById.get(job.client_id) : null;
     return {
       id: job.id,

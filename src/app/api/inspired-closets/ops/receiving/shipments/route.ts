@@ -9,6 +9,7 @@ import {
   missingReceivingTable,
   notifyReceiving,
   parsePackingSlip,
+  relinkShipmentItems,
   shipmentRollup,
   type ParsedSlipItem,
   type ShipmentItemRow,
@@ -127,11 +128,40 @@ export async function POST(request: Request) {
   try {
     if (contentType.includes("application/json")) {
       const body = (await request.json()) as {
+        action?: string;
         notice?: string;
         ship_date?: string;
         vendor?: string;
         items?: Array<Record<string, unknown>>;
       };
+      if (body.action === "relink_all") {
+        const { data: ships, error: listError } = await supabase
+          .from("ic_shipments")
+          .select("id")
+          .is("deleted_at", null)
+          .limit(100);
+        if (listError) {
+          return NextResponse.json({ ok: false, error: listError.message }, { status: 500 });
+        }
+        let linkedJobs = 0;
+        let linkedParts = 0;
+        let unassigned = 0;
+        for (const ship of ships ?? []) {
+          const result = await relinkShipmentItems(ship.id);
+          linkedJobs += result.linked_jobs;
+          linkedParts += result.linked_parts;
+          unassigned += result.unassigned;
+        }
+        return NextResponse.json({
+          ok: true,
+          relinked: {
+            shipments: (ships ?? []).length,
+            linked_jobs: linkedJobs,
+            linked_parts: linkedParts,
+            unassigned,
+          },
+        });
+      }
       const items = fixtureItemsToParsed(body.items ?? []);
       if (items.length === 0) {
         return NextResponse.json(

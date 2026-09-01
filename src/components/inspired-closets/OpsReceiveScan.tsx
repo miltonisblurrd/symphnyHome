@@ -30,6 +30,13 @@ type Banner = {
   warn?: boolean;
 };
 
+type ScanLogRow = {
+  item_number: string;
+  job: string;
+  description: string;
+  qty: number;
+};
+
 const OFFLINE_KEY = "ic-receiving-offline";
 
 function readOffline(): Array<{ shipmentId: string; item_number: string; qty: number; pallet: string | null }> {
@@ -50,6 +57,16 @@ function writeOffline(
   rows: Array<{ shipmentId: string; item_number: string; qty: number; pallet: string | null }>,
 ) {
   localStorage.setItem(OFFLINE_KEY, JSON.stringify(rows));
+}
+
+function jobLabel(item?: Item | null): string {
+  return item?.cust_ref || item?.job_name || "Unassigned";
+}
+
+function shortPallet(id: string): string {
+  const digits = id.replace(/\D/g, "");
+  const tail = (digits || id).slice(-4);
+  return `…${tail}`;
 }
 
 function beep(ok: boolean) {
@@ -78,6 +95,10 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   const [query, setQuery] = useState("");
   const [banner, setBanner] = useState<Banner | null>(null);
   const [lastItem, setLastItem] = useState<Item | null>(null);
+  const [lastQty, setLastQty] = useState(1);
+  const [scanLog, setScanLog] = useState<ScanLogRow[]>([]);
+  const [logOpen, setLogOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [ocrReady, setOcrReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -208,19 +229,34 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       } else if (last.result === "already_received") {
         beep(false);
         setLastItem(last.item);
+        setLastQty(qty);
         setBanner({
           title: "Already in",
-          detail: `${last.item?.item_number ?? code} · ${last.item?.job_name ?? ""}`,
+          detail: `${jobLabel(last.item)} · #${last.item?.item_number ?? code}`,
           warn: true,
         });
       } else {
         beep(true);
         if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(40);
         setLastItem(last.item);
+        setLastQty(qty);
         setBanner({
-          title: last.result === "pallet_mismatch" ? "Checked in · other pallet" : "Checked in",
-          detail: `${last.item?.item_number ?? code} · ${last.item?.job_name ?? ""} · ${last.item?.description ?? ""}`,
+          title: last.result === "pallet_mismatch" ? "Other pallet" : "SCANNED",
+          detail: jobLabel(last.item),
         });
+        if (last.item) {
+          setScanLog((rows) =>
+            [
+              {
+                item_number: last.item?.item_number ?? code,
+                job: jobLabel(last.item),
+                description: last.item?.description ?? "",
+                qty,
+              },
+              ...rows,
+            ].slice(0, 20),
+          );
+        }
       }
       await load();
     } catch (error) {
@@ -281,6 +317,36 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     holdRef.current = false;
     setScanning(false);
     cancelAnimationFrame(rafRef.current);
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      await load();
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function undoLast() {
+    if (!lastItem) return;
+    try {
+      await fetch(`/api/inspired-closets/ops/receiving/shipments/${shipmentId}/items/${lastItem.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unreceive", qty: lastQty }),
+      });
+      setScanLog((rows) => rows.slice(1));
+      setLastItem(null);
+      setBanner(null);
+      await load();
+    } catch (error) {
+      setBanner({
+        title: "Undo failed",
+        detail: error instanceof Error ? error.message : "Try Browse −",
+        warn: true,
+      });
+    }
   }
 
   async function markCredit(item: Item, on = true) {
@@ -371,19 +437,41 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     [items, pallet],
   );
 
+  const activePallet = (stats?.by_container ?? []).find((row) => row.container_id === pallet);
+  const focusReceived = activePallet?.total_received_qty ?? stats?.total_received_qty ?? 0;
+  const focusQty = activePallet?.total_qty ?? stats?.total_qty ?? 0;
+  const focusPct = focusQty > 0 ? Math.round((focusReceived / focusQty) * 100) : 0;
+  const hit = Boolean(lastItem && banner && !banner.warn);
+
   return (
-    <div className={styles.scanPage}>
-      <header className={styles.scanTop}>
-        <div>
-          <p className={styles.scanTitle}>{notice || "Receiving"}</p>
-          <p className={styles.scanMeta}>
-            {stats?.total_received_qty ?? 0}/{stats?.total_qty ?? 0} · {stats?.pct ?? 0}%
-            {pallet ? ` · pallet ${pallet}` : ""}
+    <div className={`${styles.scanPage} ${hit ? styles.scanHit : ""}`}>
+      <header className={styles.scanChrome}>
+        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}`} className={styles.scanNav}>
+          Back
+        </Link>
+        <div className={styles.scanCounts}>
+          <p className={styles.scanHeroCount}>
+            {focusReceived}/{focusQty} {focusPct}%
           </p>
+          <button type="button" className={styles.scanSync} onClick={() => void syncNow()}>
+            {stats?.total_received_qty ?? 0}/{stats?.total_qty ?? 0} total / {syncing ? "syncing…" : "tap to sync"}
+          </button>
+          <p className={styles.scanBrand}>Inspired Closets{notice ? ` · ${notice}` : ""}</p>
         </div>
-        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}`}>Details</Link>
+        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}`} className={styles.scanNav}>
+          Summary
+        </Link>
       </header>
 
+      <div className={styles.palletContext}>
+        {pallet && activePallet ? (
+          <span>
+            Pallet {shortPallet(pallet)} {activePallet.total_received_qty}/{activePallet.total_qty} tap to change
+          </span>
+        ) : (
+          <span>Entire truck · tap a pallet</span>
+        )}
+      </div>
       <div className={styles.palletBar}>
         <button
           type="button"
@@ -399,56 +487,74 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
             className={`${styles.palletChip} ${pallet === row.container_id ? styles.palletOn : ""}`}
             onClick={() => setPallet(row.container_id)}
           >
-            {row.container_id.slice(-6)} {row.total_received_qty}/{row.total_qty}
+            {shortPallet(row.container_id)} {row.total_received_qty}/{row.total_qty}
           </button>
         ))}
       </div>
 
+      {lastItem && banner && !banner.warn ? (
+        <div className={styles.successBanner}>
+          <div>
+            <p className={styles.successJob}>{jobLabel(lastItem)}</p>
+            <p className={styles.successDesc}>{lastItem.description ?? ""}</p>
+            <p className={styles.successMeta}>
+              #{lastItem.item_number} · Qty: {lastQty}
+              {banner.title === "Other pallet" ? " · other pallet" : ""}
+            </p>
+          </div>
+          <button type="button" className={styles.undoBtn} onClick={() => void undoLast()}>
+            Undo
+          </button>
+        </div>
+      ) : banner ? (
+        <div className={`${styles.banner} ${styles.bannerWarn}`}>
+          <h3>{banner.title}</h3>
+          <p>{banner.detail}</p>
+        </div>
+      ) : null}
+
       <nav className={styles.tabs}>
-        {(["scan", "search", "browse"] as const).map((id) => (
+        {(
+          [
+            ["scan", "Scan"],
+            ["search", "Search"],
+            ["browse", "Browse"],
+          ] as const
+        ).map(([id, label]) => (
           <button
             key={id}
             type="button"
             className={`${styles.tab} ${tab === id ? styles.tabOn : ""}`}
             onClick={() => setTab(id)}
           >
-            {id === "scan" ? "Scan" : id === "search" ? "Search" : "Browse"}
+            {label}
           </button>
         ))}
       </nav>
-
-      {banner ? (
-        <div className={`${styles.banner} ${banner.warn ? styles.bannerWarn : ""}`}>
-          <h3>{banner.title}</h3>
-          <p>{banner.detail}</p>
-          {lastItem && !lastItem.needs_credit ? (
-            <button
-              type="button"
-              className={styles.creditBtn}
-              style={{ marginTop: "0.55rem" }}
-              onClick={() => void markCredit(lastItem, true)}
-            >
-              Credit later — still using it
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       {tab === "scan" ? (
         <>
           <div className={styles.cameraWrap}>
             <video ref={videoRef} playsInline muted autoPlay />
             <div className={styles.scanBand} />
+            {hit && lastItem ? (
+              <div className={styles.scannedOverlay}>
+                <p className={styles.overlayKicker}>SCANNED</p>
+                <p className={styles.overlayJob}>{jobLabel(lastItem)}</p>
+                <p className={styles.overlayDesc}>{lastItem.description ?? ""}</p>
+                <p className={styles.overlayMeta}>#{lastItem.item_number}</p>
+              </div>
+            ) : null}
             <canvas ref={canvasRef} hidden />
           </div>
           <button
             type="button"
-            className={`${styles.holdBtn} ${scanning ? styles.holdScanning : ""}`}
+            className={`${styles.holdBtn} ${scanning ? styles.holdScanning : ""} ${hit ? styles.holdSuccess : ""}`}
             onPointerDown={startHold}
             onPointerUp={stopHold}
             onPointerLeave={stopHold}
           >
-            {scanning ? "Scanning…" : ocrReady ? "Hold to scan" : "Starting OCR…"}
+            {scanning ? "SCANNING…" : ocrReady ? "HOLD TO SCAN NEXT" : "Starting camera…"}
           </button>
         </>
       ) : null}
@@ -503,30 +609,48 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
           </div>
         ))}
 
-      <section className={styles.creditQueue}>
-        <h3>Need credit after this truck</h3>
-        <p>
-          Blue-tape it, keep scanning. These pieces stay on the job — file the vendor list when
-          the last pallet is in.
-        </p>
-        {creditQueue.length === 0 ? (
-          <p>Nothing flagged yet.</p>
-        ) : (
-          creditQueue.map((item) => (
-            <div key={item.id} className={styles.creditRow}>
-              <div>
-                <strong className={styles.mono}>{item.item_number}</strong>
-                <div style={{ color: "#a8a29e", fontSize: "0.75rem" }}>
-                  {item.job_name ?? item.cust_ref ?? "—"} · {item.description ?? ""}
+      {tab !== "scan" ? (
+        <section className={styles.creditQueue}>
+          <h3>Need credit after this truck</h3>
+          <p>
+            Blue-tape it, keep scanning. These pieces stay on the job — file the vendor list when
+            the last pallet is in.
+          </p>
+          {creditQueue.length === 0 ? (
+            <p>Nothing flagged yet.</p>
+          ) : (
+            creditQueue.map((item) => (
+              <div key={item.id} className={styles.creditRow}>
+                <div>
+                  <strong className={styles.mono}>{item.item_number}</strong>
+                  <div style={{ color: "#a8a29e", fontSize: "0.75rem" }}>
+                    {item.job_name ?? item.cust_ref ?? "—"} · {item.description ?? ""}
+                  </div>
                 </div>
+                <button type="button" className={styles.creditBtn} onClick={() => void markCredit(item, false)}>
+                  Done
+                </button>
               </div>
-              <button type="button" className={styles.creditBtn} onClick={() => void markCredit(item, false)}>
-                Done
-              </button>
-            </div>
-          ))
-        )}
-      </section>
+            ))
+          )}
+        </section>
+      ) : (
+        <section className={styles.scanLog}>
+          <button type="button" className={styles.scanLogToggle} onClick={() => setLogOpen((open) => !open)}>
+            Scan Log · {scanLog.length}
+          </button>
+          {logOpen
+            ? scanLog.map((row, index) => (
+                <div key={`${row.item_number}-${index}`} className={styles.scanLogRow}>
+                  <strong>{row.job}</strong>
+                  <span>
+                    #{row.item_number} · {row.description} · Qty {row.qty}
+                  </span>
+                </div>
+              ))
+            : null}
+        </section>
+      )}
     </div>
   );
 }

@@ -106,29 +106,73 @@
   font-size: 0.78rem;
 }
 
-/* Scan screen — dark, phone-first, like the warehouse app they already use. */
+/* Scan screen — phone-first, Inspired Closets chrome, green only on a hit. */
 .scanPage {
   min-height: 100dvh;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: #000;
+  color: #efe9e5;
   font-family: "Lato", system-ui, sans-serif;
   display: flex;
   flex-direction: column;
 }
 
-.scanTop {
-  padding: 0.85rem 1rem 0.5rem;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  align-items: flex-start;
+.scanHit {
+  background: #04140a;
 }
 
-.scanTop a {
-  color: #93c5fd;
-  font-size: 0.8rem;
-  font-weight: 700;
+.scanChrome {
+  padding: 0.7rem 0.85rem 0.35rem;
+  display: grid;
+  grid-template-columns: 3.2rem 1fr 4.2rem;
+  align-items: start;
+  gap: 0.4rem;
+}
+
+.scanNav {
+  color: #821f2d;
+  font-size: 0.92rem;
+  font-weight: 800;
   text-decoration: none;
+  padding-top: 0.15rem;
+}
+
+.scanNav:last-child {
+  text-align: right;
+}
+
+.scanCounts {
+  text-align: center;
+}
+
+.scanHeroCount {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #fff;
+  line-height: 1.1;
+}
+
+.scanSync {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0;
+  border: 0;
+  background: none;
+  color: #93c5fd;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scanBrand {
+  margin: 0.15rem 0 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #821f2d;
 }
 
 .scanTitle {
@@ -143,35 +187,48 @@
   color: #94a3b8;
 }
 
+.palletContext {
+  margin: 0;
+  padding: 0.45rem 0.85rem;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: center;
+}
+
 .tabs {
   display: flex;
-  gap: 0.35rem;
-  padding: 0 1rem 0.65rem;
+  gap: 0;
+  padding: 0.15rem 0.85rem 0.2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .tab {
   flex: 1;
   border: 0;
-  border-radius: 0.7rem;
-  padding: 0.55rem;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  padding: 0.65rem 0.4rem;
   font-weight: 800;
-  font-size: 0.8rem;
-  background: #1e293b;
-  color: #94a3b8;
+  font-size: 0.82rem;
+  background: transparent;
+  color: #a8a29e;
   cursor: pointer;
 }
 
 .tabOn {
-  background: #334155;
+  background: transparent;
   color: #fff;
+  border-bottom-color: #2563eb;
 }
 
 .cameraWrap {
   position: relative;
-  margin: 0 1rem;
+  margin: 0.55rem 0.85rem 0;
   border-radius: 1rem;
   overflow: hidden;
-  background: #000;
+  background: #111;
   aspect-ratio: 4 / 3;
 }
 
@@ -193,14 +250,59 @@
   pointer-events: none;
 }
 
+.scannedOverlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(86%, 18rem);
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.85rem;
+  background: rgba(22, 163, 74, 0.92);
+  color: #fff;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.overlayKicker {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.overlayJob,
+.successJob {
+  margin: 0.15rem 0 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.overlayDesc,
+.successDesc {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  opacity: 0.95;
+}
+
+.overlayMeta,
+.successMeta {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.88;
+}
+
 .holdBtn {
-  margin: 0.85rem 1rem 0;
+  margin: 0.75rem 0.85rem 0;
   border: 0;
-  border-radius: 1rem;
-  padding: 1rem;
+  border-radius: 1.15rem;
+  padding: 1.05rem 1rem;
   font-size: 1.05rem;
   font-weight: 800;
-  background: #2563eb;
+  letter-spacing: 0.04em;
+  background: #16a34a;
   color: #fff;
   cursor: pointer;
   user-select: none;
@@ -209,7 +311,34 @@
 
 .holdBtn:active,
 .holdScanning {
-  background: #d97706;
+  background: #15803d;
+}
+
+.holdSuccess {
+  background: #16a34a;
+}
+
+.successBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  background: #16a34a;
+  color: #fff;
+}
+
+.undoBtn {
+  flex: 0 0 auto;
+  border: 1.5px solid #fff;
+  background: transparent;
+  color: #fff;
+  border-radius: 0.65rem;
+  padding: 0.45rem 0.75rem;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 
 .banner {
@@ -221,8 +350,9 @@
 }
 
 .bannerWarn {
-  background: #7c2d12;
-  border-color: #9a3412;
+  background: #821f2d;
+  border-color: #821f2d;
+  color: #fdeae6;
 }
 
 .banner h3 {
@@ -233,7 +363,37 @@
 .banner p {
   margin: 0.2rem 0 0;
   font-size: 0.8rem;
-  color: #cbd5e1;
+  color: #fdeae6;
+}
+
+.scanLog {
+  margin: 0.75rem 0.85rem 1.4rem;
+}
+
+.scanLogToggle {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: #a8a29e;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.35rem 0;
+}
+
+.scanLogRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+}
+
+.scanLogRow span {
+  color: #a8a29e;
 }
 
 .searchBox {

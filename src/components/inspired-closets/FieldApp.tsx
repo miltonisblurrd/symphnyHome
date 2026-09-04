@@ -9,12 +9,16 @@ import {
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
 import InstallerHomeCalendar from "@/components/inspired-closets/InstallerHomeCalendar";
 import InstallerMonthPage from "@/components/inspired-closets/InstallerMonthPage";
+import FieldVehicleCard from "@/components/inspired-closets/FieldVehicleCard";
+import FieldVehicleTab, {
+  type FieldVehicleSnapshot,
+} from "@/components/inspired-closets/FieldVehicleTab";
 import access from "@/app/inspired-closets/access/access.module.css";
 import styles from "./field.module.css";
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 
-type FieldTab = "today" | "schedule" | "jobs" | "me";
+type FieldTab = "today" | "schedule" | "jobs" | "vehicle" | "me";
 
 type Installer = { id: string; name: string; phone?: string | null; title?: string | null };
 
@@ -112,6 +116,7 @@ const NAV: { id: FieldTab; label: string }[] = [
   { id: "today", label: "Home" },
   { id: "schedule", label: "Schedule" },
   { id: "jobs", label: "Jobs" },
+  { id: "vehicle", label: "Vehicle" },
 ];
 
 type FeedEntry =
@@ -349,6 +354,20 @@ function TabIcon({ id }: { id: FieldTab }) {
       </svg>
     );
   }
+  if (id === "vehicle") {
+    return (
+      <svg className={styles.tabBarIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M4 15.5h16v3.2a1 1 0 0 1-1 1h-1.4M6.4 19.7H5a1 1 0 0 1-1-1V15.5Zm2.2 0h7.2M5.2 15.5l1.6-6.2A2 2 0 0 1 8.7 8h6.8a2 2 0 0 1 1.9 1.3l1.6 6.2"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+        <circle cx="7.4" cy="19.6" r="1.35" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="16.6" cy="19.6" r="1.35" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
   return (
     <svg className={styles.tabBarIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="3.5" y="8" width="17" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
@@ -387,6 +406,9 @@ export default function FieldApp() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [hoursThisWeek, setHoursThisWeek] = useState(0);
   const [nextJobId, setNextJobId] = useState<string | null>(null);
+  const [vehicleSnap, setVehicleSnap] = useState<FieldVehicleSnapshot | null>(null);
+  const [milesOut, setMilesOut] = useState("");
+  const [milesBack, setMilesBack] = useState("");
   const [loading, setLoading] = useState(true);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -418,6 +440,11 @@ export default function FieldApp() {
   const [account, setAccount] = useState("");
 
   const myJobs = useMemo(() => jobs.filter((job) => job.mine), [jobs]);
+  const vehicleJobNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const job of myJobs) map.set(job.id, job.client?.name ?? "Job");
+    return map;
+  }, [myJobs]);
   const selected = useMemo(() => myJobs.find((job) => job.id === selectedId) ?? null, [myJobs, selectedId]);
   const workJob = useMemo(() => {
     if (selected && !isPastJob(selected)) return selected;
@@ -532,6 +559,18 @@ export default function FieldApp() {
       }
     } catch {
       /* auto-sync / HMR — keep the last good screen */
+    }
+  }, []);
+
+  const loadVehicle = useCallback(async () => {
+    try {
+      const response = await fetch("/api/inspired-closets/field/vehicle");
+      if (response.status === 401) return;
+      const payload = (await response.json()) as FieldVehicleSnapshot & { ok?: boolean };
+      if (!payload.ok) return;
+      setVehicleSnap(payload);
+    } catch {
+      /* keep last truck snapshot */
     }
   }, []);
 
@@ -651,7 +690,13 @@ export default function FieldApp() {
           return;
         }
         setInstaller(payload.installer);
-        await Promise.all([loadHome(), loadJobs(), loadPto(), loadProfiles(payload.installer.id)]);
+        await Promise.all([
+          loadHome(),
+          loadJobs(),
+          loadPto(),
+          loadProfiles(payload.installer.id),
+          loadVehicle(),
+        ]);
         await flushQueue();
       } catch (error) {
         setNotice({
@@ -662,7 +707,7 @@ export default function FieldApp() {
         setLoading(false);
       }
     })();
-  }, [flushQueue, loadHome, loadJobs, loadProfiles, loadPto]);
+  }, [flushQueue, loadHome, loadJobs, loadProfiles, loadPto, loadVehicle]);
 
   useEffect(() => {
     if (!installer) return;
@@ -670,6 +715,7 @@ export default function FieldApp() {
       void loadHome();
       void loadJobs();
       void loadPto();
+      void loadVehicle();
       void flushQueue();
     }
     const timer = window.setInterval(() => {
@@ -682,14 +728,20 @@ export default function FieldApp() {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [flushQueue, installer, loadHome, loadJobs, loadPto]);
+  }, [flushQueue, installer, loadHome, loadJobs, loadPto, loadVehicle]);
 
   useEffect(() => {
     if (workJob?.id) {
       void loadJobExtras(workJob.id);
       setFieldNotes(workJob.field_notes ?? "");
+      const today = new Date().toISOString().slice(0, 10);
+      const row = vehicleSnap?.miles?.find(
+        (item) => item.job_id === workJob.id && item.drive_date === today,
+      );
+      setMilesOut(row ? String(row.miles_out) : "");
+      setMilesBack(row ? String(row.miles_back) : "");
     }
-  }, [loadJobExtras, workJob]);
+  }, [loadJobExtras, vehicleSnap, workJob]);
 
   const hasOpenClock = jobs.some((job) => Boolean(job.openClock));
   useEffect(() => {
@@ -977,6 +1029,55 @@ export default function FieldApp() {
     setBellOpen(false);
     setProfileMenuOpen(false);
     if (next === "jobs") setJobsShowPacketFirst(false);
+  }
+
+  async function saveVehicleLog(body: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/inspired-closets/field/vehicle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json()) as FieldVehicleSnapshot & { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not save.");
+      setVehicleSnap(payload);
+      setNotice({ kind: "ok", text: "Saved on your truck." });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not save.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveJobMiles(jobId: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/inspired-closets/field/vehicle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "miles",
+          job_id: jobId,
+          miles_out: Number(milesOut) || 0,
+          miles_back: Number(milesBack) || 0,
+        }),
+      });
+      const payload = (await response.json()) as FieldVehicleSnapshot & { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not save miles.");
+      setVehicleSnap(payload);
+      setNotice({ kind: "ok", text: "Miles saved for this job." });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not save miles.",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitPto() {
@@ -1419,6 +1520,10 @@ export default function FieldApp() {
             )}
           </aside>
 
+          <div className={styles.vehicleCol}>
+            <FieldVehicleCard snapshot={vehicleSnap} onOpen={() => goToTab("vehicle")} />
+          </div>
+
           <div className={styles.homeCal}>
             <InstallerHomeCalendar
               jobs={myJobs}
@@ -1473,6 +1578,15 @@ export default function FieldApp() {
           jobs={myJobs}
           timeOff={timeOff}
           onOpenJob={(jobId) => openJobSurface(jobId)}
+        />
+      ) : null}
+
+      {tab === "vehicle" ? (
+        <FieldVehicleTab
+          snapshot={vehicleSnap}
+          busy={busy}
+          jobNames={vehicleJobNames}
+          onLog={saveVehicleLog}
         />
       ) : null}
 
@@ -1557,6 +1671,40 @@ export default function FieldApp() {
                         job.
                       </p>
                     ) : null}
+                  </section>
+                  <section className={styles.packetParts}>
+                    <h3 className={styles.jobName}>Miles today</h3>
+                    <div className={styles.twoCol}>
+                      <label className={styles.field} style={{ marginTop: 0 }}>
+                        <span className={styles.label}>Out</span>
+                        <input
+                          className={styles.input}
+                          inputMode="numeric"
+                          value={milesOut}
+                          onChange={(e) => setMilesOut(e.target.value)}
+                          placeholder="0"
+                        />
+                      </label>
+                      <label className={styles.field} style={{ marginTop: 0 }}>
+                        <span className={styles.label}>Back</span>
+                        <input
+                          className={styles.input}
+                          inputMode="numeric"
+                          value={milesBack}
+                          onChange={(e) => setMilesBack(e.target.value)}
+                          placeholder="0"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.btnGhost}
+                      style={{ marginTop: "0.55rem" }}
+                      disabled={busy || !vehicleSnap?.vehicle}
+                      onClick={() => void saveJobMiles(workJob.id)}
+                    >
+                      Save miles
+                    </button>
                   </section>
                   <button
                     type="button"

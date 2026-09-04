@@ -45,3 +45,6 @@ next-env.d.ts
 
 # Stow / customer PDFs forwarded from Gavin (PII — do not commit)
 /docs/stow-inbox/
+
+# Installer vehicle / license / insurance scans (PII — do not commit)
+/vheicleStuff/

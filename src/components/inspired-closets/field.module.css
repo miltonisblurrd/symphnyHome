@@ -993,6 +993,11 @@
   min-width: 0;
 }
 
+.vehicleCol {
+  grid-area: vehicle;
+  min-width: 0;
+}
+
 .leftStack {
   display: grid;
   gap: 1rem;
@@ -1623,6 +1628,7 @@
     grid-template-columns: minmax(16.5rem, 0.9fr) minmax(0, 1.35fr) minmax(16rem, 0.85fr);
     grid-template-areas:
       "profile feed quick"
+      "vehicle feed quick"
       "cal feed quick";
     align-items: start;
   }
@@ -1728,6 +1734,7 @@
     grid-template-areas:
       "profile"
       "quick"
+      "vehicle"
       "cal"
       "feed";
   }
@@ -1884,7 +1891,7 @@
 
   .tabBar {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     position: fixed;
     left: 0;
     right: 0;

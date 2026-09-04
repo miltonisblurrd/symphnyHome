@@ -201,6 +201,72 @@ function stageLabel(stage: string) {
   return stage.replace(/_/g, " ");
 }
 
+type OfficeFact = { label: string; value: string };
+
+const OFFICE_SPLIT =
+  /(?=(?:Order|Crew|Payment type|Payment|Owes|RTO|Podium|Folder|Visit|Scheduled|Date scheduled|Date ordered|Receive|ETA|Install date|Confirmed|Job complete|Job check date|Related install|Zip|Original install|100% ready):\s)/i;
+
+function isBillingNote(value: string) {
+  return /invoice|invoiced|check|paid|pif|gc\b|visa|card|billing|owes|\$|deposit/i.test(value);
+}
+
+function parseOfficeNotes(notes: string | null | undefined): { facts: OfficeFact[]; site: string[] } {
+  if (!notes?.trim()) return { facts: [], site: [] };
+  const chunks = notes
+    .split(/\n+/)
+    .flatMap((line) => line.split(OFFICE_SPLIT))
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const facts: OfficeFact[] = [];
+  const site: string[] = [];
+  for (const chunk of chunks) {
+    const match = chunk.match(/^([^:]{1,40}):\s*(.+)$/);
+    const label = (match?.[1] ?? "Note").trim();
+    const value = (match?.[2] ?? chunk).trim();
+    if (!value) continue;
+    if (/^crew$/i.test(label)) continue;
+    if (/^payment$/i.test(label) && !isBillingNote(value)) {
+      site.push(value);
+      continue;
+    }
+    if (/^note$/i.test(label)) {
+      site.push(value);
+      continue;
+    }
+    facts.push({ label, value });
+  }
+  return { facts, site };
+}
+
+function OfficePacket({ notes }: { notes: string | null | undefined }) {
+  const { facts, site } = parseOfficeNotes(notes);
+  if (facts.length === 0 && site.length === 0) return null;
+  return (
+    <>
+      {facts.length > 0 ? (
+        <dl className={styles.packetFacts}>
+          {facts.map((fact, index) => (
+            <div key={`${fact.label}-${index}`} className={styles.packetFact}>
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {site.length > 0 ? (
+        <div className={styles.packetBlock}>
+          <h3 className={styles.packetSection}>Site notes</h3>
+          <ul className={styles.packetNoteList}>
+            {site.map((item, index) => (
+              <li key={`${item}-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function localYmd(value = new Date()): string {
   const y = value.getFullYear();
   const m = String(value.getMonth() + 1).padStart(2, "0");
@@ -457,8 +523,11 @@ export default function FieldApp() {
         .sort((a, b) => (b.install_date ?? "").localeCompare(a.install_date ?? "")),
     [myJobs],
   );
-  const openJobs = useMemo(
-    () => myJobs.filter((job) => !isPastJob(job)),
+  const upcomingJobs = useMemo(
+    () =>
+      myJobs
+        .filter((job) => !isPastJob(job))
+        .sort((a, b) => (a.install_date ?? "9999").localeCompare(b.install_date ?? "9999")),
     [myJobs],
   );
   const reviewJob = useMemo(
@@ -466,10 +535,19 @@ export default function FieldApp() {
     [myJobs, reviewJobId],
   );
   const nextJob = useMemo(
-    () => myJobs.find((job) => job.id === nextJobId) ?? myJobs[0] ?? null,
+    () =>
+      myJobs.find((job) => job.id === nextJobId) ??
+      myJobs.find((job) => !isPastJob(job)) ??
+      myJobs[0] ??
+      null,
     [myJobs, nextJobId],
   );
   const clockedJob = useMemo(() => myJobs.find((job) => job.openClock) ?? null, [myJobs]);
+  const nextBoardJob = clockedJob ?? upcomingJobs[0] ?? null;
+  const laterJobs = useMemo(
+    () => upcomingJobs.filter((job) => job.id !== nextBoardJob?.id),
+    [upcomingJobs, nextBoardJob],
+  );
   const packetJob = clockedJob ?? nextJob;
   const recentJobs = useMemo(
     () =>
@@ -711,22 +789,28 @@ export default function FieldApp() {
 
   useEffect(() => {
     if (!installer) return;
-    function onFocus() {
+    function refreshCalendar() {
       void loadHome();
       void loadJobs();
       void loadPto();
       void loadVehicle();
       void flushQueue();
     }
+    function onFocus() {
+      refreshCalendar();
+    }
+    function onVisible() {
+      if (document.visibilityState === "visible") refreshCalendar();
+    }
     const timer = window.setInterval(() => {
-      void loadHome();
-      void loadJobs();
-      void flushQueue();
-    }, 30_000);
+      refreshCalendar();
+    }, 15_000);
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [flushQueue, installer, loadHome, loadJobs, loadPto, loadVehicle]);
 
@@ -1024,11 +1108,33 @@ export default function FieldApp() {
     setReviewJobId(null);
   }
 
+  function openScheduledJob(jobId: string) {
+    setSelectedId(jobId);
+    setReviewJobId(null);
+    setJobsShowPacketFirst(true);
+  }
+
+  function jobKindClass(kind: string | null | undefined) {
+    if (kind === "service") return styles.chipService;
+    if (kind === "go_back") return styles.chipGoBack;
+    return styles.chipNew;
+  }
+
+  function jobKindLabel(kind: string | null | undefined) {
+    if (kind === "service") return "Service";
+    if (kind === "go_back") return "Go-back";
+    return "New";
+  }
+
   function goToTab(next: FieldTab) {
     setTab(next);
     setBellOpen(false);
     setProfileMenuOpen(false);
     if (next === "jobs") setJobsShowPacketFirst(false);
+    if (next === "today" || next === "schedule" || next === "jobs") {
+      void loadJobs();
+      void loadHome();
+    }
   }
 
   async function saveVehicleLog(body: Record<string, unknown>) {
@@ -1417,11 +1523,12 @@ export default function FieldApp() {
       </header>
 
       <div className={styles.shell}>
-      <div className={`${styles.body} ${tab === "today" ? styles.bodyHome : ""} ${tab === "schedule" ? styles.bodyMonth : ""} ${tab === "jobs" ? styles.bodyJobs : ""}`}>
+      <div className={`${styles.body} ${tab === "today" || tab === "vehicle" ? styles.bodyHome : ""} ${tab === "schedule" ? styles.bodyMonth : ""} ${tab === "jobs" ? styles.bodyJobs : ""}`}>
       {noticeEl}
 
       {tab === "today" && profile ? (
         <div className={styles.homeGrid}>
+          <div className={styles.homeLeft}>
           <section className={`${styles.dashCard} ${styles.profileCol}`}>
             <div className={styles.profileHero}>
               <AvatarPicker profile={profile} xl disabled={busy} onPick={openAvatarPicker} />
@@ -1469,6 +1576,60 @@ export default function FieldApp() {
             </div>
           </section>
 
+          <div className={styles.homeCal}>
+            <InstallerHomeCalendar
+              jobs={myJobs}
+              timeOff={timeOff}
+              onOpenJob={(jobId) => openJobSurface(jobId)}
+            />
+          </div>
+          </div>
+
+          <div className={styles.feedStack}>
+          <div className={styles.vehicleCol}>
+            <FieldVehicleCard snapshot={vehicleSnap} busy={busy} onLog={saveVehicleLog} />
+          </div>
+          <section className={`${styles.dashCard} ${styles.feedCol}`} aria-label="Updates and notices">
+            <p className={styles.colLabel}>Updates</p>
+            {feed.length === 0 ? (
+              <p className={styles.empty}>
+                Company notes and your PTO, crew, and pay replies will land here.
+              </p>
+            ) : (
+              <div className={styles.feedList}>
+                {feed.map((item) => (
+                  <article
+                    key={item.key}
+                    id={item.key}
+                    className={`${styles.feedCard} ${highlightId === item.key ? styles.feedCardFocus : ""} ${
+                      item.kind === "notice" && !item.read_at ? styles.feedCardUnread : ""
+                    }`}
+                  >
+                    <div className={styles.feedCardTop}>
+                      <span
+                        className={`${styles.feedTag} ${
+                          item.kind === "update" ? styles.feedTagCompany : styles.feedTagPersonal
+                        }`}
+                      >
+                        {item.kind === "update" ? "Company update" : "Personal notification"}
+                      </span>
+                      <time className={styles.historyDate}>{formatStamp(item.created_at)}</time>
+                    </div>
+                    <h3 className={styles.jobName}>{item.title}</h3>
+                    <p className={styles.jobMeta} style={{ whiteSpace: "pre-wrap" }}>
+                      {item.body}
+                    </p>
+                    {item.kind === "update" && item.author_name ? (
+                      <p className={styles.feedAuthor}>{item.author_name}</p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+          </div>
+
+          <div className={styles.quickStack}>
           <aside className={`${styles.dashCard} ${styles.quickCol}`}>
             <p className={styles.colLabel}>Quick context</p>
             <dl className={styles.statList}>
@@ -1519,57 +1680,7 @@ export default function FieldApp() {
               </ul>
             )}
           </aside>
-
-          <div className={styles.vehicleCol}>
-            <FieldVehicleCard snapshot={vehicleSnap} onOpen={() => goToTab("vehicle")} />
           </div>
-
-          <div className={styles.homeCal}>
-            <InstallerHomeCalendar
-              jobs={myJobs}
-              timeOff={timeOff}
-              onOpenJob={(jobId) => openJobSurface(jobId)}
-            />
-          </div>
-
-          <section className={`${styles.dashCard} ${styles.feedCol}`} aria-label="Updates and notices">
-            <p className={styles.colLabel}>Updates</p>
-            {feed.length === 0 ? (
-              <p className={styles.empty}>
-                Company notes and your PTO, crew, and pay replies will land here.
-              </p>
-            ) : (
-              <div className={styles.feedList}>
-                {feed.map((item) => (
-                  <article
-                    key={item.key}
-                    id={item.key}
-                    className={`${styles.feedCard} ${highlightId === item.key ? styles.feedCardFocus : ""} ${
-                      item.kind === "notice" && !item.read_at ? styles.feedCardUnread : ""
-                    }`}
-                  >
-                    <div className={styles.feedCardTop}>
-                      <span
-                        className={`${styles.feedTag} ${
-                          item.kind === "update" ? styles.feedTagCompany : styles.feedTagPersonal
-                        }`}
-                      >
-                        {item.kind === "update" ? "Company update" : "Personal notification"}
-                      </span>
-                      <time className={styles.historyDate}>{formatStamp(item.created_at)}</time>
-                    </div>
-                    <h3 className={styles.jobName}>{item.title}</h3>
-                    <p className={styles.jobMeta} style={{ whiteSpace: "pre-wrap" }}>
-                      {item.body}
-                    </p>
-                    {item.kind === "update" && item.author_name ? (
-                      <p className={styles.feedAuthor}>{item.author_name}</p>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
       ) : null}
 
@@ -1590,18 +1701,109 @@ export default function FieldApp() {
         />
       ) : null}
 
-      {tab === "jobs" ? (
-        <div className={`${styles.jobsGrid} ${jobsShowPacketFirst ? styles.jobsGridPacketFirst : ""}`}>
-          <div className={styles.jobsPacketCol} id="installer-job-packet">
+      {tab === "jobs" && !jobsShowPacketFirst ? (
+        <div className={styles.jobsBoard}>
+          {nextBoardJob ? (
+            <button
+              type="button"
+              className={`${styles.dashCard} ${styles.jobsHero}`}
+              onClick={() => openScheduledJob(nextBoardJob.id)}
+            >
+              <div className={styles.jobsHeroTop}>
+                <p className={styles.colLabel}>Next job</p>
+                <span className={`${styles.chip} ${jobKindClass(nextBoardJob.job_kind)}`}>
+                  {jobKindLabel(nextBoardJob.job_kind)}
+                </span>
+              </div>
+              <h2 className={styles.jobsHeroName}>{nextBoardJob.client?.name ?? "Job"}</h2>
+              <p className={styles.jobsHeroMeta}>
+                {[formatDay(nextBoardJob.install_date), nextBoardJob.visit_window, stageLabel(nextBoardJob.stage)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              {nextBoardJob.client?.address ? (
+                <p className={styles.jobsHeroMeta}>{nextBoardJob.client.address}</p>
+              ) : null}
+              <span className={styles.jobsHeroCta}>Open job packet</span>
+            </button>
+          ) : (
+            <section className={`${styles.dashCard} ${styles.jobsHero}`}>
+              <p className={styles.colLabel}>Next job</p>
+              <h2 className={styles.jobsHeroName}>Nothing on deck</h2>
+              <p className={styles.jobsHeroMeta}>When Des books you, the next install lands here.</p>
+            </section>
+          )}
+
+          {laterJobs.length > 0 ? (
+            <section>
+              <p className={styles.colLabel}>Coming up</p>
+              <div className={styles.jobsPair}>
+                {laterJobs.map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    className={`${styles.dashCard} ${styles.jobTile}`}
+                    onClick={() => openScheduledJob(job.id)}
+                  >
+                    <div className={styles.jobsHeroTop}>
+                      <p className={styles.colLabel}>{stageLabel(job.stage)}</p>
+                      <span className={`${styles.chip} ${jobKindClass(job.job_kind)}`}>
+                        {jobKindLabel(job.job_kind)}
+                      </span>
+                    </div>
+                    <h3 className={styles.jobTileName}>{job.client?.name ?? "Job"}</h3>
+                    <p className={styles.jobMeta}>
+                      {[formatDay(job.install_date), job.visit_window].filter(Boolean).join(" · ")}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section>
+            <p className={styles.colLabel}>Past jobs</p>
+            {pastJobs.length === 0 ? (
+              <p className={styles.empty}>Completed installs will show here.</p>
+            ) : (
+              <div className={styles.jobsQuad}>
+                {pastJobs.map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    className={`${styles.dashCard} ${styles.jobTile} ${styles.jobTilePast}`}
+                    onClick={() => void openReview(job.id)}
+                  >
+                    <p className={styles.colLabel}>{stageLabel(job.stage)}</p>
+                    <h3 className={styles.jobTileName}>{job.client?.name ?? "Job"}</h3>
+                    <p className={styles.jobMeta}>{formatDay(job.install_date)}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
+
+      {tab === "jobs" && jobsShowPacketFirst ? (
+        <div className={styles.jobsPacketView} id="installer-job-packet">
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => setJobsShowPacketFirst(false)}
+          >
+            All jobs
+          </button>
+          <div className={styles.jobsPacketCol}>
             {workJob ? (
               <>
                 <section className={styles.dashCard}>
                   <div className={styles.packetHead}>
                     <div>
                       <p className={styles.colLabel}>Job packet</p>
-                      <h2 className={styles.profileNameLg}>{workJob.client?.name ?? "Job"}</h2>
-                      <p className={styles.jobMeta}>
-                        {workJob.client?.address ? (
+                      <h2 className={styles.packetTitle}>{workJob.client?.name ?? "Job"}</h2>
+                      {workJob.client?.address ? (
+                        <p className={styles.packetLead}>
                           <a
                             href={`https://maps.google.com/?q=${encodeURIComponent(workJob.client.address)}`}
                             target="_blank"
@@ -1609,20 +1811,17 @@ export default function FieldApp() {
                           >
                             {workJob.client.address}
                           </a>
-                        ) : (
-                          "No address"
-                        )}
-                      </p>
-                      <p className={styles.jobMeta}>
+                        </p>
+                      ) : null}
+                      <p className={styles.packetLead}>
                         {workJob.client?.phone ? (
                           <a href={`tel:${workJob.client.phone}`}>{workJob.client.phone}</a>
-                        ) : (
-                          "No phone"
-                        )}
-                        {workJob.install_date ? ` · ${formatDay(workJob.install_date)}` : ""}
-                        {workJob.visit_window ? ` · ${workJob.visit_window}` : ""}
+                        ) : null}
+                        {workJob.client?.phone && (workJob.install_date || workJob.visit_window) ? " · " : null}
+                        {[workJob.install_date ? formatDay(workJob.install_date) : null, workJob.visit_window]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
-                      {workJob.notes ? <p className={styles.jobMeta}>Office: {workJob.notes}</p> : null}
                     </div>
                     <button
                       type="button"
@@ -1632,6 +1831,7 @@ export default function FieldApp() {
                       Add Installer
                     </button>
                   </div>
+                  <OfficePacket notes={workJob.notes} />
                   {crew.length > 0 ? (
                     <p className={styles.crewLine}>
                       On this job: {crew.map((person) => person.name).join(", ")}
@@ -1811,47 +2011,6 @@ export default function FieldApp() {
               </section>
             )}
           </div>
-
-          <aside className={`${styles.dashCard} ${styles.jobsListCol}`}>
-            <p className={styles.colLabel}>Scheduled jobs</p>
-            {openJobs.length === 0 ? (
-              <p className={styles.empty}>Upcoming installs will show here.</p>
-            ) : (
-              <ul className={styles.recentList}>
-                {openJobs.map((job) => (
-                  <li key={job.id}>
-                    <button
-                      type="button"
-                      className={`${styles.recentItem} ${workJob?.id === job.id ? styles.jobListActive : ""}`}
-                      onClick={() => {
-                        setSelectedId(job.id);
-                        setReviewJobId(null);
-                        setJobsShowPacketFirst(true);
-                      }}
-                    >
-                      <strong>{job.client?.name ?? "Job"}</strong>
-                      <span>{formatDay(job.install_date)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className={`${styles.colLabel} ${styles.jobsPastLabel}`}>Past jobs</p>
-            {pastJobs.length === 0 ? (
-              <p className={styles.empty}>Completed installs will show here.</p>
-            ) : (
-              <ul className={styles.recentList}>
-                {pastJobs.map((job) => (
-                  <li key={job.id}>
-                    <button type="button" className={styles.recentItem} onClick={() => void openReview(job.id)}>
-                      <strong>{job.client?.name ?? "Job"}</strong>
-                      <span>{formatDay(job.install_date)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </aside>
         </div>
       ) : null}
 
@@ -1930,9 +2089,9 @@ export default function FieldApp() {
             <div className={styles.modalHead}>
               <div>
                 <p className={styles.colLabel}>Job packet</p>
-                <h2 id="past-packet-title" className={styles.jobName}>{reviewJob.client?.name ?? "Job"}</h2>
-                <p className={styles.jobMeta}>
-                  {reviewJob.client?.address ? (
+                <h2 id="past-packet-title" className={styles.packetTitle}>{reviewJob.client?.name ?? "Job"}</h2>
+                {reviewJob.client?.address ? (
+                  <p className={styles.packetLead}>
                     <a
                       href={`https://maps.google.com/?q=${encodeURIComponent(reviewJob.client.address)}`}
                       target="_blank"
@@ -1940,61 +2099,67 @@ export default function FieldApp() {
                     >
                       {reviewJob.client.address}
                     </a>
-                  ) : (
-                    "No address"
-                  )}
-                </p>
-                <p className={styles.jobMeta}>
+                  </p>
+                ) : null}
+                <p className={styles.packetLead}>
                   {reviewJob.client?.phone ? (
                     <a href={`tel:${reviewJob.client.phone}`}>{reviewJob.client.phone}</a>
-                  ) : (
-                    "No phone"
-                  )}
-                  {reviewJob.install_date ? ` · ${formatDay(reviewJob.install_date)}` : ""}
-                  {reviewJob.visit_window ? ` · ${reviewJob.visit_window}` : ""}
+                  ) : null}
+                  {reviewJob.client?.phone && (reviewJob.install_date || reviewJob.visit_window) ? " · " : null}
+                  {[reviewJob.install_date ? formatDay(reviewJob.install_date) : null, reviewJob.visit_window]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
-                {reviewJob.notes ? <p className={styles.jobMeta}>Office: {reviewJob.notes}</p> : null}
               </div>
               <button type="button" className={styles.modalClose} onClick={() => setReviewJobId(null)}>
                 Close
               </button>
             </div>
-            {reviewBusy ? <p className={styles.jobMeta}>Loading packet…</p> : null}
-            <p className={styles.jobMeta}>
-              Crew:{" "}
-              {reviewCrew.length > 0 ? reviewCrew.map((person) => person.name).join(", ") : "Just you"}
-            </p>
-            {reviewJob.field_notes ? (
-              <>
-                <h3 className={styles.jobName}>Your notes</h3>
-                <p className={styles.jobMeta} style={{ whiteSpace: "pre-wrap" }}>{reviewJob.field_notes}</p>
-              </>
-            ) : (
-              <p className={styles.jobMeta}>No notes on this job.</p>
-            )}
-            <h3 className={styles.jobName} style={{ marginTop: "0.9rem" }}>Photos</h3>
-            {reviewMedia.length > 0 ? (
-              <div className={styles.mediaGrid}>
-                {reviewMedia.map((item) =>
-                  item.public_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={item.id} src={item.public_url} alt={item.caption || item.kind} className={styles.mediaThumb} />
-                  ) : null,
-                )}
-              </div>
-            ) : (
-              <p className={styles.jobMeta}>No photos saved.</p>
-            )}
-            <h3 className={styles.jobName} style={{ marginTop: "0.9rem" }}>Issues</h3>
-            {reviewIssues.length === 0 ? (
-              <p className={styles.jobMeta}>No issues reported.</p>
-            ) : (
-              reviewIssues.map((issue) => (
-                <p key={issue.id} className={styles.jobMeta}>
-                  · {issue.issue_type.replace(/_/g, " ")} — {issue.description}
-                </p>
-              ))
-            )}
+            {reviewBusy ? <p className={styles.packetEmpty}>Loading packet…</p> : null}
+            <OfficePacket notes={reviewJob.notes} />
+            <div className={styles.packetBlock}>
+              <h3 className={styles.packetSection}>Crew</h3>
+              <p className={styles.packetBody}>
+                {reviewCrew.length > 0 ? reviewCrew.map((person) => person.name).join(", ") : "Just you"}
+              </p>
+            </div>
+            <div className={styles.packetBlock}>
+              <h3 className={styles.packetSection}>Your notes</h3>
+              {reviewJob.field_notes ? (
+                <p className={styles.packetBody} style={{ whiteSpace: "pre-wrap" }}>{reviewJob.field_notes}</p>
+              ) : (
+                <p className={styles.packetEmpty}>None on this job.</p>
+              )}
+            </div>
+            <div className={styles.packetBlock}>
+              <h3 className={styles.packetSection}>Photos</h3>
+              {reviewMedia.length > 0 ? (
+                <div className={styles.mediaGrid}>
+                  {reviewMedia.map((item) =>
+                    item.public_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={item.id} src={item.public_url} alt={item.caption || item.kind} className={styles.mediaThumb} />
+                    ) : null,
+                  )}
+                </div>
+              ) : (
+                <p className={styles.packetEmpty}>No photos saved.</p>
+              )}
+            </div>
+            <div className={styles.packetBlock}>
+              <h3 className={styles.packetSection}>Issues</h3>
+              {reviewIssues.length === 0 ? (
+                <p className={styles.packetEmpty}>No issues reported.</p>
+              ) : (
+                <ul className={styles.packetNoteList}>
+                  {reviewIssues.map((issue) => (
+                    <li key={issue.id}>
+                      {issue.issue_type.replace(/_/g, " ")} — {issue.description}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       ) : null}

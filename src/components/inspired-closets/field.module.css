@@ -371,7 +371,7 @@
 }
 
 @media (min-width: 481px) {
-  .quickCol,
+  .quickStack,
   .jobsListCol {
     position: sticky;
     top: 4.4rem;
@@ -953,6 +953,18 @@
   opacity: 0.85;
 }
 
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .chipNew {
   background: #8fbf88;
   color: #102010;
@@ -971,6 +983,7 @@
 .homeGrid {
   display: grid;
   gap: 1rem;
+  align-content: start;
 }
 
 .profileCol {
@@ -989,8 +1002,19 @@
 }
 
 .quickCol {
-  grid-area: quick;
   min-width: 0;
+}
+
+.quickStack {
+  grid-area: quick;
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  align-content: start;
+}
+
+.feedStack {
+  display: contents;
 }
 
 .vehicleCol {
@@ -1002,6 +1026,10 @@
   display: grid;
   gap: 1rem;
   min-width: 0;
+}
+
+.homeLeft {
+  display: contents;
 }
 
 .dashCard {
@@ -1623,14 +1651,159 @@
   min-width: 0;
 }
 
+.jobsBoard {
+  display: grid;
+  gap: 1.35rem;
+  min-width: 0;
+}
+
+.jobsPacketView {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  justify-items: start;
+}
+
+.jobsPacketView .jobsPacketCol {
+  width: 100%;
+}
+
+.jobsHero,
+.jobTile {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.jobsHero:hover,
+.jobTile:hover {
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.07);
+}
+
+.jobsHero {
+  padding: 1.4rem 1.45rem 1.5rem;
+}
+
+.jobsHeroTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.jobsHero .colLabel,
+.jobTile .colLabel {
+  margin: 0;
+}
+
+.jobsHeroName {
+  margin: 0.55rem 0 0;
+  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.jobsHeroMeta {
+  margin: 0.35rem 0 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.jobsHeroCta {
+  margin-top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: var(--ic-red, #821f2d);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.jobsPair,
+.jobsQuad {
+  display: grid;
+  gap: 1rem;
+}
+
+.jobsPair {
+  grid-template-columns: 1fr;
+}
+
+.jobsQuad {
+  grid-template-columns: 1fr 1fr;
+}
+
+.jobTile {
+  padding: 1rem 1.05rem 1.1rem;
+  min-height: 8.5rem;
+}
+
+.jobTilePast {
+  min-height: 7.25rem;
+}
+
+.jobTileName {
+  margin: 0.45rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+@media (min-width: 700px) {
+  .jobsPair {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 960px) {
+  .jobsQuad {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .jobTilePast {
+    min-height: 8rem;
+  }
+}
+
 @media (min-width: 481px) {
   .homeGrid {
     grid-template-columns: minmax(16.5rem, 0.9fr) minmax(0, 1.35fr) minmax(16rem, 0.85fr);
-    grid-template-areas:
-      "profile feed quick"
-      "vehicle feed quick"
-      "cal feed quick";
+    grid-template-areas: "left feed quick";
     align-items: start;
+    align-content: start;
+  }
+
+  .homeLeft {
+    display: grid;
+    grid-area: left;
+    gap: 1rem;
+    min-width: 0;
+    align-content: start;
+  }
+
+  .feedStack {
+    display: grid;
+    grid-area: feed;
+    gap: 1rem;
+    min-width: 0;
+    align-content: start;
+  }
+
+  .profileCol,
+  .homeCal,
+  .vehicleCol,
+  .feedCol {
+    grid-area: auto;
   }
 
   .jobsGrid,
@@ -1649,8 +1822,8 @@
 }
 
 .crewLine {
-  margin: 0.75rem 0 0;
-  font-size: 0.8rem;
+  margin: 1rem 0 0;
+  font-size: 1.02rem;
   color: var(--muted);
 }
 
@@ -1701,6 +1874,93 @@
 
 .modalWide {
   width: min(46rem, 100%);
+  padding: 1.4rem 1.45rem 1.55rem;
+}
+
+.packetTitle {
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.55rem, 2.6vw, 2.05rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.packetLead {
+  margin: 0.4rem 0 0;
+  font-size: 1.02rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.packetLead a {
+  color: var(--ic-red);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.packetFacts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.95rem 1.25rem;
+  margin: 1.2rem 0 0;
+}
+
+.packetFact dt {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.packetFact dd {
+  margin: 0.28rem 0 0;
+  font-size: 1.08rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.packetBlock {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.packetSection {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.packetBody {
+  margin: 0.4rem 0 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
+.packetNoteList {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.packetNoteList li + li {
+  margin-top: 0.4rem;
+}
+
+.packetEmpty {
+  margin: 0.4rem 0 0;
+  font-size: 1.02rem;
+  color: var(--muted);
+}
+
+@media (min-width: 560px) {
+  .packetFacts {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .modalHead {
@@ -1733,9 +1993,9 @@
     grid-template-columns: 1fr;
     grid-template-areas:
       "profile"
-      "quick"
-      "vehicle"
       "cal"
+      "vehicle"
+      "quick"
       "feed";
   }
 

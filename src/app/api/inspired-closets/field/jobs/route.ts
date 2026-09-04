@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
 import { isFieldTestInstaller } from "@/lib/inspired-closets-field-test-seed";
-import { jobBelongsOnField } from "@/lib/inspired-closets-ops-installer-roster";
+import {
+  crewTokensFromNotes,
+  installerKeyFromStaffName,
+  jobBelongsOnField,
+} from "@/lib/inspired-closets-ops-installer-roster";
+import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
 import { FIELD_JOB_STAGES } from "@/lib/inspired-closets-ops-field";
 import { markCompletionTenDue } from "@/lib/inspired-closets-ops-billing";
 
@@ -28,16 +33,42 @@ export async function GET() {
     ? `installer_id.eq.${installerId},id.in.(${[...crewJobIds].join(",")})`
     : `installer_id.eq.${installerId}`;
 
-  const [{ data: jobs, error }, { data: timeEntries }, { data: clients }, { data: staff }] =
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - 90);
+  const windowEnd = new Date();
+  windowEnd.setDate(windowEnd.getDate() + 180);
+  const from = ymdFromIso(windowStart.toISOString());
+  const to = ymdFromIso(windowEnd.toISOString());
+
+  const myToken = installerKeyFromStaffName(auth.installer.name);
+  const [{ data: windowJobs, error: windowError }, { data: stagedJobs, error: stagedError }, { data: crewNoted }, { data: timeEntries }, { data: clients }, { data: staff }] =
     await Promise.all([
+      supabase
+        .from("ic_jobs")
+        .select("*")
+        .is("deleted_at", null)
+        .or(jobFilter)
+        .gte("install_date", from)
+        .lte("install_date", to)
+        .limit(400),
       supabase
         .from("ic_jobs")
         .select("*")
         .is("deleted_at", null)
         .in("stage", [...FIELD_JOB_STAGES, "install_complete", "final_payment"])
         .or(jobFilter)
-        .order("install_date", { ascending: true, nullsFirst: false })
+        .order("install_date", { ascending: false, nullsFirst: false })
         .limit(200),
+      myToken
+        ? supabase
+            .from("ic_jobs")
+            .select("*")
+            .is("deleted_at", null)
+            .gte("install_date", from)
+            .lte("install_date", to)
+            .ilike("notes", "%Crew:%")
+            .limit(400)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
       supabase
         .from("ic_time_entries")
         .select("*")
@@ -52,9 +83,25 @@ export async function GET() {
         .maybeSingle(),
     ]);
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (windowError) {
+    return NextResponse.json({ ok: false, error: windowError.message }, { status: 500 });
   }
+  if (stagedError) {
+    return NextResponse.json({ ok: false, error: stagedError.message }, { status: 500 });
+  }
+
+  const jobsById = new Map<string, NonNullable<typeof stagedJobs>[number]>();
+  for (const job of [...(stagedJobs ?? []), ...(windowJobs ?? [])]) {
+    jobsById.set(String(job.id), job);
+  }
+  for (const job of crewNoted ?? []) {
+    if (!myToken || !crewTokensFromNotes(String(job.notes ?? "")).includes(myToken)) continue;
+    crewJobIds.add(String(job.id));
+    jobsById.set(String(job.id), job);
+  }
+  const jobs = [...jobsById.values()].sort((a, b) =>
+    String(a.install_date ?? "").localeCompare(String(b.install_date ?? "")),
+  );
 
   const clientsById = new Map((clients ?? []).map((client) => [client.id, client]));
   const entriesByJob = new Map<string, typeof timeEntries>();
@@ -71,7 +118,7 @@ export async function GET() {
       isTestInstaller,
       job,
       crewJobIds,
-      jobId: job.id,
+      jobId: String(job.id),
     }),
   );
   const packetJobIds = visibleJobs.map((job) => job.id);

@@ -5,7 +5,12 @@ import {
   FIELD_TEST_UPDATES,
   isFieldTestInstaller,
 } from "@/lib/inspired-closets-field-test-seed";
-import { isFieldTestJob } from "@/lib/inspired-closets-ops-installer-roster";
+import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
+import {
+  crewTokensFromNotes,
+  installerKeyFromStaffName,
+  isFieldTestJob,
+} from "@/lib/inspired-closets-ops-installer-roster";
 
 export const runtime = "nodejs";
 
@@ -41,10 +46,24 @@ export async function GET() {
     .select("job_id")
     .eq("installer_id", installer.id)
     .eq("status", "approved");
-  const crewJobIds = (crewRows ?? []).map((row) => row.job_id);
+  const crewJobIds = new Set((crewRows ?? []).map((row) => row.job_id));
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - 90);
+  const windowEnd = new Date();
+  windowEnd.setDate(windowEnd.getDate() + 180);
+  const from = ymdFromIso(windowStart.toISOString());
+  const to = ymdFromIso(windowEnd.toISOString());
+  const myToken = installerKeyFromStaffName(installer.name);
+  const jobFilter = crewJobIds.size
+    ? `installer_id.eq.${installer.id},id.in.(${[...crewJobIds].join(",")})`
+    : `installer_id.eq.${installer.id}`;
 
+  const jobSelect =
+    "id, installer_id, stage, install_date, visit_window, notes, field_notes, client_id, job_kind, community_ref";
   const [
-    { data: jobs },
+    { data: assignedJobs },
+    { data: windowJobs },
+    { data: crewNoted },
     { data: clocks },
     { data: notices },
     { data: updates },
@@ -55,15 +74,29 @@ export async function GET() {
   ] = await Promise.all([
     supabase
       .from("ic_jobs")
-      .select("id, installer_id, stage, install_date, visit_window, notes, field_notes, client_id, job_kind, community_ref")
-      .or(
-        crewJobIds.length
-          ? `installer_id.eq.${installer.id},id.in.(${crewJobIds.join(",")})`
-          : `installer_id.eq.${installer.id}`,
-      )
+      .select(jobSelect)
+      .or(jobFilter)
       .is("deleted_at", null)
-      .order("install_date", { ascending: true, nullsFirst: false })
-      .limit(80),
+      .order("install_date", { ascending: false, nullsFirst: false })
+      .limit(200),
+    supabase
+      .from("ic_jobs")
+      .select(jobSelect)
+      .or(jobFilter)
+      .is("deleted_at", null)
+      .gte("install_date", from)
+      .lte("install_date", to)
+      .limit(400),
+    myToken
+      ? supabase
+          .from("ic_jobs")
+          .select(jobSelect)
+          .is("deleted_at", null)
+          .gte("install_date", from)
+          .lte("install_date", to)
+          .ilike("notes", "%Crew:%")
+          .limit(400)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
     supabase
       .from("ic_time_entries")
       .select("id, job_id, clock_in_at, clock_out_at")
@@ -102,7 +135,16 @@ export async function GET() {
   const clientsById = new Map((clients ?? []).map((c) => [c.id, c]));
   const isTestInstaller = isFieldTestInstaller(installer);
   const activeStages = new Set(["install_scheduled", "install_in_progress", "ordered", "job_check"]);
-  const mappedJobs = (jobs ?? [])
+  const jobsById = new Map<string, NonNullable<typeof assignedJobs>[number]>();
+  for (const job of [...(assignedJobs ?? []), ...(windowJobs ?? [])]) {
+    jobsById.set(String(job.id), job);
+  }
+  for (const job of crewNoted ?? []) {
+    if (!myToken || !crewTokensFromNotes(job.notes).includes(myToken)) continue;
+    jobsById.set(String(job.id), job);
+  }
+  const jobs = [...jobsById.values()];
+  const mappedJobs = jobs
     .filter((job) => (isTestInstaller ? isFieldTestJob(job) : !isFieldTestJob(job)))
     .map((job) => {
     const client = job.client_id ? clientsById.get(job.client_id) : null;
@@ -117,9 +159,18 @@ export async function GET() {
       client: client ?? null,
     };
   });
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const upcoming = mappedJobs
+    .filter((job) => {
+      if (!activeStages.has(job.stage)) return false;
+      if (!job.installDate) return true;
+      return job.installDate >= todayKey;
+    })
+    .sort((a, b) => (a.installDate ?? "9999").localeCompare(b.installDate ?? "9999"));
   const nextJob =
-    mappedJobs.find((job) => activeStages.has(job.stage)) ??
-    mappedJobs.find((job) => job.installDate && job.installDate >= new Date().toISOString().slice(0, 10)) ??
+    upcoming[0] ??
+    mappedJobs.find((job) => job.installDate && job.installDate >= todayKey) ??
     null;
 
   const weekMinutes = (clocks ?? []).reduce(

@@ -1,22 +1,24 @@
 .truckStage {
   display: grid;
   place-items: center;
-  min-height: 8.5rem;
+  min-height: 10.5rem;
   margin: 0 0 0.85rem;
 }
 
 .truckStageCompact {
-  min-height: 4.6rem;
+  min-height: 5.4rem;
   margin: 0 0 0.45rem;
 }
 
 .truckSvg {
-  width: min(100%, 17rem);
+  width: min(100%, 22rem);
   height: auto;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.12));
 }
 
 .truckStageCompact .truckSvg {
-  width: min(100%, 11rem);
+  width: min(100%, 13rem);
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.1));
 }
 
 .homeCard {
@@ -76,6 +78,25 @@
   margin: 0.75rem 0 1rem;
 }
 
+.dateRow {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 0.5rem;
+}
+
+.dateField {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.dateField span {
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.42);
+}
+
 .logList {
   margin: 0.35rem 0 0;
   padding: 0;
@@ -92,4 +113,56 @@
   margin: 0.35rem 0 0;
   font-size: 0.86rem;
   opacity: 0.7;
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.facts div {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.facts div:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.facts dt {
+  margin: 0;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.facts dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.vehicleGrid {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.col {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  align-content: start;
+}
+
+@media (min-width: 481px) {
+  .vehicleGrid {
+    grid-template-columns: minmax(16.5rem, 0.9fr) minmax(0, 1.35fr) minmax(16rem, 0.85fr);
+    align-items: start;
+  }
 }

@@ -1,4 +1,4 @@
-export type VehicleLogKind = "fuel" | "wash" | "clean_check" | "odometer" | "service";
+export type VehicleLogKind = "fuel" | "wash" | "clean_check" | "odometer" | "service" | "oil";
 
 export type VehicleRow = {
   id: string;
@@ -7,11 +7,22 @@ export type VehicleRow = {
   make: string;
   model: string;
   color: string | null;
+  plate?: string | null;
   plate_last4: string | null;
+  vin?: string | null;
+  vin_last6?: string | null;
   odometer: number;
   assigned_installer_id: string | null;
+  registered_owner?: string | null;
+  garage_address?: string | null;
   registration_expires_on: string | null;
+  insurance_carrier?: string | null;
+  insurance_policy?: string | null;
+  insurance_agency?: string | null;
+  insurance_agency_phone?: string | null;
+  insurance_effective_on?: string | null;
   insurance_expires_on: string | null;
+  declared_weight_lbs?: number | null;
   next_oil_due_miles: number | null;
 };
 
@@ -48,6 +59,9 @@ export type VehicleGrade = {
   lights: GradeLight[];
 };
 
+export const WASH_EVERY_DAYS = 14;
+export const OIL_EVERY_MILES = 5000;
+
 function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
   const end = new Date(`${iso.slice(0, 10)}T12:00:00`);
@@ -57,9 +71,47 @@ function daysUntil(iso: string | null): number | null {
 
 function daysSince(iso: string | null): number | null {
   if (!iso) return null;
-  const start = new Date(iso);
+  const start = new Date(`${iso.slice(0, 10)}T12:00:00`);
   if (Number.isNaN(start.getTime())) return null;
-  return Math.round((Date.now() - start.getTime()) / 86_400_000);
+  const today = new Date();
+  const noon = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+  return Math.round((noon.getTime() - start.getTime()) / 86_400_000);
+}
+
+function washDayLabel(iso: string): string {
+  const date = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export function gradeWash(lastWashAt: string | null): GradeLight {
+  const age = daysSince(lastWashAt);
+  if (!lastWashAt || age == null) {
+    return { id: "wash", label: "Wash", status: "warn", detail: "No wash logged yet" };
+  }
+  const last = washDayLabel(lastWashAt);
+  if (age > WASH_EVERY_DAYS) {
+    return {
+      id: "wash",
+      label: "Wash",
+      status: "due",
+      detail: `Needs a wash · last ${last}`,
+    };
+  }
+  if (age >= WASH_EVERY_DAYS - 4) {
+    return {
+      id: "wash",
+      label: "Wash",
+      status: "warn",
+      detail: `Due in ${WASH_EVERY_DAYS - age} days · last ${last}`,
+    };
+  }
+  return {
+    id: "wash",
+    label: "Wash",
+    status: "ok",
+    detail: `Washed ${last} · next in ${WASH_EVERY_DAYS - age} days`,
+  };
 }
 
 function worst(statuses: GradeStatus[]): GradeStatus {
@@ -73,31 +125,68 @@ export function vehicleLabel(vehicle: Pick<VehicleRow, "year" | "make" | "model"
   return [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
 }
 
+export function gradeOil(input: {
+  odometer: number;
+  lastOilAt: string | null;
+  lastOilMiles: number | null;
+  nextOilDueMiles: number | null;
+}): GradeLight {
+  const dueAt =
+    input.lastOilMiles != null
+      ? input.lastOilMiles + OIL_EVERY_MILES
+      : input.nextOilDueMiles;
+  const last = input.lastOilAt ? washDayLabel(input.lastOilAt) : null;
+  if (dueAt == null) {
+    return { id: "oil", label: "Oil", status: "warn", detail: "No oil change logged yet" };
+  }
+  const left = dueAt - (input.odometer ?? 0);
+  if (left <= 0) {
+    return {
+      id: "oil",
+      label: "Oil",
+      status: "due",
+      detail: last ? `Oil due · last ${last} at ${input.lastOilMiles?.toLocaleString()} mi` : "Oil due",
+    };
+  }
+  if (left <= 500) {
+    return {
+      id: "oil",
+      label: "Oil",
+      status: "warn",
+      detail: last ? `Due in ${left} mi · last ${last}` : `Due in ${left} mi`,
+    };
+  }
+  return {
+    id: "oil",
+    label: "Oil",
+    status: "ok",
+    detail: last
+      ? `${left.toLocaleString()} mi to go · last ${last}`
+      : `${left.toLocaleString()} mi to go`,
+  };
+}
+
 export function gradeVehicle(input: {
   vehicle: VehicleRow;
   lastWashAt: string | null;
   lastCleanAt: string | null;
   lastCleanOk: boolean | null;
   lastOdometerAt: string | null;
+  lastOilAt?: string | null;
+  lastOilMiles?: number | null;
   weekMiles: number;
 }): VehicleGrade {
-  const washAge = daysSince(input.lastWashAt);
-  const wash: GradeLight = !input.lastWashAt
-    ? { id: "wash", label: "Wash", status: "warn", detail: "No wash logged yet" }
-    : washAge !== null && washAge > 14
-      ? { id: "wash", label: "Wash", status: "due", detail: `Last wash ${washAge} days ago` }
-      : washAge !== null && washAge > 10
-        ? { id: "wash", label: "Wash", status: "warn", detail: `Due soon · ${14 - washAge} days` }
-        : { id: "wash", label: "Wash", status: "ok", detail: "Washed this cycle" };
+  const wash = gradeWash(input.lastWashAt);
 
   const cleanAge = daysSince(input.lastCleanAt);
+  const cleanLast = input.lastCleanAt ? washDayLabel(input.lastCleanAt) : null;
   const clean: GradeLight = !input.lastCleanAt
     ? { id: "clean", label: "Cab", status: "warn", detail: "No cab check yet" }
-    : input.lastCleanOk === false
-      ? { id: "clean", label: "Cab", status: "due", detail: "Needs a clean" }
-      : cleanAge !== null && cleanAge > 7
-        ? { id: "clean", label: "Cab", status: "warn", detail: "Check the cab this week" }
-        : { id: "clean", label: "Cab", status: "ok", detail: "Cab looks good" };
+    : cleanAge !== null && cleanAge > 7
+      ? { id: "clean", label: "Cab", status: "due", detail: `Needs a cab check · last ${cleanLast}` }
+      : cleanAge !== null && cleanAge > 5
+        ? { id: "clean", label: "Cab", status: "warn", detail: `Due this week · last ${cleanLast}` }
+        : { id: "clean", label: "Cab", status: "ok", detail: `Checked ${cleanLast}` };
 
   const regDays = daysUntil(input.vehicle.registration_expires_on);
   const reg: GradeLight =
@@ -119,16 +208,12 @@ export function gradeVehicle(input: {
           ? { id: "insurance", label: "Insurance", status: "warn", detail: `Due in ${insDays} days` }
           : { id: "insurance", label: "Insurance", status: "ok", detail: "Current" };
 
-  const odo = input.vehicle.odometer ?? 0;
-  const oilDue = input.vehicle.next_oil_due_miles;
-  const oil: GradeLight =
-    oilDue == null
-      ? { id: "oil", label: "Oil", status: "warn", detail: "Interval not set" }
-      : odo >= oilDue
-        ? { id: "oil", label: "Oil", status: "due", detail: "Overdue" }
-        : oilDue - odo <= 500
-          ? { id: "oil", label: "Oil", status: "warn", detail: `Due in ${oilDue - odo} mi` }
-          : { id: "oil", label: "Oil", status: "ok", detail: `${oilDue - odo} mi to go` };
+  const oil = gradeOil({
+    odometer: input.vehicle.odometer ?? 0,
+    lastOilAt: input.lastOilAt ?? null,
+    lastOilMiles: input.lastOilMiles ?? null,
+    nextOilDueMiles: input.vehicle.next_oil_due_miles,
+  });
 
   const odoAge = daysSince(input.lastOdometerAt);
   const miles: GradeLight =
@@ -150,8 +235,21 @@ export function publicVehicle(vehicle: VehicleRow) {
     make: vehicle.make,
     model: vehicle.model,
     color: vehicle.color,
+    plate: vehicle.plate ?? (vehicle.plate_last4 ? `···${vehicle.plate_last4}` : null),
     plate_last4: vehicle.plate_last4,
+    vin: vehicle.vin ?? null,
     odometer: vehicle.odometer,
+    registered_owner: vehicle.registered_owner ?? null,
+    garage_address: vehicle.garage_address ?? null,
+    registration_expires_on: vehicle.registration_expires_on,
+    insurance_carrier: vehicle.insurance_carrier ?? null,
+    insurance_policy: vehicle.insurance_policy ?? null,
+    insurance_agency: vehicle.insurance_agency ?? null,
+    insurance_agency_phone: vehicle.insurance_agency_phone ?? null,
+    insurance_effective_on: vehicle.insurance_effective_on ?? null,
+    insurance_expires_on: vehicle.insurance_expires_on,
+    declared_weight_lbs: vehicle.declared_weight_lbs ?? null,
+    next_oil_due_miles: vehicle.next_oil_due_miles,
   };
 }
 

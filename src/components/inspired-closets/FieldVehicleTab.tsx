@@ -1,49 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import PromasterPortrait from "@/components/inspired-closets/PromasterPortrait";
+import FieldVehicleCard, {
+  type FieldVehicleSnapshot,
+} from "@/components/inspired-closets/FieldVehicleCard";
 import field from "./field.module.css";
 import styles from "./field-vehicle.module.css";
 
-export type FieldVehicleSnapshot = {
-  vehicle: {
-    id: string;
-    label: string;
-    year: number | null;
-    make: string;
-    model: string;
-    color: string | null;
-    plate_last4: string | null;
-    odometer: number;
-  } | null;
-  grade: {
-    overall: "ok" | "warn" | "due";
-    lights: Array<{ id: string; label: string; status: "ok" | "warn" | "due"; detail: string }>;
-  } | null;
-  week_miles: number;
-  last_wash_at: string | null;
-  last_fuel_at: string | null;
-  logs: Array<{
-    id: string;
-    kind: string;
-    logged_at: string;
-    odometer: number | null;
-    gallons: number | string | null;
-    amount_cents: number | null;
-    clean_ok: boolean | null;
-    note: string | null;
-  }>;
-  miles: Array<{
-    id: string;
-    job_id: string;
-    drive_date: string;
-    miles_out: number;
-    miles_back: number;
-  }>;
-  hint?: string;
-};
-
-type LogKind = "fuel" | "wash" | "clean_check" | "odometer";
+export type { FieldVehicleSnapshot };
 
 function money(cents: number | null): string {
   if (cents == null) return "";
@@ -54,6 +17,7 @@ function logLabel(kind: string): string {
   if (kind === "fuel") return "Gas";
   if (kind === "wash") return "Wash";
   if (kind === "clean_check") return "Cab check";
+  if (kind === "oil") return "Oil change";
   if (kind === "odometer") return "Odometer";
   if (kind === "service") return "Service";
   return kind;
@@ -68,6 +32,23 @@ function stamp(iso: string): string {
   });
 }
 
+function dayLabel(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function Fact({ label, value }: { label: string; value: string | number | null | undefined }) {
+  if (value == null || value === "") return null;
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{typeof value === "number" ? value.toLocaleString() : value}</dd>
+    </div>
+  );
+}
+
 export default function FieldVehicleTab({
   snapshot,
   busy,
@@ -79,129 +60,81 @@ export default function FieldVehicleTab({
   jobNames: Map<string, string>;
   onLog: (body: Record<string, unknown>) => Promise<void>;
 }) {
-  const [form, setForm] = useState<LogKind | null>(null);
-  const [odometer, setOdometer] = useState("");
-  const [gallons, setGallons] = useState("");
-  const [amount, setAmount] = useState("");
-  const [cleanOk, setCleanOk] = useState(true);
-
   const vehicle = snapshot?.vehicle;
   if (!vehicle) {
     return (
-      <section className={field.dashCard}>
-        <p className={field.colLabel}>Vehicle</p>
-        <h2 className={field.profileNameLg}>No truck assigned</h2>
-        <p className={field.jobMeta}>
-          {snapshot?.hint ?? "Gavin or Des assigns the company van on your installer file."}
-        </p>
-      </section>
+      <FieldVehicleCard snapshot={snapshot} busy={busy} onLog={onLog} showPortrait />
     );
   }
 
-  async function submit(kind: LogKind) {
-    const body: Record<string, unknown> = { action: "log", kind };
-    if (odometer) body.odometer = Number(odometer);
-    if (kind === "fuel") {
-      if (gallons) body.gallons = Number(gallons);
-      if (amount) body.amount_dollars = Number(amount);
-    }
-    if (kind === "clean_check") body.clean_ok = cleanOk;
-    await onLog(body);
-    setForm(null);
-    setOdometer("");
-    setGallons("");
-    setAmount("");
-    setCleanOk(true);
-  }
-
   return (
-    <div className={field.leftStack}>
+    <div className={styles.vehicleGrid}>
+      <div className={styles.col}>
+        <FieldVehicleCard snapshot={snapshot} busy={busy} onLog={onLog} showPortrait />
+      </div>
+
+      <div className={styles.col}>
       <section className={field.dashCard}>
-        <p className={field.colLabel}>Your truck</p>
-        <PromasterPortrait color={vehicle.color ?? "#f4f1ea"} />
-        <h2 className={field.profileNameLg}>{vehicle.label}</h2>
-        <p className={field.jobMeta}>
-          {vehicle.plate_last4 ? `Plate ···${vehicle.plate_last4}` : "Plate on file at the office"}
-          {vehicle.odometer ? ` · ${vehicle.odometer.toLocaleString()} mi` : ""}
-        </p>
-        <p className={field.jobMeta}>
-          {snapshot?.week_miles ?? 0} miles this week from jobs
-        </p>
-        <div className={styles.lights}>
-          {(snapshot?.grade?.lights ?? []).map((light) => (
-            <div key={light.id} className={styles.lightRow}>
-              <strong>{light.label}</strong>
-              <span>{light.detail}</span>
-            </div>
-          ))}
-        </div>
-        <div className={styles.actions}>
-          <button type="button" className={field.btn} disabled={busy} onClick={() => setForm("fuel")}>
-            Got gas
-          </button>
-          <button type="button" className={field.btnGhost} disabled={busy} onClick={() => setForm("wash")}>
-            Washed
-          </button>
-          <button type="button" className={field.btnGhost} disabled={busy} onClick={() => setForm("clean_check")}>
-            Cab check
-          </button>
-          <button type="button" className={field.btnGhost} disabled={busy} onClick={() => setForm("odometer")}>
-            Odometer
-          </button>
-        </div>
-        {form ? (
-          <div className={styles.form}>
-            {form === "fuel" ? (
-              <>
-                <input
-                  className={field.input}
-                  inputMode="decimal"
-                  placeholder="Gallons"
-                  value={gallons}
-                  onChange={(e) => setGallons(e.target.value)}
-                />
-                <input
-                  className={field.input}
-                  inputMode="decimal"
-                  placeholder="Dollars on the gas card"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                />
-              </>
-            ) : null}
-            {form === "clean_check" ? (
-              <select
-                className={field.select}
-                value={cleanOk ? "ok" : "needs"}
-                onChange={(e) => setCleanOk(e.target.value === "ok")}
-              >
-                <option value="ok">Cab is clean</option>
-                <option value="needs">Needs a clean</option>
-              </select>
-            ) : null}
-            <input
-              className={field.input}
-              inputMode="numeric"
-              placeholder={form === "odometer" ? "Odometer" : "Odometer (optional)"}
-              value={odometer}
-              onChange={(e) => setOdometer(e.target.value)}
-            />
-            <div className={styles.actions}>
-              <button
-                type="button"
-                className={field.btn}
-                disabled={busy || (form === "odometer" && !odometer)}
-                onClick={() => void submit(form)}
-              >
-                Save
-              </button>
-              <button type="button" className={field.btnGhost} onClick={() => setForm(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
+        <p className={field.colLabel}>Truck file</p>
+        <dl className={styles.facts}>
+          <Fact label="Year" value={vehicle.year} />
+          <Fact label="Make" value={vehicle.make} />
+          <Fact label="Model" value={vehicle.model} />
+          <Fact label="Odometer" value={vehicle.odometer ? `${vehicle.odometer.toLocaleString()} mi` : null} />
+          <Fact label="VIN" value={vehicle.vin} />
+          <Fact
+            label="Oil due"
+            value={vehicle.next_oil_due_miles ? `${vehicle.next_oil_due_miles.toLocaleString()} mi` : null}
+          />
+        </dl>
+      </section>
+
+      <section className={field.dashCard}>
+        <p className={field.colLabel}>Registration</p>
+        <dl className={styles.facts}>
+          <Fact label="Registered owner" value={vehicle.registered_owner} />
+          <Fact label="Garage" value={vehicle.garage_address} />
+          <Fact label="Plate" value={vehicle.plate} />
+          <Fact label="Expires" value={vehicle.registration_expires_on ? dayLabel(vehicle.registration_expires_on) : null} />
+          <Fact
+            label="Declared weight"
+            value={vehicle.declared_weight_lbs ? `${vehicle.declared_weight_lbs.toLocaleString()} lbs` : null}
+          />
+        </dl>
+        {!vehicle.registered_owner && !vehicle.plate && !vehicle.registration_expires_on ? (
+          <p className={styles.emptyHint}>No registration card on this van yet.</p>
         ) : null}
       </section>
+
+      <section className={field.dashCard}>
+        <p className={field.colLabel}>Insurance</p>
+        <dl className={styles.facts}>
+          <Fact label="Carrier" value={vehicle.insurance_carrier} />
+          <Fact label="Policy" value={vehicle.insurance_policy} />
+          <Fact label="Agency" value={vehicle.insurance_agency} />
+          <Fact label="Agency phone" value={vehicle.insurance_agency_phone} />
+          <Fact label="Effective" value={vehicle.insurance_effective_on ? dayLabel(vehicle.insurance_effective_on) : null} />
+          <Fact label="Expires" value={vehicle.insurance_expires_on ? dayLabel(vehicle.insurance_expires_on) : null} />
+        </dl>
+      </section>
+      </div>
+
+      <div className={styles.col}>
+      {snapshot?.license ? (
+        <section className={field.dashCard}>
+          <p className={field.colLabel}>Driver license</p>
+          <dl className={styles.facts}>
+            <Fact label="Name" value={snapshot.license.legal_name} />
+            <Fact label="License" value={snapshot.license.license_number} />
+            <Fact label="State" value={snapshot.license.state} />
+            <Fact label="Class" value={snapshot.license.class} />
+            <Fact label="Issued" value={snapshot.license.issued_on ? dayLabel(snapshot.license.issued_on) : null} />
+            <Fact label="Expires" value={snapshot.license.expires_on ? dayLabel(snapshot.license.expires_on) : null} />
+            <Fact label="Endorsements" value={snapshot.license.endorsements} />
+            <Fact label="Restrictions" value={snapshot.license.restrictions} />
+          </dl>
+        </section>
+      ) : null}
 
       <section className={field.dashCard}>
         <p className={field.colLabel}>This week’s job miles</p>
@@ -228,15 +161,22 @@ export default function FieldVehicleTab({
               <li key={row.id}>
                 {logLabel(row.kind)}
                 {row.kind === "fuel" ? ` · ${row.gallons ?? ""} gal ${money(row.amount_cents)}` : ""}
-                {row.kind === "clean_check" ? (row.clean_ok ? " · clean" : " · needs clean") : ""}
-                {row.odometer ? ` · ${row.odometer.toLocaleString()} mi` : ""}
-                {" · "}
-                {stamp(row.logged_at)}
+                {row.kind === "wash" || row.kind === "clean_check" || row.kind === "oil"
+                  ? ` · ${dayLabel(row.logged_at)}`
+                  : ""}
+                {row.kind === "oil" && row.odometer ? ` · ${row.odometer.toLocaleString()} mi` : ""}
+                {row.kind !== "wash" && row.kind !== "clean_check" && row.kind !== "oil" && row.odometer
+                  ? ` · ${row.odometer.toLocaleString()} mi`
+                  : ""}
+                {row.kind !== "wash" && row.kind !== "clean_check" && row.kind !== "oil"
+                  ? ` · ${stamp(row.logged_at)}`
+                  : ""}
               </li>
             ))}
           </ul>
         )}
       </section>
+      </div>
     </div>
   );
 }

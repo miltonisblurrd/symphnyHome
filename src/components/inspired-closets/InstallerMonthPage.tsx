@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { eachDateInclusive } from "@/lib/inspired-closets-field-dates";
+import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
 import styles from "./field.module.css";
 
 type MonthJob = {
@@ -71,7 +72,8 @@ export default function InstallerMonthPage({
     const map = new Map<string, MonthJob[]>();
     for (const job of jobs) {
       if (!job.install_date) continue;
-      const key = job.install_date.slice(0, 10);
+      const key = ymdFromIso(job.install_date);
+      if (!key) continue;
       const list = map.get(key) ?? [];
       list.push(job);
       map.set(key, list);

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { eachDateInclusive } from "@/lib/inspired-closets-field-dates";
+import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
 import styles from "./field.module.css";
 
 type CalJob = {
@@ -64,7 +65,8 @@ export default function InstallerHomeCalendar({
     const map = new Map<string, CalJob[]>();
     for (const job of jobs) {
       if (!job.install_date) continue;
-      const key = job.install_date.slice(0, 10);
+      const key = ymdFromIso(job.install_date);
+      if (!key) continue;
       const list = map.get(key) ?? [];
       list.push(job);
       map.set(key, list);
@@ -210,7 +212,7 @@ export default function InstallerHomeCalendar({
             {jobs
               .filter((job) => {
                 if (!job.install_date) return false;
-                const key = job.install_date.slice(0, 10);
+                const key = ymdFromIso(job.install_date);
                 return key.startsWith(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
               })
               .sort((a, b) => (a.install_date ?? "").localeCompare(b.install_date ?? ""))

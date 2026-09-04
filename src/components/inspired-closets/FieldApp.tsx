@@ -220,6 +220,10 @@ function parseOfficeNotes(notes: string | null | undefined): { facts: OfficeFact
   const facts: OfficeFact[] = [];
   const site: string[] = [];
   for (const chunk of chunks) {
+    if (/^go[- ]?back\b/i.test(chunk) || /^service\b/i.test(chunk)) {
+      site.push(chunk.replace(/^[^:]+:\s*/, "").trim() || chunk);
+      continue;
+    }
     const match = chunk.match(/^([^:]{1,40}):\s*(.+)$/);
     const label = (match?.[1] ?? "Note").trim();
     const value = (match?.[2] ?? chunk).trim();
@@ -242,7 +246,7 @@ function OfficePacket({ notes }: { notes: string | null | undefined }) {
   const { facts, site } = parseOfficeNotes(notes);
   if (facts.length === 0 && site.length === 0) return null;
   return (
-    <>
+    <div className={styles.packetOffice}>
       {facts.length > 0 ? (
         <dl className={styles.packetFacts}>
           {facts.map((fact, index) => (
@@ -263,8 +267,12 @@ function OfficePacket({ notes }: { notes: string | null | undefined }) {
           </ul>
         </div>
       ) : null}
-    </>
+    </div>
   );
+}
+
+function mediaKindLabel(kind: string) {
+  return MEDIA_KINDS.find((row) => row.id === kind)?.label ?? kind;
 }
 
 function localYmd(value = new Date()): string {
@@ -480,6 +488,8 @@ export default function FieldApp() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error" | "ok"; text: string } | null>(null);
   const [mediaKind, setMediaKind] = useState("before");
+  const [mediaCaption, setMediaCaption] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [issueType, setIssueType] = useState("site_not_ready");
   const [issueText, setIssueText] = useState("");
   const [fieldNotes, setFieldNotes] = useState("");
@@ -488,6 +498,7 @@ export default function FieldApp() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [jobsShowPacketFirst, setJobsShowPacketFirst] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [phone, setPhone] = useState("");
   const bellRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -926,20 +937,39 @@ export default function FieldApp() {
 
   async function uploadPhoto(file: File) {
     if (!workJob) return;
+    const form = new FormData();
+    form.set("job_id", workJob.id);
+    form.set("kind", mediaKind);
+    if (mediaCaption.trim()) form.set("caption", mediaCaption.trim());
+    form.set("file", file);
+    const response = await fetch("/api/inspired-closets/field/media", { method: "POST", body: form });
+    const data = (await response.json()) as { ok?: boolean; error?: string };
+    if (!data.ok) throw new Error(data.error ?? "Upload failed.");
+  }
+
+  async function uploadPhotos(files: FileList | File[]) {
+    if (!workJob) return;
+    const list = Array.from(files).filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
+    if (list.length === 0) {
+      setNotice({ kind: "error", text: "Choose a photo or video." });
+      return;
+    }
+    setPhotoBusy(true);
     setBusy(true);
     try {
-      const form = new FormData();
-      form.set("job_id", workJob.id);
-      form.set("kind", mediaKind);
-      form.set("file", file);
-      const response = await fetch("/api/inspired-closets/field/media", { method: "POST", body: form });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
-      if (!data.ok) throw new Error(data.error ?? "Upload failed.");
-      setNotice({ kind: "ok", text: "Photo saved to the job." });
+      for (const file of list) {
+        await uploadPhoto(file);
+      }
+      setMediaCaption("");
+      setNotice({
+        kind: "ok",
+        text: list.length === 1 ? "Photo saved to the job." : `${list.length} photos saved to the job.`,
+      });
       await loadJobExtras(workJob.id);
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Upload failed." });
     } finally {
+      setPhotoBusy(false);
       setBusy(false);
     }
   }
@@ -1787,60 +1817,105 @@ export default function FieldApp() {
 
       {tab === "jobs" && jobsShowPacketFirst ? (
         <div className={styles.jobsPacketView} id="installer-job-packet">
-          <button
-            type="button"
-            className={styles.btnGhost}
-            onClick={() => setJobsShowPacketFirst(false)}
-          >
-            All jobs
-          </button>
-          <div className={styles.jobsPacketCol}>
+          <div className={styles.packetToolbar}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => setJobsShowPacketFirst(false)}
+            >
+              ← All jobs
+            </button>
             {workJob ? (
-              <>
-                <section className={styles.dashCard}>
-                  <div className={styles.packetHead}>
-                    <div>
-                      <p className={styles.colLabel}>Job packet</p>
-                      <h2 className={styles.packetTitle}>{workJob.client?.name ?? "Job"}</h2>
-                      {workJob.client?.address ? (
-                        <p className={styles.packetLead}>
+              <div className={styles.packetToolbarActions}>
+                <span className={`${styles.chip} ${jobKindClass(workJob.job_kind)}`}>
+                  {jobKindLabel(workJob.job_kind)}
+                </span>
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={() => setAddInstallerOpen(true)}
+                >
+                  Add installer
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {workJob ? (
+            <>
+              <nav className={styles.packetJump} aria-label="Packet sections">
+                {[
+                  { id: "packet-brief", label: "Brief" },
+                  { id: "packet-photos", label: "Photos" },
+                  { id: "packet-notes", label: "Notes" },
+                  { id: "packet-parts", label: "Parts" },
+                  { id: "packet-issue", label: "Issue" },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={styles.packetJumpBtn}
+                    onClick={() =>
+                      document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
+
+              <div className={styles.packetLayout}>
+                <div className={styles.packetBriefCol}>
+                  <section className={styles.dashCard} id="packet-brief">
+                    <p className={styles.colLabel}>Job packet</p>
+                    <h2 className={styles.packetTitle}>{workJob.client?.name ?? "Job"}</h2>
+                    <p className={styles.packetLead}>
+                      {[workJob.install_date ? formatDay(workJob.install_date) : null, workJob.visit_window]
+                        .filter(Boolean)
+                        .join(" · ") || "Date TBD"}
+                    </p>
+                    {(workJob.client?.phone || workJob.client?.address) ? (
+                      <div className={styles.packetActions}>
+                        {workJob.client?.phone ? (
+                          <a className={styles.packetActionBtn} href={`tel:${workJob.client.phone}`}>
+                            Call
+                          </a>
+                        ) : null}
+                        {workJob.client?.address ? (
                           <a
+                            className={styles.packetActionBtn}
                             href={`https://maps.google.com/?q=${encodeURIComponent(workJob.client.address)}`}
                             target="_blank"
                             rel="noreferrer"
                           >
-                            {workJob.client.address}
+                            Directions
                           </a>
-                        </p>
-                      ) : null}
-                      <p className={styles.packetLead}>
-                        {workJob.client?.phone ? (
-                          <a href={`tel:${workJob.client.phone}`}>{workJob.client.phone}</a>
                         ) : null}
-                        {workJob.client?.phone && (workJob.install_date || workJob.visit_window) ? " · " : null}
-                        {[workJob.install_date ? formatDay(workJob.install_date) : null, workJob.visit_window]
-                          .filter(Boolean)
-                          .join(" · ")}
+                      </div>
+                    ) : null}
+                    {workJob.client?.address ? (
+                      <p className={styles.packetAddress}>{workJob.client.address}</p>
+                    ) : null}
+                    {workJob.client?.phone ? (
+                      <p className={styles.packetAddress}>
+                        <a href={`tel:${workJob.client.phone}`}>{workJob.client.phone}</a>
+                      </p>
+                    ) : null}
+
+                    <OfficePacket notes={workJob.notes} />
+
+                    <div className={styles.packetBlock}>
+                      <h3 className={styles.packetSection}>Crew</h3>
+                      <p className={styles.packetBody}>
+                        {crew.length > 0
+                          ? crew.map((person) => person.name).join(", ")
+                          : "Just you so far."}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className={styles.btnGhost}
-                      onClick={() => setAddInstallerOpen(true)}
-                    >
-                      Add Installer
-                    </button>
-                  </div>
-                  <OfficePacket notes={workJob.notes} />
-                  {crew.length > 0 ? (
-                    <p className={styles.crewLine}>
-                      On this job: {crew.map((person) => person.name).join(", ")}
-                    </p>
-                  ) : (
-                    <p className={styles.crewLine}>Just you so far.</p>
-                  )}
-                  <section className={styles.packetParts}>
-                    <h3 className={styles.jobName}>Parts</h3>
+                  </section>
+
+                  <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
+                    <h3 className={styles.packetSection}>Parts</h3>
                     {(workJob.packet_materials ?? []).length > 0 ? (
                       <ul className={styles.packetPartList}>
                         {(workJob.packet_materials ?? []).map((line) => (
@@ -1866,151 +1941,211 @@ export default function FieldApp() {
                     ) : null}
                     {(workJob.packet_materials ?? []).length === 0 &&
                     (workJob.packet_slip ?? []).length === 0 ? (
-                      <p className={styles.jobMeta}>
+                      <p className={styles.packetEmpty}>
                         Warehouse hasn&apos;t kitted this job yet. Parts show here after Receiving and To
                         job.
                       </p>
                     ) : null}
-                  </section>
-                  <section className={styles.packetParts}>
-                    <h3 className={styles.jobName}>Miles today</h3>
-                    <div className={styles.twoCol}>
-                      <label className={styles.field} style={{ marginTop: 0 }}>
-                        <span className={styles.label}>Out</span>
-                        <input
-                          className={styles.input}
-                          inputMode="numeric"
-                          value={milesOut}
-                          onChange={(e) => setMilesOut(e.target.value)}
-                          placeholder="0"
-                        />
-                      </label>
-                      <label className={styles.field} style={{ marginTop: 0 }}>
-                        <span className={styles.label}>Back</span>
-                        <input
-                          className={styles.input}
-                          inputMode="numeric"
-                          value={milesBack}
-                          onChange={(e) => setMilesBack(e.target.value)}
-                          placeholder="0"
-                        />
-                      </label>
+
+                    <div className={styles.packetParts}>
+                      <h3 className={styles.packetSection}>Miles today</h3>
+                      <div className={styles.twoCol}>
+                        <label className={styles.field} style={{ marginTop: 0 }}>
+                          <span className={styles.label}>Out</span>
+                          <input
+                            className={styles.input}
+                            inputMode="numeric"
+                            value={milesOut}
+                            onChange={(e) => setMilesOut(e.target.value)}
+                            placeholder="0"
+                          />
+                        </label>
+                        <label className={styles.field} style={{ marginTop: 0 }}>
+                          <span className={styles.label}>Back</span>
+                          <input
+                            className={styles.input}
+                            inputMode="numeric"
+                            value={milesBack}
+                            onChange={(e) => setMilesBack(e.target.value)}
+                            placeholder="0"
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.btnGhost}
+                        style={{ marginTop: "0.55rem" }}
+                        disabled={busy || !vehicleSnap?.vehicle}
+                        onClick={() => void saveJobMiles(workJob.id)}
+                      >
+                        Save miles
+                      </button>
                     </div>
+
                     <button
                       type="button"
-                      className={styles.btnGhost}
-                      style={{ marginTop: "0.55rem" }}
-                      disabled={busy || !vehicleSnap?.vehicle}
-                      onClick={() => void saveJobMiles(workJob.id)}
+                      className={`${styles.btn} ${styles.packetBtn}`}
+                      disabled={busy || isPastJob(workJob)}
+                      onClick={() => void completeJob()}
                     >
-                      Save miles
+                      Mark install complete
                     </button>
                   </section>
-                  <button
-                    type="button"
-                    className={`${styles.btn} ${styles.packetBtn}`}
-                    disabled={busy || isPastJob(workJob)}
-                    onClick={() => void completeJob()}
-                  >
-                    Mark install complete
-                  </button>
-                </section>
+                </div>
 
-                <section className={styles.dashCard}>
-                  <h3 className={styles.jobName}>Your notes</h3>
-                  <textarea
-                    className={styles.textarea}
-                    value={fieldNotes}
-                    onChange={(e) => setFieldNotes(e.target.value)}
-                    placeholder="Site notes, what’s left, what the customer said…"
-                  />
-                  <button type="button" className={styles.btn} style={{ marginTop: "0.65rem" }} disabled={busy} onClick={() => void saveNotes()}>
-                    Save notes
-                  </button>
-                </section>
+                <div className={styles.packetDocCol}>
+                  <section className={`${styles.dashCard} ${styles.packetDocCard}`} id="packet-photos">
+                    <div className={styles.packetDocHead}>
+                      <div>
+                        <p className={styles.colLabel}>Document the job</p>
+                        <h3 className={styles.packetSection}>Photos</h3>
+                        <p className={styles.jobMeta}>
+                          Before, during, after — stays on this job for the office.
+                        </p>
+                      </div>
+                      <span className={styles.packetCount}>{media.length}</span>
+                    </div>
 
-                <section className={styles.dashCard}>
-                  <h3 className={styles.jobName}>Photos</h3>
-                  <div className={styles.field}>
-                    <span className={styles.label}>Type</span>
-                    <select className={styles.select} value={mediaKind} onChange={(e) => setMediaKind(e.target.value)}>
+                    <div className={styles.kindChips} role="group" aria-label="Photo type">
                       {MEDIA_KINDS.map((kind) => (
-                        <option key={kind.id} value={kind.id}>
+                        <button
+                          key={kind.id}
+                          type="button"
+                          className={`${styles.kindChip} ${mediaKind === kind.id ? styles.kindChipActive : ""}`}
+                          onClick={() => setMediaKind(kind.id)}
+                        >
                           {kind.label}
-                        </option>
+                        </button>
                       ))}
-                    </select>
-                  </div>
-                  <label className={styles.photoPick}>
-                    Add photo
+                    </div>
+
+                    <label className={styles.field}>
+                      <span className={styles.label}>Caption (optional)</span>
+                      <input
+                        className={styles.input}
+                        value={mediaCaption}
+                        onChange={(e) => setMediaCaption(e.target.value)}
+                        placeholder="What should the office know?"
+                      />
+                    </label>
+
                     <input
+                      ref={photoInputRef}
                       type="file"
                       accept="image/*,video/*"
                       capture="environment"
-                      disabled={busy}
+                      multiple
+                      className={styles.avatarFileInput}
+                      disabled={busy || photoBusy}
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void uploadPhoto(file);
+                        const files = e.target.files;
+                        if (files?.length) void uploadPhotos(files);
                         e.target.value = "";
                       }}
                     />
-                  </label>
-                  {media.length > 0 ? (
-                    <div className={styles.mediaGrid}>
-                      {media.map((item) =>
-                        item.public_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img key={item.id} src={item.public_url} alt={item.caption || item.kind} className={styles.mediaThumb} />
-                        ) : null,
-                      )}
-                    </div>
-                  ) : (
-                    <p className={styles.jobMeta} style={{ marginTop: "0.65rem" }}>
-                      Snap before / during / after.
-                    </p>
-                  )}
-                </section>
 
-                <section className={styles.dashCard}>
-                  <h3 className={styles.jobName}>Report an issue</h3>
-                  <select className={styles.select} value={issueType} onChange={(e) => setIssueType(e.target.value)}>
-                    {ISSUE_TYPES.map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.label}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    className={styles.textarea}
-                    style={{ marginTop: "0.55rem" }}
-                    value={issueText}
-                    onChange={(e) => setIssueText(e.target.value)}
-                    placeholder="Site not ready, missing hardware…"
-                  />
-                  <button
-                    type="button"
-                    className={`${styles.btnDanger} ${styles.full}`}
-                    style={{ marginTop: "0.65rem", width: "100%" }}
-                    disabled={busy || !issueText.trim()}
-                    onClick={() => void reportIssue()}
-                  >
-                    Flag to office
-                  </button>
-                  {issues.map((issue) => (
-                    <p key={issue.id} className={styles.jobMeta}>
-                      · {issue.issue_type.replace(/_/g, " ")} — {issue.description}
+                    <div className={styles.photoActions}>
+                      <button
+                        type="button"
+                        className={`${styles.btn} ${styles.photoPrimary}`}
+                        disabled={busy || photoBusy}
+                        onClick={() => photoInputRef.current?.click()}
+                      >
+                        {photoBusy ? "Uploading…" : "Take / add photos"}
+                      </button>
+                    </div>
+
+                    {media.length > 0 ? (
+                      <div className={styles.mediaGrid}>
+                        {media.map((item) =>
+                          item.public_url ? (
+                            <figure key={item.id} className={styles.mediaFigure}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={item.public_url}
+                                alt={item.caption || item.kind}
+                                className={styles.mediaThumb}
+                              />
+                              <figcaption className={styles.mediaCaption}>
+                                <span>{mediaKindLabel(item.kind)}</span>
+                                {item.caption ? <span>{item.caption}</span> : null}
+                              </figcaption>
+                            </figure>
+                          ) : null,
+                        )}
+                      </div>
+                    ) : (
+                      <p className={styles.packetEmpty}>No photos yet — snap the room before you start.</p>
+                    )}
+                  </section>
+
+                  <section className={styles.dashCard} id="packet-notes">
+                    <h3 className={styles.packetSection}>Your notes</h3>
+                    <p className={styles.jobMeta}>
+                      What you did, what’s left, what the customer said.
                     </p>
-                  ))}
-                </section>
-              </>
-            ) : (
-              <section className={styles.dashCard}>
-                <p className={styles.colLabel}>Job packet</p>
-                <h2 className={styles.jobName}>No install on deck</h2>
-                <p className={styles.jobMeta}>When Des books you, the packet lands here.</p>
-              </section>
-            )}
-          </div>
+                    <textarea
+                      className={`${styles.textarea} ${styles.packetNotesArea}`}
+                      value={fieldNotes}
+                      onChange={(e) => setFieldNotes(e.target.value)}
+                      placeholder="Site notes, what’s left, what the customer said…"
+                    />
+                    <button
+                      type="button"
+                      className={styles.btn}
+                      style={{ marginTop: "0.65rem" }}
+                      disabled={busy}
+                      onClick={() => void saveNotes()}
+                    >
+                      Save notes
+                    </button>
+                  </section>
+
+                  <section className={styles.dashCard} id="packet-issue">
+                    <h3 className={styles.packetSection}>Report an issue</h3>
+                    <select
+                      className={styles.select}
+                      value={issueType}
+                      onChange={(e) => setIssueType(e.target.value)}
+                    >
+                      {ISSUE_TYPES.map((type) => (
+                        <option key={type.id} value={type.id}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      className={styles.textarea}
+                      style={{ marginTop: "0.55rem" }}
+                      value={issueText}
+                      onChange={(e) => setIssueText(e.target.value)}
+                      placeholder="Site not ready, missing hardware…"
+                    />
+                    <button
+                      type="button"
+                      className={`${styles.btnDanger} ${styles.full}`}
+                      style={{ marginTop: "0.65rem", width: "100%" }}
+                      disabled={busy || !issueText.trim()}
+                      onClick={() => void reportIssue()}
+                    >
+                      Flag to office
+                    </button>
+                    {issues.map((issue) => (
+                      <p key={issue.id} className={styles.jobMeta}>
+                        · {issue.issue_type.replace(/_/g, " ")} — {issue.description}
+                      </p>
+                    ))}
+                  </section>
+                </div>
+              </div>
+            </>
+          ) : (
+            <section className={styles.dashCard}>
+              <p className={styles.colLabel}>Job packet</p>
+              <h2 className={styles.jobName}>No install on deck</h2>
+              <p className={styles.jobMeta}>When Des books you, the packet lands here.</p>
+            </section>
+          )}
         </div>
       ) : null}
 

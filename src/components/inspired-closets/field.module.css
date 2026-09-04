@@ -588,9 +588,15 @@
 
 .mediaGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.4rem;
-  margin-top: 0.65rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+@media (min-width: 560px) {
+  .mediaGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .mediaThumb {
@@ -1135,6 +1141,14 @@
   margin-top: 0.75rem;
 }
 
+#packet-brief,
+#packet-photos,
+#packet-notes,
+#packet-parts,
+#packet-issue {
+  scroll-margin-top: 5.5rem;
+}
+
 .colLabel {
   margin: 0 0 0.85rem;
   font-size: 0.66rem;
@@ -1639,6 +1653,230 @@
   gap: 1rem;
 }
 
+.jobsPacketView {
+  display: grid;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.packetToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.packetToolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.packetJump {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.packetJump::-webkit-scrollbar {
+  display: none;
+}
+
+.packetJumpBtn {
+  flex: 0 0 auto;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.packetLayout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+}
+
+.packetBriefCol,
+.packetDocCol {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.packetOpsCard .packetParts {
+  margin-top: 1rem;
+}
+
+@media (max-width: 899px) {
+  .packetLayout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .packetBriefCol {
+    display: contents;
+  }
+
+  .packetDocCol {
+    order: 2;
+    display: grid;
+    gap: 1rem;
+  }
+
+  #packet-brief {
+    order: 1;
+  }
+
+  .packetOpsCard {
+    order: 3;
+  }
+}
+
+.packetDocCard {
+  border-color: rgba(130, 31, 45, 0.18);
+}
+
+.packetDocHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.packetDocHead .packetSection {
+  margin-top: 0.15rem;
+}
+
+.packetCount {
+  display: grid;
+  place-items: center;
+  min-width: 2.4rem;
+  height: 2.4rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: var(--ic-blush);
+  color: var(--ic-red);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.packetActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.packetActionBtn {
+  display: grid;
+  place-items: center;
+  min-height: 2.75rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(130, 31, 45, 0.28);
+  background: var(--ic-blush);
+  color: var(--ic-red);
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-decoration: none;
+  touch-action: manipulation;
+}
+
+.packetAddress {
+  margin: 0.55rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.packetAddress a {
+  color: var(--ic-red);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.packetOffice {
+  margin-top: 1rem;
+}
+
+.kindChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.kindChip {
+  min-height: 2.15rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #faf8f6;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.kindChipActive {
+  background: #111;
+  border-color: #111;
+  color: #fff;
+}
+
+.photoActions {
+  margin-top: 0.75rem;
+}
+
+.photoPrimary {
+  width: 100%;
+}
+
+.packetNotesArea {
+  min-height: 8.5rem;
+  margin-top: 0.55rem;
+}
+
+.mediaFigure {
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.mediaCaption {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.mediaCaption span:first-child {
+  font-weight: 800;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .jobsPacketCol {
   display: grid;
   gap: 1rem;
@@ -1657,15 +1895,23 @@
   min-width: 0;
 }
 
-.jobsPacketView {
-  display: grid;
-  gap: 1rem;
-  min-width: 0;
-  justify-items: start;
-}
+@media (min-width: 900px) {
+  .packetLayout {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 1.15rem;
+  }
 
-.jobsPacketView .jobsPacketCol {
-  width: 100%;
+  .packetDocCol {
+    position: sticky;
+    top: 4.5rem;
+    max-height: calc(100dvh - 5rem);
+    overflow: auto;
+    padding-right: 0.15rem;
+  }
+
+  .packetJump {
+    display: none;
+  }
 }
 
 .jobsHero,
@@ -2099,6 +2345,16 @@
 
   .packetHead .btnGhost {
     width: 100%;
+  }
+
+  .packetActions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .packetJump {
+    margin: 0 -0.15rem;
+    padding-left: 0.15rem;
+    padding-right: 0.15rem;
   }
 
   .twoCol {

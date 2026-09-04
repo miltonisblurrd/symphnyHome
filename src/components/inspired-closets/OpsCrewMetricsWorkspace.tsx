@@ -4,7 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import { ISSUE_TYPES, MEDIA_KINDS } from "@/lib/inspired-closets-ops-field";
 import { JOB_KINDS, stageLabel } from "@/lib/inspired-closets-ops-jobs";
+import type {
+  InstallerJobsGrade,
+  InstallerOverallGrade,
+  InstallerVehicleGradeView,
+} from "@/lib/inspired-closets-ops-installer-grade";
+import type { GradeLight, GradeStatus } from "@/lib/inspired-closets-ops-vehicles";
 import styles from "./ops-payroll.module.css";
+
+type GradeBundle = {
+  overall: InstallerOverallGrade;
+  jobs: InstallerJobsGrade;
+  vehicle: InstallerVehicleGradeView;
+};
 
 type InstallerMetric = {
   id: string;
@@ -30,6 +42,7 @@ type InstallerMetric = {
   issuesReported: number;
   openIssues: number;
   hasPassword?: boolean;
+  grade: GradeBundle;
 };
 
 type SessionRow = {
@@ -108,6 +121,11 @@ type DetailFile = {
     bank_last4: string | null;
     bank_status: string | null;
   } | null;
+  vehicle: {
+    id: string;
+    label: string;
+    grade: InstallerVehicleGradeView;
+  } | null;
 };
 
 type ApiResponse = {
@@ -122,10 +140,11 @@ type ApiResponse = {
   upcoming?: UpcomingRow[];
   timeOff?: DetailFile["timeOff"];
   pay?: DetailFile["pay"];
+  vehicle?: DetailFile["vehicle"];
 };
 
 type DetailTab = "details" | "jobs" | "clocks" | "issues" | "photos" | "timeoff" | "access";
-type ListFilter = "all" | "on_site";
+type ListFilter = "all" | "on_site" | "needs_attention";
 
 function formatMinutes(mins: number | null | undefined): string {
   if (mins == null) return "—";
@@ -165,6 +184,45 @@ function mediaLabel(id: string): string {
 function jobKindLabel(id: string | null): string {
   if (!id) return "—";
   return JOB_KINDS.find((item) => item.id === id)?.label ?? id.replace(/_/g, " ");
+}
+
+function gradeToneClass(status: GradeStatus | "new" | "none"): string {
+  if (status === "due") return styles.gradeDue;
+  if (status === "warn") return styles.gradeWarn;
+  if (status === "new" || status === "none") return styles.gradeMuted;
+  return styles.gradeOk;
+}
+
+function GradeChip({
+  label,
+  status,
+  prefix,
+}: {
+  label: string;
+  status: GradeStatus | "new" | "none";
+  prefix?: string;
+}) {
+  return (
+    <span className={`${styles.gradeChip} ${gradeToneClass(status)}`}>
+      {prefix ? `${prefix} · ${label}` : label}
+    </span>
+  );
+}
+
+function GradeLights({ lights }: { lights: GradeLight[] }) {
+  if (lights.length === 0) {
+    return <p className={styles.leadContact}>No truck assigned.</p>;
+  }
+  return (
+    <div className={styles.gradeLights}>
+      {lights.map((light) => (
+        <div key={light.id} className={styles.gradeLightRow}>
+          <strong className={gradeToneClass(light.status)}>{light.label}</strong>
+          <span>{light.detail}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Avatar({
@@ -242,6 +300,7 @@ export default function OpsCrewMetricsWorkspace() {
         upcoming: payload.upcoming ?? [],
         timeOff: payload.timeOff ?? [],
         pay: payload.pay ?? null,
+        vehicle: payload.vehicle ?? null,
       });
     } catch (error) {
       setNotice({
@@ -290,20 +349,38 @@ export default function OpsCrewMetricsWorkspace() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId]);
 
-  const visibleInstallers = useMemo(
-    () => (listFilter === "on_site" ? installers.filter((row) => row.onSiteNow) : installers),
-    [installers, listFilter],
-  );
+  const visibleInstallers = useMemo(() => {
+    if (listFilter === "on_site") return installers.filter((row) => row.onSiteNow);
+    if (listFilter === "needs_attention") {
+      return installers.filter(
+        (row) =>
+          row.grade.overall.overall === "due" ||
+          row.grade.jobs.overall === "due" ||
+          row.grade.vehicle.overall === "due",
+      );
+    }
+    return installers;
+  }, [installers, listFilter]);
 
   const totalIssues = installers.reduce((sum, row) => sum + row.issuesReported, 0);
   const totalCompletions = installers.reduce((sum, row) => sum + row.completions, 0);
-  const totalMinutes = installers.reduce((sum, row) => sum + row.totalMinutes, 0);
   const onSiteCount = installers.filter((row) => row.onSiteNow).length;
+  const needsAttentionCount = installers.filter(
+    (row) =>
+      row.grade.overall.overall === "due" ||
+      row.grade.jobs.overall === "due" ||
+      row.grade.vehicle.overall === "due",
+  ).length;
 
   function closeFile() {
     setSelectedId(null);
     setDetailTab("details");
     setFieldPassword("");
+  }
+
+  function openInstaller(id: string, tab: DetailTab = "details") {
+    setDetailTab(tab);
+    setSelectedId(id);
   }
 
   async function syncRosterFromJobs() {
@@ -377,7 +454,10 @@ export default function OpsCrewMetricsWorkspace() {
       });
       const payload = (await response.json()) as { ok?: boolean; error?: string };
       if (!payload.ok) throw new Error(payload.error ?? "Could not update.");
-      setNotice({ kind: "info", text: decision === "approved" ? "Approved. Calendar will show it." : "Denied. They’ll see a bell." });
+      setNotice({
+        kind: "info",
+        text: decision === "approved" ? "Approved. Calendar will show it." : "Denied. They’ll see a bell.",
+      });
       if (selectedId) await loadDetail(selectedId);
     } catch (error) {
       setNotice({
@@ -434,14 +514,15 @@ export default function OpsCrewMetricsWorkspace() {
 
   if (selectedId && detail) {
     const person = detail.installer;
-    const contact = [
-      person.phone ?? "No phone",
-      person.email,
-      person.title,
-      person.tenureLabel,
-    ]
+    const grade = person.grade;
+    const vehicleGrade = detail.vehicle?.grade ?? grade.vehicle;
+    const contact = [person.phone ?? "No phone", person.email, person.title, person.tenureLabel]
       .filter(Boolean)
       .join(" · ");
+    const whyLines = [
+      ...grade.jobs.lights.filter((light) => light.status === "due" || light.status === "warn"),
+      ...vehicleGrade.lights.filter((light) => light.status === "due" || light.status === "warn"),
+    ];
 
     return (
       <OpsShell title={person.name} hideTitle>
@@ -460,6 +541,11 @@ export default function OpsCrewMetricsWorkspace() {
                 {person.onSiteNow ? <span className={styles.liveChip}>On site</span> : null}
               </h1>
               <p className={styles.leadContact}>{contact}</p>
+              <div className={styles.gradeChipRow}>
+                <GradeChip label={grade.overall.label} status={grade.overall.overall} prefix="Overall" />
+                <GradeChip label={grade.jobs.label} status={grade.jobs.overall} prefix="Jobs" />
+                <GradeChip label={vehicleGrade.label} status={vehicleGrade.overall} prefix="Vehicle" />
+              </div>
             </div>
           </div>
           <div className={styles.leadHeaderActions}>
@@ -493,274 +579,383 @@ export default function OpsCrewMetricsWorkspace() {
         </div>
 
         <div className={styles.leadLayout}>
-          <div className={styles.panel}>
+          <div className={styles.detailStack}>
             {detailTab === "details" ? (
-              <div className={styles.detailGrid}>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Title</span>
-                  <p className={styles.readValue}>{person.title}</p>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Phone</span>
-                  <p className={styles.readValue}>
-                    {person.phone ? (
-                      <a href={`tel:${person.phone}`}>{person.phone}</a>
-                    ) : (
-                      "—"
-                    )}
-                  </p>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Email</span>
-                  <p className={styles.readValue}>
-                    {person.email ? <a href={`mailto:${person.email}`}>{person.email}</a> : "—"}
-                  </p>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Started</span>
-                  <p className={styles.readValue}>{formatDay(person.hiredAt)}</p>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Tenure</span>
-                  <p className={styles.readValue}>{person.tenureLabel}</p>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Status</span>
-                  <p className={styles.readValue}>
-                    {person.onSiteNow ? "Clocked in" : "Not on a job"}
-                    {!person.active ? " · Inactive" : ""}
-                  </p>
-                </label>
-              </div>
+              <>
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>Overall</p>
+                  <div className={styles.gradeChipRow}>
+                    <GradeChip label={grade.overall.label} status={grade.overall.overall} />
+                  </div>
+                  <p className={styles.gradeSummary}>{grade.overall.summary}</p>
+                </section>
+
+                <div className={styles.gradeTwoUp}>
+                  <section className={styles.panel}>
+                    <div className={styles.gradeCardHead}>
+                      <p className={styles.railTitle}>Jobs</p>
+                      <GradeChip label={grade.jobs.label} status={grade.jobs.overall} />
+                    </div>
+                    <GradeLights lights={grade.jobs.lights} />
+                    <button
+                      type="button"
+                      className={styles.buttonGhost}
+                      style={{ marginTop: "0.75rem" }}
+                      onClick={() => setDetailTab("issues")}
+                    >
+                      Open issues tab
+                    </button>
+                  </section>
+                  <section className={styles.panel}>
+                    <div className={styles.gradeCardHead}>
+                      <p className={styles.railTitle}>Vehicle</p>
+                      <GradeChip label={vehicleGrade.label} status={vehicleGrade.overall} />
+                    </div>
+                    {vehicleGrade.label_name ? (
+                      <p className={styles.leadContact} style={{ marginBottom: "0.55rem" }}>
+                        {vehicleGrade.label_name}
+                      </p>
+                    ) : null}
+                    <GradeLights lights={vehicleGrade.lights} />
+                  </section>
+                </div>
+
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>Last 30 days</p>
+                  <div className={styles.evidenceGrid}>
+                    <article className={styles.evidenceCard}>
+                      <p className={styles.statCardLabel}>Completions</p>
+                      <p className={styles.statCardValue}>{grade.jobs.completions30}</p>
+                    </article>
+                    <article className={styles.evidenceCard}>
+                      <p className={styles.statCardLabel}>Open issues</p>
+                      <p className={styles.statCardValue}>{grade.jobs.openIssues}</p>
+                    </article>
+                    <article className={styles.evidenceCard}>
+                      <p className={styles.statCardLabel}>Hours clocked</p>
+                      <p className={styles.statCardValue}>{formatMinutes(grade.jobs.minutes30)}</p>
+                    </article>
+                    <article className={styles.evidenceCard}>
+                      <p className={styles.statCardLabel}>Go-backs</p>
+                      <p className={styles.statCardValue}>{grade.jobs.goBacks30}</p>
+                    </article>
+                  </div>
+                </section>
+
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>File</p>
+                  <div className={styles.detailGrid}>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Title</span>
+                      <p className={styles.readValue}>{person.title}</p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Phone</span>
+                      <p className={styles.readValue}>
+                        {person.phone ? <a href={`tel:${person.phone}`}>{person.phone}</a> : "—"}
+                      </p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Email</span>
+                      <p className={styles.readValue}>
+                        {person.email ? <a href={`mailto:${person.email}`}>{person.email}</a> : "—"}
+                      </p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Started</span>
+                      <p className={styles.readValue}>{formatDay(person.hiredAt)}</p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Tenure</span>
+                      <p className={styles.readValue}>{person.tenureLabel}</p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Status</span>
+                      <p className={styles.readValue}>
+                        {person.onSiteNow ? "Clocked in" : "Not on a job"}
+                        {!person.active ? " · Inactive" : ""}
+                      </p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Truck</span>
+                      <p className={styles.readValue}>{detail.vehicle?.label ?? "No truck assigned"}</p>
+                    </label>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Lifetime completions</span>
+                      <p className={styles.readValue}>{person.completions}</p>
+                    </label>
+                  </div>
+                </section>
+              </>
             ) : null}
 
             {detailTab === "jobs" ? (
-              detail.jobs.length === 0 ? (
-                <p className={styles.empty}>No jobs assigned or timed for this installer yet.</p>
-              ) : (
-                <table className={styles.table} style={{ minWidth: "42rem" }}>
-                  <thead>
-                    <tr>
-                      <th>Client</th>
-                      <th>Address</th>
-                      <th>Stage</th>
-                      <th>Kind</th>
-                      <th>Install</th>
-                      <th>Window</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.jobs.map((job) => (
-                      <tr key={job.id}>
-                        <td>
-                          <strong>{job.clientName}</strong>
-                        </td>
-                        <td className={styles.notesCell}>{job.address ?? "—"}</td>
-                        <td>{stageLabel(job.stage)}</td>
-                        <td>{jobKindLabel(job.jobKind)}</td>
-                        <td>{formatDay(job.installDate ?? job.completedDate)}</td>
-                        <td>{job.visitWindow ?? "—"}</td>
+              <div className={styles.panel}>
+                {detail.jobs.length === 0 ? (
+                  <p className={styles.empty}>No jobs assigned or timed for this installer yet.</p>
+                ) : (
+                  <table className={styles.table} style={{ minWidth: "42rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Client</th>
+                        <th>Address</th>
+                        <th>Stage</th>
+                        <th>Kind</th>
+                        <th>Install</th>
+                        <th>Window</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+                    </thead>
+                    <tbody>
+                      {detail.jobs.map((job) => (
+                        <tr key={job.id}>
+                          <td>
+                            <strong>{job.clientName}</strong>
+                          </td>
+                          <td className={styles.notesCell}>{job.address ?? "—"}</td>
+                          <td>{stageLabel(job.stage)}</td>
+                          <td>{jobKindLabel(job.jobKind)}</td>
+                          <td>{formatDay(job.installDate ?? job.completedDate)}</td>
+                          <td>{job.visitWindow ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             ) : null}
 
             {detailTab === "clocks" ? (
-              detail.sessions.length === 0 ? (
-                <p className={styles.empty}>No installer clocks yet.</p>
-              ) : (
-                <table className={styles.table} style={{ minWidth: "40rem" }}>
-                  <thead>
-                    <tr>
-                      <th>Client</th>
-                      <th>In</th>
-                      <th>Out</th>
-                      <th>Duration</th>
-                      <th>Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.sessions.map((row) => (
-                      <tr key={row.id} className={row.open ? styles.rowHeld : undefined}>
-                        <td>{row.clientName}</td>
-                        <td>{formatStamp(row.clockInAt)}</td>
-                        <td>{row.open ? "On site" : formatStamp(row.clockOutAt)}</td>
-                        <td>{row.open ? "—" : formatMinutes(row.minutes)}</td>
-                        <td className={styles.notesCell}>{row.note ?? "—"}</td>
+              <div className={styles.panel}>
+                {detail.sessions.length === 0 ? (
+                  <p className={styles.empty}>No installer clocks yet.</p>
+                ) : (
+                  <table className={styles.table} style={{ minWidth: "40rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Client</th>
+                        <th>In</th>
+                        <th>Out</th>
+                        <th>Duration</th>
+                        <th>Note</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+                    </thead>
+                    <tbody>
+                      {detail.sessions.map((row) => (
+                        <tr key={row.id} className={row.open ? styles.rowHeld : undefined}>
+                          <td>{row.clientName}</td>
+                          <td>{formatStamp(row.clockInAt)}</td>
+                          <td>{row.open ? "On site" : formatStamp(row.clockOutAt)}</td>
+                          <td>{row.open ? "—" : formatMinutes(row.minutes)}</td>
+                          <td className={styles.notesCell}>{row.note ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             ) : null}
 
             {detailTab === "issues" ? (
-              detail.issues.length === 0 ? (
-                <p className={styles.empty}>No field issues reported by this installer.</p>
-              ) : (
-                <table className={styles.table} style={{ minWidth: "40rem" }}>
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Client</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>What happened</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.issues.map((row) => (
-                      <tr key={row.id} className={row.status === "open" ? styles.rowHeld : undefined}>
-                        <td>{formatStamp(row.createdAt)}</td>
-                        <td>{row.clientName}</td>
-                        <td>{issueLabel(row.issueType)}</td>
-                        <td>
-                          <span
-                            className={`${styles.statusBadge} ${
-                              row.status === "open" ? styles.statusHeld : styles.statusPaid
-                            }`}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                        <td className={styles.notesCell}>{row.description ?? "—"}</td>
+              <div className={styles.panel}>
+                {detail.issues.length === 0 ? (
+                  <p className={styles.empty}>No field issues reported by this installer.</p>
+                ) : (
+                  <table className={styles.table} style={{ minWidth: "40rem" }}>
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>Client</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>What happened</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+                    </thead>
+                    <tbody>
+                      {detail.issues.map((row) => (
+                        <tr key={row.id} className={row.status === "open" ? styles.rowHeld : undefined}>
+                          <td>{formatStamp(row.createdAt)}</td>
+                          <td>{row.clientName}</td>
+                          <td>{issueLabel(row.issueType)}</td>
+                          <td>
+                            <span
+                              className={`${styles.statusBadge} ${
+                                row.status === "open" ? styles.statusHeld : styles.statusPaid
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className={styles.notesCell}>{row.description ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             ) : null}
 
             {detailTab === "photos" ? (
-              detail.media.length === 0 ? (
-                <p className={styles.empty}>No photos from this installer yet.</p>
-              ) : (
-                <div className={styles.installerMediaGrid}>
-                  {detail.media.map((item) => (
-                    <figure key={item.id} className={styles.installerMediaCard}>
-                      {item.publicUrl ? (
-                        <a href={item.publicUrl} target="_blank" rel="noreferrer">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={item.publicUrl} alt={item.caption || item.kind} />
-                        </a>
-                      ) : (
-                        <div className={styles.installerMediaMissing}>No preview</div>
-                      )}
-                      <figcaption>
-                        {mediaLabel(item.kind)} · {item.clientName}
-                        {item.caption ? ` · ${item.caption}` : ""}
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
-              )
+              <div className={styles.panel}>
+                {detail.media.length === 0 ? (
+                  <p className={styles.empty}>No photos from this installer yet.</p>
+                ) : (
+                  <div className={styles.installerMediaGrid}>
+                    {detail.media.map((item) => (
+                      <figure key={item.id} className={styles.installerMediaCard}>
+                        {item.publicUrl ? (
+                          <a href={item.publicUrl} target="_blank" rel="noreferrer">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={item.publicUrl} alt={item.caption || item.kind} />
+                          </a>
+                        ) : (
+                          <div className={styles.installerMediaMissing}>No preview</div>
+                        )}
+                        <figcaption>
+                          {mediaLabel(item.kind)} · {item.clientName}
+                          {item.caption ? ` · ${item.caption}` : ""}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : null}
 
             {detailTab === "timeoff" ? (
-              detail.timeOff.length === 0 ? (
-                <p className={styles.empty}>No PTO or sick requests yet.</p>
-              ) : (
-                <table className={styles.table} style={{ minWidth: "36rem" }}>
-                  <thead>
-                    <tr>
-                      <th>Kind</th>
-                      <th>Dates</th>
-                      <th>Status</th>
-                      <th>Note</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.timeOff.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.kind === "sick" ? "Sick" : "PTO"}</td>
-                        <td>
-                          {row.start_date}
-                          {row.end_date !== row.start_date ? ` → ${row.end_date}` : ""}
-                        </td>
-                        <td>{row.status}</td>
-                        <td className={styles.notesCell}>{row.note ?? "—"}</td>
-                        <td>
-                          {row.status === "requested" ? (
-                            <>
-                              <button type="button" className={styles.buttonPrimary} onClick={() => void decideTimeOff(row.id, "approved")}>
-                                Approve
-                              </button>{" "}
-                              <button type="button" className={styles.buttonGhost} onClick={() => void decideTimeOff(row.id, "denied")}>
-                                Deny
-                              </button>
-                            </>
-                          ) : null}
-                        </td>
+              <div className={styles.panel}>
+                {detail.timeOff.length === 0 ? (
+                  <p className={styles.empty}>No PTO or sick requests yet.</p>
+                ) : (
+                  <table className={styles.table} style={{ minWidth: "36rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Kind</th>
+                        <th>Dates</th>
+                        <th>Status</th>
+                        <th>Note</th>
+                        <th></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
+                    </thead>
+                    <tbody>
+                      {detail.timeOff.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.kind === "sick" ? "Sick" : "PTO"}</td>
+                          <td>
+                            {row.start_date}
+                            {row.end_date !== row.start_date ? ` → ${row.end_date}` : ""}
+                          </td>
+                          <td>{row.status}</td>
+                          <td className={styles.notesCell}>{row.note ?? "—"}</td>
+                          <td>
+                            {row.status === "requested" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className={styles.buttonPrimary}
+                                  onClick={() => void decideTimeOff(row.id, "approved")}
+                                >
+                                  Approve
+                                </button>{" "}
+                                <button
+                                  type="button"
+                                  className={styles.buttonGhost}
+                                  onClick={() => void decideTimeOff(row.id, "denied")}
+                                >
+                                  Deny
+                                </button>
+                              </>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             ) : null}
 
             {detailTab === "access" ? (
-              <div className={styles.detailGrid}>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>App phone</span>
-                  <input
-                    className={styles.input}
-                    value={fieldPhone || person.phone || ""}
-                    onChange={(e) => setFieldPhone(e.target.value)}
-                    placeholder="7025550100"
-                  />
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Set / reset password</span>
-                  <input
-                    className={styles.input}
-                    type="password"
-                    value={fieldPassword}
-                    onChange={(e) => setFieldPassword(e.target.value)}
-                    placeholder={person.hasPassword ? "New password" : "First password"}
-                  />
-                </label>
-                <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
-                  Installers sign-in uses this exact phone. A random number on the app screen will fail
-                  unless you save it here first.
-                  {person.hasPassword ? " A password is already on file — reset only if they forgot it." : " No password yet."}
-                </p>
-                <div className={styles.formActions}>
-                  <button
-                    type="button"
-                    className={styles.buttonPrimary}
-                    disabled={fieldPassword.length < 6 || (fieldPhone || person.phone || "").replace(/\D/g, "").length < 10}
-                    onClick={() => void saveFieldAccess()}
-                  >
-                    Save app login
-                  </button>
-                </div>
-                <p className={styles.detailSectionTitle} style={{ gridColumn: "1 / -1" }}>
-                  Pay preview (installer Me)
-                </p>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Last pay $</span>
-                  <input className={styles.input} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="0" />
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Last pay date</span>
-                  <input className={styles.input} type="date" value={payLast} onChange={(e) => setPayLast(e.target.value)} />
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Next pay date</span>
-                  <input className={styles.input} type="date" value={payNext} onChange={(e) => setPayNext(e.target.value)} />
-                </label>
-                <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
-                  {detail.pay?.bank_last4
-                    ? `Deposit last 4 ···${detail.pay.bank_last4} · ${detail.pay.bank_status}`
-                    : "No deposit last 4 on file."}
-                </p>
-                <div className={styles.formActions}>
-                  <button type="button" className={styles.buttonGhost} onClick={() => void savePayVision()}>
-                    Save pay preview
-                  </button>
+              <div className={styles.panel}>
+                <div className={styles.detailGrid}>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>App phone</span>
+                    <input
+                      className={styles.input}
+                      value={fieldPhone || person.phone || ""}
+                      onChange={(e) => setFieldPhone(e.target.value)}
+                      placeholder="7025550100"
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Set / reset password</span>
+                    <input
+                      className={styles.input}
+                      type="password"
+                      value={fieldPassword}
+                      onChange={(e) => setFieldPassword(e.target.value)}
+                      placeholder={person.hasPassword ? "New password" : "First password"}
+                    />
+                  </label>
+                  <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
+                    Installers sign-in uses this exact phone. A random number on the app screen will fail
+                    unless you save it here first.
+                    {person.hasPassword
+                      ? " A password is already on file — reset only if they forgot it."
+                      : " No password yet."}
+                  </p>
+                  <div className={styles.formActions}>
+                    <button
+                      type="button"
+                      className={styles.buttonPrimary}
+                      disabled={
+                        fieldPassword.length < 6 ||
+                        (fieldPhone || person.phone || "").replace(/\D/g, "").length < 10
+                      }
+                      onClick={() => void saveFieldAccess()}
+                    >
+                      Save app login
+                    </button>
+                  </div>
+                  <p className={styles.detailSectionTitle} style={{ gridColumn: "1 / -1" }}>
+                    Pay preview (installer Me)
+                  </p>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Last pay $</span>
+                    <input
+                      className={styles.input}
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      placeholder="0"
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Last pay date</span>
+                    <input
+                      className={styles.input}
+                      type="date"
+                      value={payLast}
+                      onChange={(e) => setPayLast(e.target.value)}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Next pay date</span>
+                    <input
+                      className={styles.input}
+                      type="date"
+                      value={payNext}
+                      onChange={(e) => setPayNext(e.target.value)}
+                    />
+                  </label>
+                  <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
+                    {detail.pay?.bank_last4
+                      ? `Deposit last 4 ···${detail.pay.bank_last4} · ${detail.pay.bank_status}`
+                      : "No deposit last 4 on file."}
+                  </p>
+                  <div className={styles.formActions}>
+                    <button type="button" className={styles.buttonGhost} onClick={() => void savePayVision()}>
+                      Save pay preview
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -768,32 +963,32 @@ export default function OpsCrewMetricsWorkspace() {
 
           <aside>
             <div className={styles.railCard}>
-              <p className={styles.railTitle}>Snapshot</p>
-              <p className={styles.leadContact}>
-                Completions <strong>{person.completions}</strong>
-              </p>
-              <p className={styles.leadContact}>
-                Active jobs <strong>{person.activeJobs}</strong>
-              </p>
-              <p className={styles.leadContact}>
-                Issues <strong>{person.issuesReported}</strong>
-                {person.openIssues > 0 ? ` · ${person.openIssues} open` : ""}
-              </p>
-              <p className={styles.leadContact}>
-                Clocked <strong>{formatMinutes(person.totalMinutes)}</strong>
-              </p>
-              <p className={styles.leadContact}>
-                Avg / session <strong>{formatMinutes(person.avgSessionMinutes)}</strong>
-              </p>
-              <p className={styles.leadContact}>
-                Avg / job <strong>{formatMinutes(person.avgJobMinutes)}</strong>
-              </p>
+              <p className={styles.railTitle}>Why this grade</p>
+              {whyLines.length === 0 ? (
+                <p className={styles.leadContact}>Nothing flagged right now.</p>
+              ) : (
+                whyLines.map((light) => (
+                  <button
+                    key={`${light.id}-${light.detail}`}
+                    type="button"
+                    className={styles.whyLink}
+                    onClick={() =>
+                      setDetailTab(
+                        light.id === "open_issues" || light.id === "issue_rate" ? "issues" : "details",
+                      )
+                    }
+                  >
+                    <strong className={gradeToneClass(light.status)}>{light.label}</strong>
+                    <span>{light.detail}</span>
+                  </button>
+                ))
+              )}
             </div>
 
             <div className={styles.railCard}>
               <p className={styles.railTitle}>Upcoming</p>
-              {detail.upcoming.filter((item) =>
-                item.status === "scheduled" || item.status === "confirmed",
+              {detail.upcoming.filter(
+                (item) => item.status === "scheduled" || item.status === "confirmed",
               ).length === 0 ? (
                 <p className={styles.leadContact}>No upcoming visits on the calendar.</p>
               ) : (
@@ -821,7 +1016,7 @@ export default function OpsCrewMetricsWorkspace() {
   return (
     <OpsShell
       title="Install Workers"
-      subtitle="Office file for each worker — clocks, jobs, issues, and photos from Installers."
+      subtitle="Grades for jobs and trucks — open a card when something needs a closer look."
     >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
@@ -834,9 +1029,13 @@ export default function OpsCrewMetricsWorkspace() {
           [
             { label: "Workers", value: String(installers.length) },
             { label: "On site", value: String(onSiteCount), tone: onSiteCount > 0 ? "live" : undefined },
+            {
+              label: "Needs attention",
+              value: String(needsAttentionCount),
+              tone: needsAttentionCount > 0 ? "alert" : undefined,
+            },
             { label: "Completions", value: String(totalCompletions) },
             { label: "Issues", value: String(totalIssues), tone: totalIssues > 0 ? "alert" : undefined },
-            { label: "Clocked time", value: formatMinutes(totalMinutes) },
           ] as const
         ).map((item) => (
           <article
@@ -861,6 +1060,7 @@ export default function OpsCrewMetricsWorkspace() {
             [
               ["all", "All"],
               ["on_site", "On site"],
+              ["needs_attention", "Needs attention"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -902,7 +1102,12 @@ export default function OpsCrewMetricsWorkspace() {
         <div className={styles.detailGrid} style={{ marginTop: "0.55rem" }}>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Title</span>
-            <input className={styles.input} value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} placeholder="Saturday warehouse closed" />
+            <input
+              className={styles.input}
+              value={updateTitle}
+              onChange={(e) => setUpdateTitle(e.target.value)}
+              placeholder="Saturday warehouse closed"
+            />
           </label>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Message</span>
@@ -926,75 +1131,63 @@ export default function OpsCrewMetricsWorkspace() {
         </button>
       </div>
 
-      <div className={styles.panel}>
-        {loading ? (
+      {loading ? (
+        <div className={styles.panel}>
           <p className={styles.empty}>Loading installers…</p>
-        ) : visibleInstallers.length === 0 ? (
+        </div>
+      ) : visibleInstallers.length === 0 ? (
+        <div className={styles.panel}>
           <p className={styles.empty}>
             {listFilter === "on_site"
               ? "Nobody is clocked in right now."
-              : "No workers on file yet. Add them in staff, then they clock in on Installers."}
+              : listFilter === "needs_attention"
+                ? "Nobody needs attention right now."
+                : "No workers on file yet. Add them in staff, then they clock in on Installers."}
           </p>
-        ) : (
-          <table className={styles.table} style={{ minWidth: "48rem" }}>
-            <thead>
-              <tr>
-                <th>Installer</th>
-                <th>Completions</th>
-                <th>Issues</th>
-                <th>Open issues</th>
-                <th>Sessions</th>
-                <th>Jobs timed</th>
-                <th>Total time</th>
-                <th>Avg / session</th>
-                <th>Avg / job</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleInstallers.map((row) => (
-                <tr
-                  key={row.id}
-                  className={`${styles.leadRow} ${row.openIssues > 0 ? styles.rowHeld : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setDetailTab("details");
-                    setSelectedId(row.id);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setDetailTab("details");
-                      setSelectedId(row.id);
-                    }
-                  }}
-                >
-                  <td>
-                    <span className={styles.installerNameCell}>
-                      <Avatar installer={row} />
-                      <span>
-                        <strong>{row.name}</strong>
-                        {row.onSiteNow ? <span className={styles.liveChip}>On site</span> : null}
-                      </span>
-                    </span>
-                  </td>
-                  <td>{row.completions}</td>
-                  <td>{row.issuesReported}</td>
-                  <td>{row.openIssues}</td>
-                  <td>
-                    {row.sessions}
-                    {row.openSessions > 0 ? ` (${row.openSessions} open)` : ""}
-                  </td>
-                  <td>{row.jobsClocked}</td>
-                  <td>{formatMinutes(row.totalMinutes)}</td>
-                  <td>{formatMinutes(row.avgSessionMinutes)}</td>
-                  <td>{formatMinutes(row.avgJobMinutes)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className={styles.rosterGrid}>
+          {visibleInstallers.map((row) => (
+            <button
+              key={row.id}
+              type="button"
+              className={`${styles.rosterCard} ${
+                row.grade.overall.overall === "due" ? styles.rosterCardAlert : ""
+              }`}
+              onClick={() => openInstaller(row.id)}
+            >
+              <div className={styles.rosterCardTop}>
+                <Avatar installer={row} />
+                <div className={styles.rosterCardName}>
+                  <strong>{row.name}</strong>
+                  {row.onSiteNow ? <span className={styles.liveChip}>On site</span> : null}
+                </div>
+              </div>
+              <div className={styles.gradeChipRow}>
+                <GradeChip
+                  label={row.grade.overall.label}
+                  status={row.grade.overall.overall}
+                  prefix="Overall"
+                />
+                <GradeChip label={row.grade.jobs.label} status={row.grade.jobs.overall} prefix="Jobs" />
+                <GradeChip
+                  label={row.grade.vehicle.label}
+                  status={row.grade.vehicle.overall}
+                  prefix="Vehicle"
+                />
+              </div>
+              <div className={styles.rosterStats}>
+                <span>
+                  <em>{row.grade.jobs.completions30}</em> completions · 30d
+                </span>
+                <span>
+                  <em>{row.grade.jobs.openIssues}</em> open issues
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </OpsShell>
   );
 }

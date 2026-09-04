@@ -1,5 +1,19 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
+import {
+  daysAgoIso,
+  gradeInstallerJobs,
+  gradeInstallerOverall,
+  summarizeJobsInputs,
+  viewVehicleGrade,
+} from "@/lib/inspired-closets-ops-installer-grade";
+import {
+  gradeVehicle,
+  startOfWeekIso,
+  vehicleLabel,
+  type VehicleLogRow,
+  type VehicleRow,
+} from "@/lib/inspired-closets-ops-vehicles";
 
 export const runtime = "nodejs";
 
@@ -97,11 +111,34 @@ function clientFor(job: JobRow, clientsById: Map<string, ClientRow>) {
   return job.client_id ? (clientsById.get(job.client_id) ?? null) : null;
 }
 
+function buildJobsGrade(
+  personId: string,
+  entries: TimeEntry[],
+  issueRows: IssueRow[],
+  jobRows: JobRow[],
+) {
+  const theirEntries = entries.filter((e) => e.installer_id === personId);
+  const theirIssues = issueRows.filter((i) => i.installer_id === personId);
+  const theirJobs = jobRows.filter((j) => j.installer_id === personId);
+  const sinceIso = daysAgoIso(30);
+  return gradeInstallerJobs(
+    summarizeJobsInputs({
+      sinceIso,
+      openIssues: theirIssues.filter((i) => i.status === "open").length,
+      issues: theirIssues,
+      jobs: theirJobs,
+      entries: theirEntries,
+      completedStages: COMPLETED_STAGES,
+    }),
+  );
+}
+
 function buildInstaller(
   person: StaffRow,
   entries: TimeEntry[],
   issueRows: IssueRow[],
   jobRows: JobRow[],
+  vehicleGrade: ReturnType<typeof viewVehicleGrade>,
 ) {
   const theirEntries = entries.filter((e) => e.installer_id === person.id);
   const closedMinutes = theirEntries
@@ -124,6 +161,8 @@ function buildInstaller(
     minutesByJob.set(entry.job_id, (minutesByJob.get(entry.job_id) ?? 0) + mins);
   }
   const jobDurations = [...minutesByJob.values()];
+  const jobsGrade = buildJobsGrade(person.id, entries, issueRows, jobRows);
+  const overall = gradeInstallerOverall(jobsGrade, vehicleGrade);
 
   return {
     id: person.id,
@@ -152,7 +191,29 @@ function buildInstaller(
     activeJobs,
     issuesReported: theirIssues.length,
     openIssues: theirIssues.filter((i) => i.status === "open").length,
+    grade: {
+      overall,
+      jobs: jobsGrade,
+      vehicle: vehicleGrade,
+    },
   };
+}
+
+function gradeFromVehicleLogs(vehicle: VehicleRow, logs: VehicleLogRow[], weekMiles: number) {
+  const lastWash = logs.find((row) => row.kind === "wash") ?? null;
+  const lastClean = logs.find((row) => row.kind === "clean_check") ?? null;
+  const lastOdo = logs.find((row) => row.kind === "odometer" || row.odometer != null) ?? null;
+  const lastOil = logs.find((row) => row.kind === "oil") ?? null;
+  return gradeVehicle({
+    vehicle,
+    lastWashAt: lastWash?.logged_at ?? null,
+    lastCleanAt: lastClean?.logged_at ?? null,
+    lastCleanOk: lastClean?.clean_ok ?? null,
+    lastOdometerAt: lastOdo?.logged_at ?? null,
+    lastOilAt: lastOil?.logged_at ?? null,
+    lastOilMiles: lastOil?.odometer ?? null,
+    weekMiles,
+  });
 }
 
 export async function GET(request: Request) {
@@ -189,6 +250,7 @@ export async function GET(request: Request) {
     { data: clients },
     { data: mediaRows, error: mediaError },
     { data: appointmentRows, error: apptError },
+    trucksResult,
   ] = await Promise.all([
     supabase
       .from("ic_staff")
@@ -216,6 +278,11 @@ export async function GET(request: Request) {
     supabase.from("ic_clients").select("id, name, address, phone").is("deleted_at", null),
     mediaQuery,
     apptQuery,
+    supabase
+      .from("ic_vehicles")
+      .select("*")
+      .is("deleted_at", null)
+      .eq("active", true),
   ]);
 
   if (staffError || timeError || issuesError || jobsError || mediaError || apptError) {
@@ -241,10 +308,75 @@ export async function GET(request: Request) {
   const jobRows = (jobs ?? []) as JobRow[];
   const staffRows = (staff ?? []) as StaffRow[];
 
+  const trucksMissing =
+    trucksResult.error && /does not exist|schema cache|ic_vehicles/i.test(trucksResult.error.message);
+  const trucks = trucksMissing ? ([] as VehicleRow[]) : ((trucksResult.data ?? []) as VehicleRow[]);
+  const trucksByInstaller = new Map<string, VehicleRow>();
+  for (const truck of trucks) {
+    if (truck.assigned_installer_id) trucksByInstaller.set(truck.assigned_installer_id, truck);
+  }
+
+  const truckIds = trucks.map((truck) => truck.id);
+  type VehicleLogWithTruck = VehicleLogRow & { vehicle_id: string };
+  let vehicleLogs: VehicleLogWithTruck[] = [];
+  let milesByInstaller = new Map<string, number>();
+  if (truckIds.length > 0) {
+    const weekStart = startOfWeekIso().slice(0, 10);
+    const [{ data: logs }, milesResult] = await Promise.all([
+      supabase
+        .from("ic_vehicle_logs")
+        .select("id, kind, logged_at, odometer, gallons, amount_cents, clean_ok, note, vehicle_id")
+        .in("vehicle_id", truckIds)
+        .order("logged_at", { ascending: false })
+        .limit(2000),
+      supabase
+        .from("ic_job_miles")
+        .select("installer_id, miles_out, miles_back, drive_date")
+        .gte("drive_date", weekStart)
+        .limit(2000),
+    ]);
+    vehicleLogs = (logs ?? []) as VehicleLogWithTruck[];
+    milesByInstaller = new Map();
+    const milesMissing =
+      milesResult.error && /does not exist|schema cache|ic_job_miles/i.test(milesResult.error.message);
+    if (!milesMissing) {
+      for (const row of (milesResult.data ?? []) as Array<{
+        installer_id: string;
+        miles_out: number;
+        miles_back: number;
+      }>) {
+        milesByInstaller.set(
+          row.installer_id,
+          (milesByInstaller.get(row.installer_id) ?? 0) + (row.miles_out || 0) + (row.miles_back || 0),
+        );
+      }
+    }
+  }
+
+  const logsByVehicle = new Map<string, VehicleLogRow[]>();
+  for (const log of vehicleLogs) {
+    const list = logsByVehicle.get(log.vehicle_id) ?? [];
+    list.push(log);
+    logsByVehicle.set(log.vehicle_id, list);
+  }
+
+  function vehicleGradeFor(personId: string) {
+    const truck = trucksByInstaller.get(personId);
+    if (!truck) return viewVehicleGrade(null, null);
+    const grade = gradeFromVehicleLogs(
+      truck,
+      logsByVehicle.get(truck.id) ?? [],
+      milesByInstaller.get(personId) ?? 0,
+    );
+    return viewVehicleGrade(grade, vehicleLabel(truck));
+  }
+
   const installers = staffRows
     .filter((person) => person.phone !== "0000000000")
     .filter((person) => person.role === "installer" || person.role === "ops")
-    .map((person) => buildInstaller(person, entries, issueRows, jobRows))
+    .map((person) =>
+      buildInstaller(person, entries, issueRows, jobRows, vehicleGradeFor(person.id)),
+    )
     .filter(
       (row) =>
         row.role === "installer" ||
@@ -252,7 +384,13 @@ export async function GET(request: Request) {
         row.completions > 0 ||
         row.issuesReported > 0,
     )
-    .sort((a, b) => Number(b.onSiteNow) - Number(a.onSiteNow) || b.totalMinutes - a.totalMinutes || a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      const rank = (status: string) =>
+        status === "due" ? 0 : status === "warn" ? 1 : status === "new" || status === "none" ? 3 : 2;
+      const byGrade = rank(a.grade.overall.overall) - rank(b.grade.overall.overall);
+      if (byGrade !== 0) return byGrade;
+      return Number(b.onSiteNow) - Number(a.onSiteNow) || b.totalMinutes - a.totalMinutes || a.name.localeCompare(b.name);
+    });
 
   function mapSession(entry: TimeEntry) {
     const job = jobRows.find((j) => j.id === entry.job_id);
@@ -311,7 +449,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: false, error: "Installer not found." }, { status: 404 });
     }
 
-    const installer = buildInstaller(person, entries, issueRows, jobRows);
+    const vehicleGrade = vehicleGradeFor(installerId);
+    const installer = buildInstaller(person, entries, issueRows, jobRows, vehicleGrade);
     const theirJobIds = new Set([
       ...jobRows.filter((j) => j.installer_id === installerId).map((j) => j.id),
       ...entries.filter((e) => e.installer_id === installerId).map((e) => e.job_id),
@@ -396,6 +535,8 @@ export async function GET(request: Request) {
       supabase.from("ic_staff_pay").select("*").eq("staff_id", installerId).maybeSingle(),
       supabase.from("ic_staff").select("password_hash").eq("id", installerId).maybeSingle(),
     ]);
+
+    const truck = trucksByInstaller.get(installerId) ?? null;
     payload.installer = { ...installer, hasPassword: Boolean(access?.password_hash) };
     payload.sessions = entries.filter((e) => e.installer_id === installerId).map(mapSession);
     payload.issues = issueRows.filter((i) => i.installer_id === installerId).map(mapIssue);
@@ -404,6 +545,13 @@ export async function GET(request: Request) {
     payload.upcoming = upcoming;
     payload.timeOff = timeOff ?? [];
     payload.pay = pay ?? null;
+    payload.vehicle = truck
+      ? {
+          id: truck.id,
+          label: vehicleLabel(truck),
+          grade: vehicleGrade,
+        }
+      : null;
   }
 
   return NextResponse.json(payload);

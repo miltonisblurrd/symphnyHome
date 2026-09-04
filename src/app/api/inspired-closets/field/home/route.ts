@@ -60,6 +60,18 @@ export async function GET() {
 
   const jobSelect =
     "id, installer_id, stage, install_date, visit_window, notes, field_notes, client_id, job_kind, community_ref";
+  type FieldJobRow = {
+    id: string;
+    installer_id: string | null;
+    stage: string;
+    install_date: string | null;
+    visit_window: string | null;
+    notes: string | null;
+    field_notes: string | null;
+    client_id: string | null;
+    job_kind: string | null;
+    community_ref: string | null;
+  };
   const [
     { data: assignedJobs },
     { data: windowJobs },
@@ -96,7 +108,7 @@ export async function GET() {
           .lte("install_date", to)
           .ilike("notes", "%Crew:%")
           .limit(400)
-      : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+      : Promise.resolve({ data: [] as FieldJobRow[] }),
     supabase
       .from("ic_time_entries")
       .select("id, job_id, clock_in_at, clock_out_at")

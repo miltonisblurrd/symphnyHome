@@ -398,7 +398,7 @@ export async function loadSalesOrderCheck(input: {
     .from("ic_shipment_items")
     .select("item_number, description, qty, so_number, job_id")
     .eq("job_id", input.jobId);
-  let slipLines = slipByJob ?? [];
+  const slipLines = slipByJob ?? [];
   if (input.soNumber) {
     const { data: slipBySo } = await supabase
       .from("ic_shipment_items")

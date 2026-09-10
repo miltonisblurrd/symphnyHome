@@ -173,8 +173,6 @@ export async function parseStowSalesOrder(input: {
     process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() ||
     process.env.ANTHROPIC_MODEL?.trim() ||
     "claude-sonnet-5";
-  const isPdf = input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
-
   const message = await client.messages.create({
     model,
     max_tokens: 16000,
@@ -183,23 +181,14 @@ export async function parseStowSalesOrder(input: {
       {
         role: "user",
         content: [
-          isPdf
-            ? {
-                type: "document",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: input.bytes.toString("base64"),
-                },
-              }
-            : {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: input.bytes.toString("base64"),
-                },
-              },
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: input.bytes.toString("base64"),
+            },
+          },
           {
             type: "text",
             text: `Extract every line from this Stow sales order (${input.filename}). JSON only.`,

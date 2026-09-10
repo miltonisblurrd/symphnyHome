@@ -8,6 +8,8 @@ import Link from "next/link";
 import { PAYMENT_MILESTONES } from "@/lib/inspired-closets-ops-billing";
 import { JOB_KINDS } from "@/lib/inspired-closets-ops-jobs";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
+import OpsProductSummary from "@/components/inspired-closets/OpsProductSummary";
+import OpsStowSalesOrder from "@/components/inspired-closets/OpsStowSalesOrder";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -180,6 +182,7 @@ export default function OpsProjectFile({
   onUploadProposal,
   onStagePart,
   onDamagePart,
+  onMaterialsChanged,
 }: {
   job: ProjectJob;
   file: ProjectFile | null;
@@ -200,6 +203,7 @@ export default function OpsProjectFile({
   onUploadProposal: (file: File) => void;
   onStagePart: (lineId: string) => void;
   onDamagePart: (lineId: string) => void;
+  onMaterialsChanged?: () => void;
 }) {
   const lead = file?.lead ?? null;
   const client = file?.job.client ?? job.client;
@@ -496,6 +500,8 @@ export default function OpsProjectFile({
             />
           </label>
         </div>
+        <OpsStowSalesOrder jobId={job.id} />
+        <OpsProductSummary jobId={job.id} onChanged={onMaterialsChanged} />
         <p className={styles.fieldLabel}>
           Materials on this project ·{" "}
           <span className={styles.summaryStrong}>{cents(materialsTotal)}</span>

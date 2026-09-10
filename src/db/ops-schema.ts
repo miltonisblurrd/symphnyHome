@@ -303,6 +303,9 @@ export const icJobs = pgTable("ic_jobs", {
   proposalFilename: text("proposal_filename"),
   notes: text("notes"),
   fieldNotes: text("field_notes"),
+  /** Craig RTO — Frank's order queue. */
+  readyToOrder: boolean("ready_to_order").notNull().default(false),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
   updatedBy: uuid("updated_by").references(() => icStaff.id),
@@ -844,6 +847,109 @@ export const icShipmentClaims = pgTable("ic_shipment_claims", {
 });
 
 export type IcFieldIssue = typeof icFieldIssues.$inferSelect;
+/** Stow/Studio product summary uploaded to a job (Frank order check). */
+export const icJobSummaries = pgTable("ic_job_summaries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id, { onDelete: "cascade" }),
+  orderName: text("order_name"),
+  orderId: text("order_id"),
+  soNumber: text("so_number"),
+  purchasedOn: date("purchased_on"),
+  shipDate: date("ship_date"),
+  itemCount: integer("item_count").notNull().default(0),
+  totalCents: integer("total_cents").notNull().default(0),
+  sourceFilename: text("source_filename"),
+  storagePath: text("storage_path"),
+  publicUrl: text("public_url"),
+  status: text("status").notNull().default("review"),
+  parseError: text("parse_error"),
+  parseQuality: jsonb("parse_quality"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icJobSummaryLines = pgTable("ic_job_summary_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  summaryId: uuid("summary_id")
+    .notNull()
+    .references(() => icJobSummaries.id, { onDelete: "cascade" }),
+  lineNo: integer("line_no"),
+  itemCode: text("item_code"),
+  description: text("description"),
+  productType: text("product_type"),
+  dimensions: text("dimensions"),
+  finish: text("finish"),
+  qty: integer("qty").notNull().default(1),
+  totalCents: integer("total_cents").notNull().default(0),
+  classification: text("classification").notNull().default("unmatched"),
+  partId: uuid("part_id").references(() => icParts.id),
+  availableQty: integer("available_qty").notNull().default(0),
+  reserveQty: integer("reserve_qty").notNull().default(0),
+  orderQty: integer("order_qty").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Stow email sales order — check against Frank's summary / receiving slip. */
+export const icStowSalesOrders = pgTable("ic_stow_sales_orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id").references(() => icJobs.id, { onDelete: "set null" }),
+  gmailMessageId: text("gmail_message_id"),
+  fromEmail: text("from_email"),
+  subject: text("subject"),
+  soNumber: text("so_number"),
+  orderName: text("order_name"),
+  shipDate: date("ship_date"),
+  itemCount: integer("item_count").notNull().default(0),
+  totalCents: integer("total_cents").notNull().default(0),
+  sourceFilename: text("source_filename"),
+  storagePath: text("storage_path"),
+  publicUrl: text("public_url"),
+  status: text("status").notNull().default("received"),
+  ignoreReason: text("ignore_reason"),
+  parseError: text("parse_error"),
+  parseQuality: jsonb("parse_quality"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icStowSalesOrderLines = pgTable("ic_stow_sales_order_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  salesOrderId: uuid("sales_order_id")
+    .notNull()
+    .references(() => icStowSalesOrders.id, { onDelete: "cascade" }),
+  lineNo: integer("line_no"),
+  itemCode: text("item_code"),
+  description: text("description"),
+  qty: integer("qty").notNull().default(1),
+  totalCents: integer("total_cents").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icSalesHistory = pgTable("ic_sales_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),
+  designerName: text("designer_name").notNull(),
+  soldCents: integer("sold_cents").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icSalesGoals = pgTable("ic_sales_goals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  year: integer("year").notNull(),
+  month: integer("month"),
+  designerId: uuid("designer_id").references(() => icStaff.id),
+  designerName: text("designer_name"),
+  goalCents: integer("goal_cents").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export type IcShipment = typeof icShipments.$inferSelect;
 export type IcShipmentItem = typeof icShipmentItems.$inferSelect;
 export type IcShipmentScan = typeof icShipmentScans.$inferSelect;

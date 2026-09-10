@@ -38,6 +38,22 @@ type JobOption = {
   stage: string;
 };
 
+type RtoJob = {
+  id: string;
+  ready_to_order?: boolean;
+  summary_count?: number;
+  summary_confirmed?: boolean;
+  client: { name: string } | null;
+  designer?: { name: string } | null;
+};
+
+type UnmatchedSo = {
+  id: string;
+  so_number: string | null;
+  order_name: string | null;
+  source_filename: string | null;
+};
+
 type Movement = {
   id: string;
   part_id: string;
@@ -160,6 +176,10 @@ export default function OpsInventoryWorkspace() {
   const [saving, setSaving] = useState(false);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [attention, setAttention] = useState<Attention | null>(null);
+  const [rtoQueue, setRtoQueue] = useState<RtoJob[]>([]);
+  const [unmatchedSo, setUnmatchedSo] = useState<UnmatchedSo[]>([]);
+  const [soAttach, setSoAttach] = useState<Record<string, string>>({});
+  const [soBusy, setSoBusy] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     name: "",
     color: "",
@@ -201,13 +221,23 @@ export default function OpsInventoryWorkspace() {
       setListUpdatedAt(new Date());
       setLoading(false);
 
-      const [jobsRes, attentionRes] = await Promise.all([jobsReq, attentionReq]);
+      const [jobsRes, attentionRes, soRes] = await Promise.all([
+        jobsReq,
+        attentionReq,
+        fetch("/api/inspired-closets/ops/stow-orders?status=unmatched"),
+      ]);
       const jobsPayload = (await jobsRes.json()) as ApiResponse;
       const attentionPayload = (await attentionRes.json()) as ApiResponse;
+      const soPayload = (await soRes.json()) as { ok?: boolean; orders?: UnmatchedSo[] };
+      if (soPayload.ok) setUnmatchedSo(soPayload.orders ?? []);
       if (jobsPayload.ok) {
-        setJobs(
-          (jobsPayload.jobs ?? []).filter(
-            (job) => !["closed", "cancelled"].includes(job.stage),
+        const openJobs = (jobsPayload.jobs ?? []).filter(
+          (job) => !["closed", "cancelled"].includes(job.stage),
+        );
+        setJobs(openJobs);
+        setRtoQueue(
+          (jobsPayload.jobs as RtoJob[] | undefined ?? []).filter(
+            (job) => job.ready_to_order && !job.summary_confirmed,
           ),
         );
       }
@@ -224,6 +254,29 @@ export default function OpsInventoryWorkspace() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function attachSalesOrder(orderId: string) {
+    const jobId = soAttach[orderId];
+    if (!jobId) return;
+    setSoBusy(orderId);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/stow-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: orderId, job_id: jobId }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not attach sales order.");
+      setUnmatchedSo((rows) => rows.filter((row) => row.id !== orderId));
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not attach sales order.",
+      });
+    } finally {
+      setSoBusy(null);
+    }
+  }
 
   const selectedPart = useMemo(
     () => parts.find((part) => part.id === selectedPartId) ?? null,
@@ -703,6 +756,69 @@ export default function OpsInventoryWorkspace() {
           ))}
         </div>
       </section>
+
+      {unmatchedSo.length > 0 ? (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <p className={styles.detailSectionTitle}>Stow sales orders — pick a job</p>
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            These landed from Gmail and could not be matched. Attach them. Frank still uploads the
+            summary / slip as usual.
+          </p>
+          <ul className={styles.pulseList}>
+            {unmatchedSo.map((order) => (
+              <li key={order.id} style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+                <span>
+                  {order.so_number ? `SO ${order.so_number}` : order.source_filename ?? "Sales order"}
+                  {order.order_name ? ` · ${order.order_name}` : ""}
+                </span>
+                <select
+                  className={styles.input}
+                  value={soAttach[order.id] ?? ""}
+                  onChange={(event) =>
+                    setSoAttach((current) => ({ ...current, [order.id]: event.target.value }))
+                  }
+                >
+                  <option value="">Choose job…</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.client?.name ?? "Job"} · {job.stage}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={styles.buttonGhost}
+                  disabled={!soAttach[order.id] || soBusy === order.id}
+                  onClick={() => void attachSalesOrder(order.id)}
+                >
+                  {soBusy === order.id ? "Saving…" : "Attach"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {rtoQueue.length > 0 ? (
+        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+          <p className={styles.detailSectionTitle}>Ready to order</p>
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            Craig marked these RTO. Upload the product summary on the project so stock can be
+            assigned.
+          </p>
+          <ul className={styles.pulseList}>
+            {rtoQueue.map((job) => (
+              <li key={job.id}>
+                <a href={`/inspired-closets/ops/projects?id=${job.id}`}>
+                  {job.client?.name ?? "Job"}
+                </a>
+                {job.designer?.name ? ` · ${job.designer.name}` : ""}
+                {job.summary_count ? " · summary uploaded, not assigned" : " · needs summary"}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className={styles.listToolbar}>
         <nav className={styles.tabs} aria-label="Inventory views">

@@ -123,25 +123,33 @@ export async function GET() {
     }),
   );
   const packetJobIds = visibleJobs.map((job) => job.id);
-  const [{ data: materialRows, error: materialsError }, { data: slipRows }, milesResult] = await Promise.all([
-    packetJobIds.length
-      ? supabase.from("ic_job_materials").select("id, job_id, qty, status, part_id").in("job_id", packetJobIds)
-      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
-    packetJobIds.length
-      ? supabase
-          .from("ic_shipment_items")
-          .select("id, job_id, item_number, description, qty, received_qty, status")
-          .in("job_id", packetJobIds)
-      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
-    packetJobIds.length
-      ? supabase
-          .from("ic_job_miles")
-          .select("job_id, drive_date, miles_out, miles_back")
-          .eq("installer_id", installerId)
-          .in("job_id", packetJobIds)
-          .order("drive_date", { ascending: false })
-      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
-  ]);
+  const [{ data: materialRows, error: materialsError }, { data: slipRows }, milesResult, summariesResult] =
+    await Promise.all([
+      packetJobIds.length
+        ? supabase.from("ic_job_materials").select("id, job_id, qty, status, part_id").in("job_id", packetJobIds)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+      packetJobIds.length
+        ? supabase
+            .from("ic_shipment_items")
+            .select("id, job_id, item_number, description, qty, received_qty, status")
+            .in("job_id", packetJobIds)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+      packetJobIds.length
+        ? supabase
+            .from("ic_job_miles")
+            .select("job_id, drive_date, miles_out, miles_back")
+            .eq("installer_id", installerId)
+            .in("job_id", packetJobIds)
+            .order("drive_date", { ascending: false })
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+      packetJobIds.length
+        ? supabase
+            .from("ic_job_summaries")
+            .select("id, job_id, order_name, so_number, public_url, storage_path, created_at")
+            .in("job_id", packetJobIds)
+            .order("created_at", { ascending: false })
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    ]);
   const materialList =
     materialsError && /does not exist|schema cache/i.test(materialsError.message)
       ? []
@@ -194,6 +202,64 @@ export async function GET() {
     }
   }
 
+  const summaryByJob = new Map<
+    string,
+    {
+      public_url: string | null;
+      order_name: string | null;
+      so_number: string | null;
+      lines: Array<Record<string, unknown>>;
+    }
+  >();
+  const summaryRows =
+    summariesResult.error && /does not exist|schema cache/i.test(summariesResult.error.message)
+      ? []
+      : (summariesResult.data ?? []);
+  for (const row of summaryRows) {
+    const jobId = String(row.job_id);
+    if (summaryByJob.has(jobId)) continue;
+    let publicUrl = typeof row.public_url === "string" ? row.public_url : null;
+    const storagePath = typeof row.storage_path === "string" ? row.storage_path : null;
+    if (storagePath) {
+      const { data: signed } = await supabase.storage
+        .from("ic-field-media")
+        .createSignedUrl(storagePath, 60 * 60 * 12);
+      if (signed?.signedUrl) publicUrl = signed.signedUrl;
+    }
+    summaryByJob.set(jobId, {
+      public_url: publicUrl,
+      order_name: typeof row.order_name === "string" ? row.order_name : null,
+      so_number: typeof row.so_number === "string" ? row.so_number : null,
+      lines: [],
+    });
+  }
+  const summaryIds = [...new Set(summaryRows.map((row) => String(row.id)))];
+  const { data: summaryLines, error: summaryLinesError } = summaryIds.length
+    ? await supabase
+        .from("ic_job_summary_lines")
+        .select("id, summary_id, item_code, description, product_type, dimensions, finish, qty")
+        .in("summary_id", summaryIds)
+        .order("line_no", { ascending: true })
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  if (!summaryLinesError || !/does not exist|schema cache/i.test(summaryLinesError.message)) {
+    const summaryIdToJob = new Map(summaryRows.map((row) => [String(row.id), String(row.job_id)]));
+    for (const line of summaryLines ?? []) {
+      const jobId = summaryIdToJob.get(String(line.summary_id));
+      if (!jobId) continue;
+      const packet = summaryByJob.get(jobId);
+      if (!packet) continue;
+      packet.lines.push({
+        id: line.id,
+        item_code: line.item_code,
+        description: line.description,
+        product_type: line.product_type,
+        dimensions: line.dimensions,
+        finish: line.finish,
+        qty: line.qty,
+      });
+    }
+  }
+
   const enriched = visibleJobs.map((job) => {
     const entries = entriesByJob.get(job.id) ?? [];
     const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
@@ -205,6 +271,7 @@ export async function GET() {
       mine: job.installer_id === installerId || crewJobIds.has(job.id),
       packet_materials: materialsByJob.get(job.id) ?? [],
       packet_slip: slipsByJob.get(job.id) ?? [],
+      packet_order: summaryByJob.get(job.id) ?? null,
       miles: milesByJob.get(job.id) ?? null,
     };
   });

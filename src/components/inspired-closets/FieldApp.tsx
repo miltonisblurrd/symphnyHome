@@ -66,6 +66,23 @@ type PacketSlip = {
   status: string;
 };
 
+type PacketOrderLine = {
+  id: string;
+  item_code: string | null;
+  description: string | null;
+  product_type: string | null;
+  dimensions: string | null;
+  finish: string | null;
+  qty: number;
+};
+
+type PacketOrder = {
+  public_url: string | null;
+  order_name: string | null;
+  so_number: string | null;
+  lines: PacketOrderLine[];
+};
+
 type Job = {
   id: string;
   stage: string;
@@ -81,6 +98,7 @@ type Job = {
   timeEntries?: TimeEntry[];
   packet_materials?: PacketMaterial[];
   packet_slip?: PacketSlip[];
+  packet_order?: PacketOrder | null;
   miles?: { miles_out: number; miles_back: number; drive_date: string } | null;
 };
 
@@ -1878,6 +1896,18 @@ export default function FieldApp() {
                         <a href={`tel:${workJob.client.phone}`}>{workJob.client.phone}</a>
                       </p>
                     ) : null}
+                    {workJob.packet_order?.public_url ? (
+                      <div className={styles.packetActions}>
+                        <a
+                          className={styles.packetActionBtn}
+                          href={workJob.packet_order.public_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Order PDF
+                        </a>
+                      </div>
+                    ) : null}
 
                     <OfficePacket notes={workJob.notes} />
 
@@ -1894,7 +1924,38 @@ export default function FieldApp() {
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
                     <p className={styles.colLabel}>Warehouse</p>
                     <h3 className={styles.packetSection}>Parts</h3>
-                    {(workJob.packet_materials ?? []).length > 0 ? (
+                    {workJob.packet_order ? (
+                      <p className={styles.jobMeta}>
+                        {[
+                          workJob.packet_order.order_name,
+                          workJob.packet_order.so_number ? `SO ${workJob.packet_order.so_number}` : null,
+                          `${workJob.packet_order.lines.length} lines`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        {workJob.packet_order.public_url ? (
+                          <>
+                            {" · "}
+                            <a href={workJob.packet_order.public_url} target="_blank" rel="noreferrer">
+                              Open PDF
+                            </a>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : null}
+                    {(workJob.packet_order?.lines ?? []).length > 0 ? (
+                      <ul className={styles.packetPartList}>
+                        {workJob.packet_order!.lines.map((line) => (
+                          <li key={line.id}>
+                            <strong>{line.description || line.item_code || "Part"}</strong>
+                            {line.item_code ? ` · ${line.item_code}` : ""}
+                            {line.dimensions ? ` · ${line.dimensions}` : ""}
+                            {line.finish ? ` · ${line.finish}` : ""}
+                            {` · qty ${line.qty}`}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (workJob.packet_materials ?? []).length > 0 ? (
                       <ul className={styles.packetPartList}>
                         {(workJob.packet_materials ?? []).map((line) => (
                           <li key={line.id}>
@@ -1917,7 +1978,8 @@ export default function FieldApp() {
                         ))}
                       </ul>
                     ) : null}
-                    {(workJob.packet_materials ?? []).length === 0 &&
+                    {(workJob.packet_order?.lines ?? []).length === 0 &&
+                    (workJob.packet_materials ?? []).length === 0 &&
                     (workJob.packet_slip ?? []).length === 0 ? (
                       <p className={styles.packetEmpty}>
                         Warehouse hasn&apos;t kitted this job yet. Parts show here after Receiving and To

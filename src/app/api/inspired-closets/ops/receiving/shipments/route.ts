@@ -57,7 +57,7 @@ async function insertItems(
       source_page: item.source_page ?? null,
       status: "expected",
       vendor_sku: item.vendor_sku ?? null,
-      job_id: links.job_id,
+      job_id: item.job_id || links.job_id,
       part_id: links.part_id,
     });
   }

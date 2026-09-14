@@ -16,6 +16,7 @@ export type ParsedSlipItem = {
   so_number?: string | null;
   cust_ref?: string | null;
   job_name?: string | null;
+  job_id?: string | null;
   project_number?: string | null;
   description?: string | null;
   qty: number;
@@ -94,6 +95,20 @@ export async function loadShipmentItemRows(
 
 export function normalizeCode(value: string): string {
   return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+/** Codes Bryant may scan: Hafele 792.10.521, Stow 400005129, padded 000…400005129. */
+export function codeKeys(value: string | null | undefined): string[] {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  const norm = normalizeCode(raw);
+  const stripped = norm.replace(/^0+/, "") || "0";
+  return [...new Set([raw, norm, stripped])];
+}
+
+export function codesMatch(scanned: string, candidate: string | null | undefined): boolean {
+  const keys = new Set(codeKeys(scanned));
+  return codeKeys(candidate).some((key) => keys.has(key));
 }
 
 const SKIP_JOB_WORDS = new Set(["demo", "new", "cart", "the", "a", "and"]);
@@ -232,13 +247,11 @@ export function matchItem(
   palletId?: string | null,
 ): { item: ShipmentItemRow | null; result: "matched" | "already_received" | "unknown" | "pallet_mismatch" } {
   const raw = scanned.trim();
-  const norm = normalizeCode(raw);
   if (!raw) return { item: null, result: "unknown" };
 
-  const matches = items.filter((row) => {
-    const numbers = [row.item_number, row.vendor_sku].filter(Boolean) as string[];
-    return numbers.some((n) => n === raw || normalizeCode(n) === norm);
-  });
+  const matches = items.filter((row) =>
+    [row.item_number, row.vendor_sku, row.container_id].some((n) => codesMatch(raw, n)),
+  );
   if (matches.length === 0) return { item: null, result: "unknown" };
 
   const open = matches.filter((row) => (row.received_qty ?? 0) < (row.qty ?? 1));
@@ -260,7 +273,9 @@ function partCategoryFromDescription(description?: string | null): string {
 
 async function findPartId(codes: string[]): Promise<string | null> {
   const supabase = getSupabaseAdmin();
-  const unique = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+  const unique = [
+    ...new Set(codes.flatMap((code) => codeKeys(code)).filter((code) => code.length >= 4)),
+  ];
   for (const code of unique) {
     const { data } = await supabase
       .from("ic_parts")
@@ -293,7 +308,7 @@ async function ensurePartForSlipItem(item: ParsedSlipItem): Promise<string | nul
       name: (item.description || sku).trim(),
       category: partCategoryFromDescription(item.description),
       barcode: sku,
-      vendor: "Stow",
+      vendor: /^\d{3}\.\d{2}\.\d{3}$/.test(sku) ? "Hafele" : "Stow",
       qty_on_hand: 0,
       qty_reserved: 0,
       notes: `Created from packing slip${item.cust_ref ? ` · ${item.cust_ref}` : ""}.`,
@@ -661,6 +676,7 @@ export function fixtureItemsToParsed(
       so_number: row.so_number ? String(row.so_number) : null,
       cust_ref: row.cust_ref ? String(row.cust_ref) : null,
       job_name: row.job_name ? String(row.job_name) : jobNameFromCustRef(String(row.cust_ref ?? "")),
+      job_id: typeof row.job_id === "string" && row.job_id ? row.job_id : null,
       project_number: row.project_number ? String(row.project_number) : null,
       description: row.description ? String(row.description) : null,
       qty: Math.max(1, Math.round(Number(row.qty) || 1)),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ISSUE_TYPES,
@@ -1331,6 +1331,21 @@ export default function FieldApp() {
     return () => window.clearTimeout(timer);
   }, [highlightId, tab]);
 
+  useLayoutEffect(() => {
+    if (tab !== "jobs" || !jobsShowPacketFirst || reviewJobId) return;
+    const pinTop = () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest("#packet-notes, #packet-issue")) {
+        active.blur();
+      }
+      window.scrollTo(0, 0);
+      document.getElementById("installer-job-packet")?.scrollIntoView({ block: "start" });
+    };
+    pinTop();
+    const timer = window.setTimeout(pinTop, 120);
+    return () => window.clearTimeout(timer);
+  }, [tab, jobsShowPacketFirst, selectedId, reviewJobId]);
+
   const noticeEl = notice ? (
     <p
       className={`${styles.notice} ${
@@ -1588,7 +1603,6 @@ export default function FieldApp() {
               >
                 Clock in
               </button>
-              <p className={styles.statHint}>Leave the shop, then clock in. Stay on until you&apos;re back.</p>
               <button
                 type="button"
                 className={styles.btnGhost}
@@ -1597,6 +1611,7 @@ export default function FieldApp() {
               >
                 Clock out
               </button>
+              <p className={styles.statHint}>Leave the shop, then clock in. Stay on until you&apos;re back.</p>
             </div>
           </section>
 
@@ -1843,7 +1858,6 @@ export default function FieldApp() {
                   { id: "packet-photos", label: "Photos" },
                   { id: "packet-notes", label: "Notes" },
                   { id: "packet-parts", label: "Parts" },
-                  { id: "packet-miles", label: "Miles" },
                   { id: "packet-issue", label: "Issue" },
                 ].map((item) => (
                   <button
@@ -1919,6 +1933,14 @@ export default function FieldApp() {
                           : "Just you so far."}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      className={`${styles.btn} ${styles.packetBtn}`}
+                      disabled={busy || isPastJob(workJob)}
+                      onClick={() => void completeJob()}
+                    >
+                      Mark install complete
+                    </button>
                   </section>
 
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
@@ -1988,38 +2010,6 @@ export default function FieldApp() {
                     ) : null}
                   </section>
 
-                  <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-miles">
-                    <p className={styles.colLabel}>Truck</p>
-                    <h3 className={styles.packetSection}>Miles today</h3>
-                    <p className={styles.jobMeta}>
-                      Filled from GPS pins: clock in at the shop, install done here, clock out when you&apos;re back.
-                    </p>
-                    <dl className={styles.statList}>
-                      <div>
-                        <dt>Out</dt>
-                        <dd>{workJob.miles?.miles_out ? `${workJob.miles.miles_out} mi` : "—"}</dd>
-                      </div>
-                      <div>
-                        <dt>Back</dt>
-                        <dd>{workJob.miles?.miles_back ? `${workJob.miles.miles_back} mi` : "—"}</dd>
-                      </div>
-                    </dl>
-                    <p className={styles.packetEmpty}>
-                      {workJob.miles?.miles_out
-                        ? workJob.miles.miles_back
-                          ? "Day closed at the shop."
-                          : "Clock out at the shop to finish Back."
-                        : "Clock in when you leave the shop, then mark install done here."}
-                    </p>
-                    <button
-                      type="button"
-                      className={`${styles.btn} ${styles.packetBtn}`}
-                      disabled={busy || isPastJob(workJob)}
-                      onClick={() => void completeJob()}
-                    >
-                      Mark install complete
-                    </button>
-                  </section>
                 </div>
 
                 <div className={styles.packetDocCol}>
@@ -2118,6 +2108,8 @@ export default function FieldApp() {
                       value={fieldNotes}
                       onChange={(e) => setFieldNotes(e.target.value)}
                       placeholder="Site notes, what’s left, what the customer said…"
+                      autoComplete="off"
+                      enterKeyHint="done"
                     />
                     <button
                       type="button"

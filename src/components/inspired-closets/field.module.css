@@ -1131,9 +1131,13 @@
 
 .profileActions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.profileActions .statHint {
+  margin: 0;
 }
 
 .packetBtn {
@@ -1145,9 +1149,14 @@
 #packet-photos,
 #packet-notes,
 #packet-parts,
-#packet-miles,
 #packet-issue {
   scroll-margin-top: 5.5rem;
+}
+
+#packet-notes,
+#packet-issue,
+.packetNotesArea {
+  overflow-anchor: none;
 }
 
 .colLabel {
@@ -1659,6 +1668,7 @@
   gap: 0.85rem;
   width: 100%;
   min-width: 0;
+  scroll-margin-top: 4.75rem;
 }
 
 .packetToolbar {
@@ -2330,6 +2340,7 @@
   }
 
   .profileActions {
+    grid-template-columns: 1fr;
     gap: 0.45rem;
   }
 

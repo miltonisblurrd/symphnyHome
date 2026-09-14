@@ -81,6 +81,7 @@ type Job = {
   timeEntries?: TimeEntry[];
   packet_materials?: PacketMaterial[];
   packet_slip?: PacketSlip[];
+  miles?: { miles_out: number; miles_back: number; drive_date: string } | null;
 };
 
 type Media = { id: string; kind: string; public_url: string | null; caption: string | null };
@@ -481,8 +482,6 @@ export default function FieldApp() {
   const [hoursThisWeek, setHoursThisWeek] = useState(0);
   const [nextJobId, setNextJobId] = useState<string | null>(null);
   const [vehicleSnap, setVehicleSnap] = useState<FieldVehicleSnapshot | null>(null);
-  const [milesOut, setMilesOut] = useState("");
-  const [milesBack, setMilesBack] = useState("");
   const [loading, setLoading] = useState(true);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -829,14 +828,8 @@ export default function FieldApp() {
     if (workJob?.id) {
       void loadJobExtras(workJob.id);
       setFieldNotes(workJob.field_notes ?? "");
-      const today = new Date().toISOString().slice(0, 10);
-      const row = vehicleSnap?.miles?.find(
-        (item) => item.job_id === workJob.id && item.drive_date === today,
-      );
-      setMilesOut(row ? String(row.miles_out) : "");
-      setMilesBack(row ? String(row.miles_back) : "");
     }
-  }, [loadJobExtras, vehicleSnap, workJob]);
+  }, [loadJobExtras, workJob]);
 
   const hasOpenClock = jobs.some((job) => Boolean(job.openClock));
   useEffect(() => {
@@ -924,7 +917,10 @@ export default function FieldApp() {
       });
       const data = (await response.json()) as { ok?: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? "Clock failed.");
-      setNotice({ kind: "ok", text: action === "in" ? "Clocked in." : "Clocked out." });
+      setNotice({
+        kind: "ok",
+        text: action === "in" ? "Clocked in — pin dropped leaving the shop." : "Clocked out — pin dropped at the shop.",
+      });
       await loadJobs();
       await loadHome();
       if (installer) await loadProfiles(installer.id);
@@ -1062,14 +1058,20 @@ export default function FieldApp() {
     if (!window.confirm(`Mark ${workJob.client?.name ?? "this job"} complete?`)) return;
     setBusy(true);
     try {
+      const geo = await getGeo();
       const response = await fetch("/api/inspired-closets/field/jobs", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: workJob.id, action: "complete" }),
+        body: JSON.stringify({
+          job_id: workJob.id,
+          action: "complete",
+          lat: geo.lat,
+          lng: geo.lng,
+        }),
       });
       const data = (await response.json()) as { ok?: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? "Could not complete job.");
-      setNotice({ kind: "ok", text: "Install complete." });
+      setNotice({ kind: "ok", text: "Install complete — pin dropped. Stay on the clock until you're back at the shop." });
       await loadJobs();
       await loadHome();
     } catch (error) {
@@ -1183,33 +1185,6 @@ export default function FieldApp() {
       setNotice({
         kind: "error",
         text: error instanceof Error ? error.message : "Could not save.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveJobMiles(jobId: string) {
-    setBusy(true);
-    try {
-      const response = await fetch("/api/inspired-closets/field/vehicle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "miles",
-          job_id: jobId,
-          miles_out: Number(milesOut) || 0,
-          miles_back: Number(milesBack) || 0,
-        }),
-      });
-      const payload = (await response.json()) as FieldVehicleSnapshot & { ok?: boolean; error?: string };
-      if (!payload.ok) throw new Error(payload.error ?? "Could not save miles.");
-      setVehicleSnap(payload);
-      setNotice({ kind: "ok", text: "Miles saved for this job." });
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Could not save miles.",
       });
     } finally {
       setBusy(false);
@@ -1567,7 +1542,7 @@ export default function FieldApp() {
                 <p className={styles.profileRole}>{profile.title}</p>
                 <span className={`${styles.statusPill} ${clockedJob ? styles.statusOn : ""}`}>
                   {clockedJob
-                    ? `On site · ${formatDuration(clockedJob.openClock!.clock_in_at, null, nowTick)}`
+                    ? `On the clock · ${formatDuration(clockedJob.openClock!.clock_in_at, null, nowTick)}`
                     : "Off the clock"}
                 </span>
               </div>
@@ -1595,6 +1570,7 @@ export default function FieldApp() {
               >
                 Clock in
               </button>
+              <p className={styles.statHint}>Leave the shop, then clock in. Stay on until you&apos;re back.</p>
               <button
                 type="button"
                 className={styles.btnGhost}
@@ -1849,6 +1825,7 @@ export default function FieldApp() {
                   { id: "packet-photos", label: "Photos" },
                   { id: "packet-notes", label: "Notes" },
                   { id: "packet-parts", label: "Parts" },
+                  { id: "packet-miles", label: "Miles" },
                   { id: "packet-issue", label: "Issue" },
                 ].map((item) => (
                   <button
@@ -1915,6 +1892,7 @@ export default function FieldApp() {
                   </section>
 
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
+                    <p className={styles.colLabel}>Warehouse</p>
                     <h3 className={styles.packetSection}>Parts</h3>
                     {(workJob.packet_materials ?? []).length > 0 ? (
                       <ul className={styles.packetPartList}>
@@ -1946,42 +1924,31 @@ export default function FieldApp() {
                         job.
                       </p>
                     ) : null}
+                  </section>
 
-                    <div className={styles.packetParts}>
-                      <h3 className={styles.packetSection}>Miles today</h3>
-                      <div className={styles.twoCol}>
-                        <label className={styles.field} style={{ marginTop: 0 }}>
-                          <span className={styles.label}>Out</span>
-                          <input
-                            className={styles.input}
-                            inputMode="numeric"
-                            value={milesOut}
-                            onChange={(e) => setMilesOut(e.target.value)}
-                            placeholder="0"
-                          />
-                        </label>
-                        <label className={styles.field} style={{ marginTop: 0 }}>
-                          <span className={styles.label}>Back</span>
-                          <input
-                            className={styles.input}
-                            inputMode="numeric"
-                            value={milesBack}
-                            onChange={(e) => setMilesBack(e.target.value)}
-                            placeholder="0"
-                          />
-                        </label>
+                  <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-miles">
+                    <p className={styles.colLabel}>Truck</p>
+                    <h3 className={styles.packetSection}>Miles today</h3>
+                    <p className={styles.jobMeta}>
+                      Filled from GPS pins: clock in at the shop, install done here, clock out when you&apos;re back.
+                    </p>
+                    <dl className={styles.statList}>
+                      <div>
+                        <dt>Out</dt>
+                        <dd>{workJob.miles?.miles_out ? `${workJob.miles.miles_out} mi` : "—"}</dd>
                       </div>
-                      <button
-                        type="button"
-                        className={styles.btnGhost}
-                        style={{ marginTop: "0.55rem" }}
-                        disabled={busy || !vehicleSnap?.vehicle}
-                        onClick={() => void saveJobMiles(workJob.id)}
-                      >
-                        Save miles
-                      </button>
-                    </div>
-
+                      <div>
+                        <dt>Back</dt>
+                        <dd>{workJob.miles?.miles_back ? `${workJob.miles.miles_back} mi` : "—"}</dd>
+                      </div>
+                    </dl>
+                    <p className={styles.packetEmpty}>
+                      {workJob.miles?.miles_out
+                        ? workJob.miles.miles_back
+                          ? "Day closed at the shop."
+                          : "Clock out at the shop to finish Back."
+                        : "Clock in when you leave the shop, then mark install done here."}
+                    </p>
                     <button
                       type="button"
                       className={`${styles.btn} ${styles.packetBtn}`}

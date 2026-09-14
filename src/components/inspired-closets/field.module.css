@@ -1145,6 +1145,7 @@
 #packet-photos,
 #packet-notes,
 #packet-parts,
+#packet-miles,
 #packet-issue {
   scroll-margin-top: 5.5rem;
 }
@@ -1720,8 +1721,8 @@
   min-width: 0;
 }
 
-.packetOpsCard .packetParts {
-  margin-top: 1rem;
+.packetOpsCard .packetSection {
+  margin-top: 0.15rem;
 }
 
 @media (max-width: 899px) {
@@ -2071,12 +2072,6 @@
   margin: 1rem 0 0;
   font-size: 1.02rem;
   color: var(--muted);
-}
-
-.packetParts {
-  margin: 0.85rem 0 1rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .packetPartList {

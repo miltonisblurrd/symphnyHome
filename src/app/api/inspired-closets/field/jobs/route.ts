@@ -10,6 +10,7 @@ import {
 import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
 import { FIELD_JOB_STAGES } from "@/lib/inspired-closets-ops-field";
 import { markCompletionTenDue } from "@/lib/inspired-closets-ops-billing";
+import { recordDrivePin } from "@/lib/inspired-closets-field-miles";
 
 export const runtime = "nodejs";
 
@@ -122,7 +123,7 @@ export async function GET() {
     }),
   );
   const packetJobIds = visibleJobs.map((job) => job.id);
-  const [{ data: materialRows, error: materialsError }, { data: slipRows }] = await Promise.all([
+  const [{ data: materialRows, error: materialsError }, { data: slipRows }, milesResult] = await Promise.all([
     packetJobIds.length
       ? supabase.from("ic_job_materials").select("id, job_id, qty, status, part_id").in("job_id", packetJobIds)
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
@@ -131,6 +132,14 @@ export async function GET() {
           .from("ic_shipment_items")
           .select("id, job_id, item_number, description, qty, received_qty, status")
           .in("job_id", packetJobIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    packetJobIds.length
+      ? supabase
+          .from("ic_job_miles")
+          .select("job_id, drive_date, miles_out, miles_back")
+          .eq("installer_id", installerId)
+          .in("job_id", packetJobIds)
+          .order("drive_date", { ascending: false })
       : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
   ]);
   const materialList =
@@ -172,6 +181,19 @@ export async function GET() {
     slipsByJob.set(jobId, list);
   }
 
+  const milesByJob = new Map<string, { miles_out: number; miles_back: number; drive_date: string }>();
+  if (!milesResult.error || !/does not exist|schema cache/i.test(milesResult.error.message)) {
+    for (const row of milesResult.data ?? []) {
+      const jobId = String(row.job_id);
+      if (milesByJob.has(jobId)) continue;
+      milesByJob.set(jobId, {
+        miles_out: Number(row.miles_out) || 0,
+        miles_back: Number(row.miles_back) || 0,
+        drive_date: String(row.drive_date ?? ""),
+      });
+    }
+  }
+
   const enriched = visibleJobs.map((job) => {
     const entries = entriesByJob.get(job.id) ?? [];
     const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
@@ -183,6 +205,7 @@ export async function GET() {
       mine: job.installer_id === installerId || crewJobIds.has(job.id),
       packet_materials: materialsByJob.get(job.id) ?? [],
       packet_slip: slipsByJob.get(job.id) ?? [],
+      miles: milesByJob.get(job.id) ?? null,
     };
   });
 
@@ -284,13 +307,17 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    // Auto clock-out any open entry on this job for this installer.
-    await supabase
-      .from("ic_time_entries")
-      .update({ clock_out_at: new Date().toISOString() })
-      .eq("job_id", jobId)
-      .eq("installer_id", installerId)
-      .is("clock_out_at", null);
+    const lat = typeof body.lat === "string" || typeof body.lat === "number" ? String(body.lat) : null;
+    const lng = typeof body.lng === "string" || typeof body.lng === "number" ? String(body.lng) : null;
+    await recordDrivePin({
+      installerId,
+      jobId,
+      kind: "install_done",
+      lat,
+      lng,
+    });
+
+    // Stay on the clock until they clock out back at the shop.
 
     // Queue final 10% for Des billing + advance stage to final_payment.
     try {

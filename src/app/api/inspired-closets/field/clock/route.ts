@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
+import { recordDrivePin } from "@/lib/inspired-closets-field-miles";
 
 export const runtime = "nodejs";
 
@@ -25,14 +26,12 @@ export async function POST(request: Request) {
   const lat = typeof body.lat === "string" || typeof body.lat === "number" ? String(body.lat) : null;
   const lng = typeof body.lng === "string" || typeof body.lng === "number" ? String(body.lng) : null;
   const note = typeof body.note === "string" ? body.note : null;
-
-  if (!jobId) {
-    return NextResponse.json({ ok: false, error: "job_id is required." }, { status: 400 });
-  }
-
   const supabase = getSupabaseAdmin();
 
   if (action === "in") {
+    if (!jobId) {
+      return NextResponse.json({ ok: false, error: "job_id is required." }, { status: 400 });
+    }
     const { data: existing } = await supabase
       .from("ic_time_entries")
       .select("id")
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (existing) {
       return NextResponse.json(
-        { ok: false, error: "Already clocked in on another job. Clock out first." },
+        { ok: false, error: "Already on the clock. Clock out when you're back at the shop." },
         { status: 409 },
       );
     }
@@ -80,6 +79,14 @@ export async function POST(request: Request) {
       changes: { job_id: jobId, lat, lng },
     });
 
+    await recordDrivePin({
+      installerId,
+      jobId,
+      kind: "clock_in",
+      lat,
+      lng,
+    });
+
     return NextResponse.json({ ok: true, entry: data });
   }
 
@@ -87,14 +94,13 @@ export async function POST(request: Request) {
     .from("ic_time_entries")
     .select("*")
     .eq("installer_id", installerId)
-    .eq("job_id", jobId)
     .is("clock_out_at", null)
     .maybeSingle();
   if (findError) {
     return NextResponse.json({ ok: false, error: findError.message }, { status: 500 });
   }
   if (!open) {
-    return NextResponse.json({ ok: false, error: "No open clock-in for this job." }, { status: 404 });
+    return NextResponse.json({ ok: false, error: "No open clock-in." }, { status: 404 });
   }
 
   const { data, error } = await supabase
@@ -117,7 +123,15 @@ export async function POST(request: Request) {
     entity_id: data.id,
     action: "clock_out",
     actor_id: installerId,
-    changes: { job_id: jobId, lat, lng },
+    changes: { job_id: open.job_id, lat, lng },
+  });
+
+  await recordDrivePin({
+    installerId,
+    jobId: typeof open.job_id === "string" ? open.job_id : jobId,
+    kind: "clock_out",
+    lat,
+    lng,
   });
 
   return NextResponse.json({ ok: true, entry: data });

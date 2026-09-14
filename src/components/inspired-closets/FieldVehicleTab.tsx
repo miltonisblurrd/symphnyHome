@@ -139,7 +139,7 @@ export default function FieldVehicleTab({
       <section className={field.dashCard}>
         <p className={field.colLabel}>This week’s job miles</p>
         {(snapshot?.miles ?? []).length === 0 ? (
-          <p className={styles.emptyHint}>Log miles out and back on a job packet.</p>
+          <p className={styles.emptyHint}>Miles fill in from clock in, install done, and clock out.</p>
         ) : (
           <ul className={styles.logList}>
             {(snapshot?.miles ?? []).map((row) => (

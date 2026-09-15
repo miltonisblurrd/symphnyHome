@@ -260,6 +260,16 @@ export async function GET() {
     }
   }
 
+  const proposalByJob = new Map<string, string | null>();
+  for (const job of visibleJobs) {
+    const storagePath = typeof job.proposal_path === "string" ? job.proposal_path : null;
+    if (!storagePath) continue;
+    const { data: signed } = await supabase.storage
+      .from("ic-field-media")
+      .createSignedUrl(storagePath, 60 * 60 * 12);
+    if (signed?.signedUrl) proposalByJob.set(String(job.id), signed.signedUrl);
+  }
+
   const enriched = visibleJobs.map((job) => {
     const entries = entriesByJob.get(job.id) ?? [];
     const openClock = entries.find((entry) => !entry.clock_out_at) ?? null;
@@ -272,6 +282,7 @@ export async function GET() {
       packet_materials: materialsByJob.get(job.id) ?? [],
       packet_slip: slipsByJob.get(job.id) ?? [],
       packet_order: summaryByJob.get(job.id) ?? null,
+      proposal_url: proposalByJob.get(job.id) ?? (typeof job.proposal_url === "string" ? job.proposal_url : null),
       miles: milesByJob.get(job.id) ?? null,
     };
   });

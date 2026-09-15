@@ -99,6 +99,8 @@ type Job = {
   packet_materials?: PacketMaterial[];
   packet_slip?: PacketSlip[];
   packet_order?: PacketOrder | null;
+  proposal_url?: string | null;
+  proposal_filename?: string | null;
   miles?: { miles_out: number; miles_back: number; drive_date: string } | null;
 };
 
@@ -261,9 +263,17 @@ function parseOfficeNotes(notes: string | null | undefined): { facts: OfficeFact
   return { facts, site };
 }
 
-function OfficePacket({ notes }: { notes: string | null | undefined }) {
+function OfficePacket({
+  notes,
+  proposalUrl,
+  proposalFilename,
+}: {
+  notes: string | null | undefined;
+  proposalUrl?: string | null;
+  proposalFilename?: string | null;
+}) {
   const { facts, site } = parseOfficeNotes(notes);
-  if (facts.length === 0 && site.length === 0) return null;
+  if (facts.length === 0 && site.length === 0 && !proposalUrl) return null;
   return (
     <div className={styles.packetOffice}>
       {facts.length > 0 ? (
@@ -284,6 +294,22 @@ function OfficePacket({ notes }: { notes: string | null | undefined }) {
               <li key={`${item}-${index}`}>{item}</li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {proposalUrl ? (
+        <div className={styles.packetBlock} id="packet-design">
+          <h3 className={styles.packetSection}>Proposal / Closet Design</h3>
+          <p className={styles.jobMeta}>
+            {proposalFilename ? proposalFilename.replace(/\.[^.]+$/, "") : "The closet plan for this job."}
+          </p>
+          <a
+            className={styles.packetActionBtn}
+            href={proposalUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open design PDF
+          </a>
         </div>
       ) : null}
     </div>
@@ -1855,6 +1881,7 @@ export default function FieldApp() {
               <nav className={styles.packetJump} aria-label="Packet sections">
                 {[
                   { id: "packet-brief", label: "Brief" },
+                  ...(workJob.proposal_url ? [{ id: "packet-design", label: "Design" }] : []),
                   { id: "packet-photos", label: "Photos" },
                   { id: "packet-notes", label: "Notes" },
                   { id: "packet-parts", label: "Parts" },
@@ -1923,7 +1950,11 @@ export default function FieldApp() {
                       </div>
                     ) : null}
 
-                    <OfficePacket notes={workJob.notes} />
+                    <OfficePacket
+                      notes={workJob.notes}
+                      proposalUrl={workJob.proposal_url}
+                      proposalFilename={workJob.proposal_filename}
+                    />
 
                     <div className={styles.packetBlock}>
                       <h3 className={styles.packetSection}>Crew</h3>
@@ -2272,7 +2303,11 @@ export default function FieldApp() {
               </button>
             </div>
             {reviewBusy ? <p className={styles.packetEmpty}>Loading packet…</p> : null}
-            <OfficePacket notes={reviewJob.notes} />
+            <OfficePacket
+              notes={reviewJob.notes}
+              proposalUrl={reviewJob.proposal_url}
+              proposalFilename={reviewJob.proposal_filename}
+            />
             <div className={styles.packetBlock}>
               <h3 className={styles.packetSection}>Crew</h3>
               <p className={styles.packetBody}>

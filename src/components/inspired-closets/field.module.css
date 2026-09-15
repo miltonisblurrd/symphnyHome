@@ -1146,6 +1146,7 @@
 }
 
 #packet-brief,
+#packet-design,
 #packet-photos,
 #packet-notes,
 #packet-parts,
@@ -1825,6 +1826,11 @@
 
 .packetOffice {
   margin-top: 1rem;
+}
+
+.packetOffice .packetActionBtn {
+  margin-top: 0.55rem;
+  width: 100%;
 }
 
 .kindChips {

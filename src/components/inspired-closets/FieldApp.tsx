@@ -222,6 +222,14 @@ function stageLabel(stage: string) {
   return stage.replace(/_/g, " ");
 }
 
+function directionsHref(address: string) {
+  const dest = encodeURIComponent(address);
+  if (typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+  }
+  return `https://maps.apple.com/?daddr=${dest}&dirflg=d`;
+}
+
 type OfficeFact = { label: string; value: string };
 
 const OFFICE_SPLIT =
@@ -1927,7 +1935,7 @@ export default function FieldApp() {
                         {workJob.client?.address ? (
                           <a
                             className={styles.packetActionBtn}
-                            href={`https://maps.google.com/?q=${encodeURIComponent(workJob.client.address)}`}
+                            href={directionsHref(workJob.client.address)}
                             target="_blank"
                             rel="noreferrer"
                           >

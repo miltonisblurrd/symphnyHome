@@ -327,6 +327,29 @@ function localYmd(value = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+async function prepareFieldPhoto(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  if (typeof createImageBitmap !== "function") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const max = 1920;
+    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
 function visitWindowEnd(window: string, day: string): Date | null {
   const cleaned = window.replace(/[–—]/g, "-");
   const parts = cleaned.split("-").map((part) => part.trim()).filter(Boolean);
@@ -868,9 +891,12 @@ export default function FieldApp() {
     };
   }, [flushQueue, installer, loadHome, loadJobs, loadPto, loadVehicle]);
 
+  const notesJobIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (workJob?.id) {
-      void loadJobExtras(workJob.id);
+    if (!workJob?.id) return;
+    void loadJobExtras(workJob.id);
+    if (notesJobIdRef.current !== workJob.id) {
+      notesJobIdRef.current = workJob.id;
       setFieldNotes(workJob.field_notes ?? "");
     }
   }, [loadJobExtras, workJob]);
@@ -977,14 +1003,58 @@ export default function FieldApp() {
 
   async function uploadPhoto(file: File) {
     if (!workJob) return;
+    const prepared = await prepareFieldPhoto(file);
+    if (prepared.size > 12 * 1024 * 1024) {
+      throw new Error("Keep photos under 12 MB.");
+    }
+    const ext = prepared.name.split(".").pop()?.toLowerCase() || "jpg";
+    const prepareRes = await fetch("/api/inspired-closets/field/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prepare", job_id: workJob.id, ext }),
+    });
+    const prepareData = (await prepareRes.json()) as {
+      ok?: boolean;
+      error?: string;
+      path?: string;
+      signedUrl?: string;
+    };
+    if (prepareData.ok && prepareData.path && prepareData.signedUrl) {
+      const put = await fetch(prepareData.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": prepared.type || "image/jpeg" },
+        body: prepared,
+      });
+      if (put.ok) {
+        const completeRes = await fetch("/api/inspired-closets/field/media", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "complete",
+            job_id: workJob.id,
+            path: prepareData.path,
+            kind: mediaKind,
+            caption: mediaCaption.trim() || null,
+            mime_type: prepared.type || "image/jpeg",
+            bytes: prepared.size,
+          }),
+        });
+        const completeData = (await completeRes.json()) as { ok?: boolean; error?: string };
+        if (!completeData.ok) throw new Error(completeData.error ?? "Upload failed.");
+        return;
+      }
+    }
+
     const form = new FormData();
     form.set("job_id", workJob.id);
     form.set("kind", mediaKind);
     if (mediaCaption.trim()) form.set("caption", mediaCaption.trim());
-    form.set("file", file);
+    form.set("file", prepared);
     const response = await fetch("/api/inspired-closets/field/media", { method: "POST", body: form });
-    const data = (await response.json()) as { ok?: boolean; error?: string };
-    if (!data.ok) throw new Error(data.error ?? "Upload failed.");
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error ?? (response.status === 413 ? "Photo is too large." : "Upload failed."));
+    }
   }
 
   async function uploadPhotos(files: FileList | File[]) {
@@ -1088,8 +1158,10 @@ export default function FieldApp() {
       });
       const data = (await response.json()) as { ok?: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? "Could not save notes.");
+      setJobs((current) =>
+        current.map((job) => (job.id === workJob.id ? { ...job, field_notes: fieldNotes } : job)),
+      );
       setNotice({ kind: "ok", text: "Notes saved." });
-      await loadJobs();
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save notes." });
     } finally {
@@ -1360,10 +1432,6 @@ export default function FieldApp() {
   useLayoutEffect(() => {
     if (tab !== "jobs" || !jobsShowPacketFirst || reviewJobId) return;
     const pinTop = () => {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.closest("#packet-notes, #packet-issue")) {
-        active.blur();
-      }
       window.scrollTo(0, 0);
       document.getElementById("installer-job-packet")?.scrollIntoView({ block: "start" });
     };
@@ -2083,7 +2151,6 @@ export default function FieldApp() {
                       ref={photoInputRef}
                       type="file"
                       accept="image/*,video/*"
-                      capture="environment"
                       multiple
                       className={styles.avatarFileInput}
                       disabled={busy || photoBusy}
@@ -2104,6 +2171,7 @@ export default function FieldApp() {
                         {photoBusy ? "Uploading…" : "Take / add photos"}
                       </button>
                     </div>
+                    {noticeEl}
 
                     {media.length > 0 ? (
                       <div className={styles.mediaGrid}>
@@ -2151,6 +2219,7 @@ export default function FieldApp() {
                     >
                       Save notes
                     </button>
+                    {noticeEl}
                   </section>
 
                   <section className={styles.dashCard} id="packet-issue">

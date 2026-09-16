@@ -339,6 +339,12 @@ export async function PATCH(request: Request) {
       .select("*")
       .single();
     if (error) {
+      if (/field_notes|column|schema cache/i.test(error.message)) {
+        return NextResponse.json(
+          { ok: false, error: "Run drizzle/0019_ic_field_home.sql so installer notes can save." },
+          { status: 500 },
+        );
+      }
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
     return NextResponse.json({ ok: true, job: data });

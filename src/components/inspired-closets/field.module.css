@@ -430,6 +430,12 @@
   font-size: 0.82rem;
 }
 
+.bodyJobs .notice {
+  position: sticky;
+  top: 4.6rem;
+  z-index: 30;
+}
+
 .noticeError {
   background: #fff2f2;
   border-color: rgba(180, 30, 30, 0.35);

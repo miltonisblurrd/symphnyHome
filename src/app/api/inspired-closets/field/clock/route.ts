@@ -45,12 +45,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // Claim job if unassigned.
+    const { data: currentJob } = await supabase
+      .from("ic_jobs")
+      .select("id, stage")
+      .eq("id", jobId)
+      .maybeSingle();
+    const alreadyDone = ["install_complete", "final_payment", "closed"].includes(
+      String(currentJob?.stage ?? ""),
+    );
     await supabase
       .from("ic_jobs")
       .update({
         installer_id: installerId,
-        stage: "install_in_progress",
+        ...(alreadyDone ? {} : { stage: "install_in_progress" }),
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);

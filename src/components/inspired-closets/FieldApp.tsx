@@ -350,42 +350,14 @@ async function prepareFieldPhoto(file: File): Promise<File> {
   }
 }
 
-function visitWindowEnd(window: string, day: string): Date | null {
-  const cleaned = window.replace(/[–—]/g, "-");
-  const parts = cleaned.split("-").map((part) => part.trim()).filter(Boolean);
-  const endRaw = parts[parts.length - 1];
-  if (!endRaw) return null;
-  const match = endRaw.match(/^(\d{1,2})(?::(\d{2}))?\s*(a|p|am|pm)?/i);
-  if (!match) return null;
-  let hour = Number(match[1]);
-  const minute = Number(match[2] ?? "0");
-  const mer = (match[3] ?? "").toLowerCase();
-  const startMer = parts[0]?.match(/(a|p|am|pm)\s*$/i)?.[1]?.toLowerCase() ?? "";
-  if (mer.startsWith("p") || (!mer && startMer.startsWith("a") && hour <= 12 && hour !== 12 && hour < 8)) {
-    if (hour < 12) hour += 12;
-  } else if (mer.startsWith("a") && hour === 12) {
-    hour = 0;
-  } else if (!mer && hour === 12) {
-    hour = 12;
-  } else if (!mer && hour <= 7) {
-    hour += 12;
-  }
-  const end = new Date(`${day}T00:00:00`);
-  if (Number.isNaN(end.getTime())) return null;
-  end.setHours(hour, minute, 0, 0);
-  return end;
+function isCompletedStage(stage: string) {
+  return ["install_complete", "final_payment", "closed"].includes(stage);
 }
 
-function isPastJob(job: { stage: string; install_date?: string | null; visit_window?: string | null }) {
-  if (["install_complete", "final_payment", "closed"].includes(job.stage)) return true;
+function isPastJob(job: { stage: string; install_date?: string | null }) {
+  if (isCompletedStage(job.stage)) return true;
   const day = job.install_date?.slice(0, 10);
-  if (!day) return false;
-  const today = localYmd();
-  if (day < today) return true;
-  if (day > today) return false;
-  if (!job.visit_window) return false;
-  const end = visitWindowEnd(job.visit_window, day);
-  return Boolean(end && Date.now() > end.getTime());
+  return Boolean(day && day < localYmd());
 }
 
 function Avatar({
@@ -535,11 +507,6 @@ export default function FieldApp() {
   const [crewOptions, setCrewOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [helperId, setHelperId] = useState("");
   const [addInstallerOpen, setAddInstallerOpen] = useState(false);
-  const [reviewJobId, setReviewJobId] = useState<string | null>(null);
-  const [reviewMedia, setReviewMedia] = useState<Media[]>([]);
-  const [reviewIssues, setReviewIssues] = useState<Issue[]>([]);
-  const [reviewCrew, setReviewCrew] = useState<CrewPerson[]>([]);
-  const [reviewBusy, setReviewBusy] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [updates, setUpdates] = useState<Update[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -590,8 +557,8 @@ export default function FieldApp() {
   }, [myJobs]);
   const selected = useMemo(() => myJobs.find((job) => job.id === selectedId) ?? null, [myJobs, selectedId]);
   const workJob = useMemo(() => {
-    if (selected && !isPastJob(selected)) return selected;
-    return myJobs.find((job) => !isPastJob(job)) ?? null;
+    if (selected) return selected;
+    return myJobs.find((job) => !isPastJob(job)) ?? myJobs[0] ?? null;
   }, [myJobs, selected]);
   const pastJobs = useMemo(
     () =>
@@ -606,10 +573,6 @@ export default function FieldApp() {
         .filter((job) => !isPastJob(job))
         .sort((a, b) => (a.install_date ?? "9999").localeCompare(b.install_date ?? "9999")),
     [myJobs],
-  );
-  const reviewJob = useMemo(
-    () => myJobs.find((job) => job.id === reviewJobId) ?? null,
-    [myJobs, reviewJobId],
   );
   const nextJob = useMemo(
     () =>
@@ -1064,6 +1027,10 @@ export default function FieldApp() {
       setNotice({ kind: "error", text: "Choose a photo or video." });
       return;
     }
+    if (list.some((file) => file.type.startsWith("video/") && file.size > 12 * 1024 * 1024)) {
+      setNotice({ kind: "error", text: "Keep videos under 12 MB, or send a photo instead." });
+      return;
+    }
     setPhotoBusy(true);
     setBusy(true);
     try {
@@ -1187,7 +1154,13 @@ export default function FieldApp() {
       });
       const data = (await response.json()) as { ok?: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? "Could not complete job.");
-      setNotice({ kind: "ok", text: "Install complete — pin dropped. Stay on the clock until you're back at the shop." });
+      setJobs((current) =>
+        current.map((job) => (job.id === workJob.id ? { ...job, stage: "install_complete" } : job)),
+      );
+      setNotice({
+        kind: "ok",
+        text: "Install complete — pin dropped. Stay on the clock until you're back at the shop. Photos and notes still save here.",
+      });
       await loadJobs();
       await loadHome();
     } catch (error) {
@@ -1220,45 +1193,13 @@ export default function FieldApp() {
     }
   }
 
-  async function openReview(jobId: string) {
-    setReviewJobId(jobId);
-    setReviewBusy(true);
-    try {
-      const [mediaRes, issuesRes, crewRes] = await Promise.all([
-        fetch(`/api/inspired-closets/field/media?jobId=${jobId}`),
-        fetch(`/api/inspired-closets/field/issues?jobId=${jobId}`),
-        fetch(`/api/inspired-closets/field/crew?jobId=${jobId}`),
-      ]);
-      const mediaPayload = (await mediaRes.json()) as { ok?: boolean; media?: Media[] };
-      const issuesPayload = (await issuesRes.json()) as { ok?: boolean; issues?: Issue[] };
-      const crewPayload = (await crewRes.json()) as { ok?: boolean; crew?: CrewPerson[] };
-      if (mediaPayload.ok) setReviewMedia(mediaPayload.media ?? []);
-      if (issuesPayload.ok) setReviewIssues(issuesPayload.issues ?? []);
-      if (crewPayload.ok) setReviewCrew(crewPayload.crew ?? []);
-    } catch {
-      setReviewMedia([]);
-      setReviewIssues([]);
-      setReviewCrew([]);
-    } finally {
-      setReviewBusy(false);
-    }
-  }
-
   function openJobSurface(jobId: string) {
-    const job = myJobs.find((row) => row.id === jobId);
     setTab("jobs");
-    setJobsShowPacketFirst(true);
-    if (job && isPastJob(job)) {
-      void openReview(jobId);
-      return;
-    }
-    setSelectedId(jobId);
-    setReviewJobId(null);
+    openScheduledJob(jobId);
   }
 
   function openScheduledJob(jobId: string) {
     setSelectedId(jobId);
-    setReviewJobId(null);
     setJobsShowPacketFirst(true);
   }
 
@@ -1410,16 +1351,13 @@ export default function FieldApp() {
   }, [bellOpen, profileMenuOpen]);
 
   useEffect(() => {
-    if (!addInstallerOpen && !reviewJobId) return;
+    if (!addInstallerOpen) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setAddInstallerOpen(false);
-        setReviewJobId(null);
-      }
+      if (event.key === "Escape") setAddInstallerOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [addInstallerOpen, reviewJobId]);
+  }, [addInstallerOpen]);
 
   useEffect(() => {
     if (!highlightId || tab !== "today") return;
@@ -1430,7 +1368,7 @@ export default function FieldApp() {
   }, [highlightId, tab]);
 
   useLayoutEffect(() => {
-    if (tab !== "jobs" || !jobsShowPacketFirst || reviewJobId) return;
+    if (tab !== "jobs" || !jobsShowPacketFirst) return;
     const pinTop = () => {
       window.scrollTo(0, 0);
       document.getElementById("installer-job-packet")?.scrollIntoView({ block: "start" });
@@ -1438,7 +1376,7 @@ export default function FieldApp() {
     pinTop();
     const timer = window.setTimeout(pinTop, 120);
     return () => window.clearTimeout(timer);
-  }, [tab, jobsShowPacketFirst, selectedId, reviewJobId]);
+  }, [tab, jobsShowPacketFirst, selectedId]);
 
   const noticeEl = notice ? (
     <p
@@ -1896,6 +1834,7 @@ export default function FieldApp() {
 
           <section>
             <p className={styles.colLabel}>Past jobs</p>
+            <p className={styles.jobMeta}>Open any of these to add photos or notes.</p>
             {pastJobs.length === 0 ? (
               <p className={styles.empty}>Completed installs will show here.</p>
             ) : (
@@ -1905,7 +1844,7 @@ export default function FieldApp() {
                     key={job.id}
                     type="button"
                     className={`${styles.dashCard} ${styles.jobTile} ${styles.jobTilePast}`}
-                    onClick={() => void openReview(job.id)}
+                    onClick={() => openScheduledJob(job.id)}
                   >
                     <p className={styles.colLabel}>{stageLabel(job.stage)}</p>
                     <h3 className={styles.jobTileName}>{job.client?.name ?? "Job"}</h3>
@@ -2032,14 +1971,20 @@ export default function FieldApp() {
                           : "Just you so far."}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className={`${styles.btn} ${styles.packetBtn}`}
-                      disabled={busy || isPastJob(workJob)}
-                      onClick={() => void completeJob()}
-                    >
-                      Mark install complete
-                    </button>
+                    {isCompletedStage(workJob.stage) ? (
+                      <p className={styles.jobMeta}>
+                        Install marked complete. You can still add photos and notes anytime.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`${styles.btn} ${styles.packetBtn}`}
+                        disabled={busy}
+                        onClick={() => void completeJob()}
+                      >
+                        Mark install complete
+                      </button>
+                    )}
                   </section>
 
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
@@ -2118,7 +2063,7 @@ export default function FieldApp() {
                         <p className={styles.colLabel}>Document the job</p>
                         <h3 className={styles.packetSection}>Photos</h3>
                         <p className={styles.jobMeta}>
-                          Before, during, after — stays on this job for the office.
+                          Before, during, after — stays on this job. You can add more after install is done.
                         </p>
                       </div>
                       <span className={styles.packetCount}>{media.length}</span>
@@ -2200,7 +2145,7 @@ export default function FieldApp() {
                   <section className={styles.dashCard} id="packet-notes">
                     <h3 className={styles.packetSection}>Your notes</h3>
                     <p className={styles.jobMeta}>
-                      What you did, what’s left, what the customer said.
+                      What you did, what’s left, what the customer said. Editable after the install is marked done.
                     </p>
                     <textarea
                       className={`${styles.textarea} ${styles.packetNotesArea}`}
@@ -2264,7 +2209,7 @@ export default function FieldApp() {
             <section className={styles.dashCard}>
               <p className={styles.colLabel}>Job packet</p>
               <h2 className={styles.jobName}>No install on deck</h2>
-              <p className={styles.jobMeta}>When Des books you, the packet lands here.</p>
+              <p className={styles.jobMeta}>Open any job from the list — including past installs — to add photos or notes.</p>
             </section>
           )}
         </div>
@@ -2326,100 +2271,6 @@ export default function FieldApp() {
             >
               Send to Craig, Des, and Gavin
             </button>
-          </div>
-        </div>
-      ) : null}
-
-      {reviewJob ? (
-        <div
-          className={styles.modalBackdrop}
-          onClick={() => setReviewJobId(null)}
-          role="presentation"
-        >
-          <div
-            className={`${styles.modalCard} ${styles.modalWide}`}
-            role="dialog"
-            aria-labelledby="past-packet-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className={styles.modalHead}>
-              <div>
-                <p className={styles.colLabel}>Job packet</p>
-                <h2 id="past-packet-title" className={styles.packetTitle}>{reviewJob.client?.name ?? "Job"}</h2>
-                {reviewJob.client?.address ? (
-                  <p className={styles.packetLead}>
-                    <a
-                      href={`https://maps.google.com/?q=${encodeURIComponent(reviewJob.client.address)}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {reviewJob.client.address}
-                    </a>
-                  </p>
-                ) : null}
-                <p className={styles.packetLead}>
-                  {reviewJob.client?.phone ? (
-                    <a href={`tel:${reviewJob.client.phone}`}>{reviewJob.client.phone}</a>
-                  ) : null}
-                  {reviewJob.client?.phone && (reviewJob.install_date || reviewJob.visit_window) ? " · " : null}
-                  {[reviewJob.install_date ? formatDay(reviewJob.install_date) : null, reviewJob.visit_window]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              </div>
-              <button type="button" className={styles.modalClose} onClick={() => setReviewJobId(null)}>
-                Close
-              </button>
-            </div>
-            {reviewBusy ? <p className={styles.packetEmpty}>Loading packet…</p> : null}
-            <OfficePacket
-              notes={reviewJob.notes}
-              proposalUrl={reviewJob.proposal_url}
-              proposalFilename={reviewJob.proposal_filename}
-            />
-            <div className={styles.packetBlock}>
-              <h3 className={styles.packetSection}>Crew</h3>
-              <p className={styles.packetBody}>
-                {reviewCrew.length > 0 ? reviewCrew.map((person) => person.name).join(", ") : "Just you"}
-              </p>
-            </div>
-            <div className={styles.packetBlock}>
-              <h3 className={styles.packetSection}>Your notes</h3>
-              {reviewJob.field_notes ? (
-                <p className={styles.packetBody} style={{ whiteSpace: "pre-wrap" }}>{reviewJob.field_notes}</p>
-              ) : (
-                <p className={styles.packetEmpty}>None on this job.</p>
-              )}
-            </div>
-            <div className={styles.packetBlock}>
-              <h3 className={styles.packetSection}>Photos</h3>
-              {reviewMedia.length > 0 ? (
-                <div className={styles.mediaGrid}>
-                  {reviewMedia.map((item) =>
-                    item.public_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={item.id} src={item.public_url} alt={item.caption || item.kind} className={styles.mediaThumb} />
-                    ) : null,
-                  )}
-                </div>
-              ) : (
-                <p className={styles.packetEmpty}>No photos saved.</p>
-              )}
-            </div>
-            <div className={styles.packetBlock}>
-              <h3 className={styles.packetSection}>Issues</h3>
-              {reviewIssues.length === 0 ? (
-                <p className={styles.packetEmpty}>No issues reported.</p>
-              ) : (
-                <ul className={styles.packetNoteList}>
-                  {reviewIssues.map((issue) => (
-                    <li key={issue.id}>
-                      {issue.issue_type.replace(/_/g, " ")} — {issue.description}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           </div>
         </div>
       ) : null}

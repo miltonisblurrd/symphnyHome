@@ -230,6 +230,11 @@ function directionsHref(address: string) {
   return `https://maps.apple.com/?daddr=${dest}&dirflg=d`;
 }
 
+function phoneHref(phone: string, kind: "tel" | "sms") {
+  const digits = phone.replace(/[^\d+]/g, "");
+  return `${kind}:${digits}`;
+}
+
 type OfficeFact = { label: string; value: string };
 
 const OFFICE_SPLIT =
@@ -1928,8 +1933,13 @@ export default function FieldApp() {
                     {(workJob.client?.phone || workJob.client?.address) ? (
                       <div className={styles.packetActions}>
                         {workJob.client?.phone ? (
-                          <a className={styles.packetActionBtn} href={`tel:${workJob.client.phone}`}>
+                          <a className={styles.packetActionBtn} href={phoneHref(workJob.client.phone, "tel")}>
                             Call
+                          </a>
+                        ) : null}
+                        {workJob.client?.phone ? (
+                          <a className={styles.packetActionBtn} href={phoneHref(workJob.client.phone, "sms")}>
+                            Text
                           </a>
                         ) : null}
                         {workJob.client?.address ? (
@@ -1949,7 +1959,7 @@ export default function FieldApp() {
                     ) : null}
                     {workJob.client?.phone ? (
                       <p className={styles.packetAddress}>
-                        <a href={`tel:${workJob.client.phone}`}>{workJob.client.phone}</a>
+                        <a href={phoneHref(workJob.client.phone, "tel")}>{workJob.client.phone}</a>
                       </p>
                     ) : null}
                     {workJob.packet_order?.public_url ? (

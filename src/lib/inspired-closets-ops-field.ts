@@ -34,3 +34,5 @@ export function canAccessOps(role: string | null | undefined): boolean {
   if (!role) return true; // no staff session yet — allow ops (prototype password already passed)
   return !isInstallerRole(role);
 }
+
+export { isInventoryRole, filterNavHrefForRole, canAccessOpsPage } from "./inspired-closets-ops-roles";

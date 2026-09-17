@@ -113,11 +113,52 @@ a.buttonGhost {
   color: #146c43;
 }
 
-.noticeError {
-  background: #fff2f2;
-  border-color: rgba(180, 30, 30, 0.4);
-  color: #7a1212;
+.noticeWarn {
+  background: #fff6e8;
+  border-color: rgba(160, 100, 20, 0.35);
+  color: #7a4b10;
 }
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.badgeTentative {
+  background: #fff6e8;
+  border-color: rgba(160, 100, 20, 0.35);
+  color: #7a4b10;
+}
+
+.badgeConfirmed {
+  background: #e8f6ee;
+  border-color: rgba(22, 120, 70, 0.28);
+  color: #146c43;
+}
+
+.badgeCustom {
+  background: #fdeae6;
+  border-color: rgba(130, 31, 45, 0.25);
+  color: var(--ic-red);
+}
+
+.ageOk { color: var(--muted); }
+.ageWarn { color: #9a5b10; font-weight: 700; }
+.ageAlert { color: var(--ic-red); font-weight: 800; }
 
 .listToolbar {
   display: flex;
@@ -265,6 +306,25 @@ a.buttonGhost {
   background: var(--ic-black);
   color: var(--ic-white);
   border-color: var(--ic-black);
+}
+
+.tabCount {
+  display: inline-block;
+  margin-left: 0.35rem;
+  min-width: 1.1rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: #821f2d;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.tabActive .tabCount {
+  background: #fff;
+  color: #821f2d;
 }
 
 .tabAppointment {
@@ -461,6 +521,10 @@ a.buttonGhost {
   min-width: 80rem;
 }
 
+.docsTable {
+  min-width: 52rem;
+}
+
 .table th {
   text-align: left;
   font-size: 0.68rem;
@@ -591,6 +655,36 @@ a.buttonGhost {
 
 .summaryStrong {
   color: var(--ink);
+  font-weight: 800;
+}
+
+.deskMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: baseline;
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.monthChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.rtoRow td {
+  background: rgba(130, 31, 45, 0.06);
+}
+
+.sheetInput {
+  width: auto;
+  min-width: 0;
+}
+
+.soldTotal {
+  color: var(--ic-red);
   font-weight: 800;
 }
 

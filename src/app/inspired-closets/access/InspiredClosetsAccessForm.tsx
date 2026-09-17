@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { IC_INVENTORY_HOME, isInventoryRole } from "@/lib/inspired-closets-ops-roles";
 import styles from "./access.module.css";
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
@@ -11,6 +12,7 @@ export default function InspiredClosetsAccessForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") ?? "/inspired-closets/gavin";
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,16 +26,33 @@ export default function InspiredClosetsAccessForm() {
       const response = await fetch("/api/inspired-closets/access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          username: username.trim() || undefined,
+          password,
+        }),
       });
 
+      const payload = (await response.json()) as {
+        error?: string;
+        redirectTo?: string;
+        staff?: { role?: string };
+        mode?: string;
+      };
+
       if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
         setError(payload.error ?? "Could not sign in.");
         return;
       }
 
-      router.replace(returnTo);
+      let next = payload.redirectTo ?? returnTo;
+      if (isInventoryRole(payload.staff?.role)) {
+        // Inventory users always land on their module, even if returnTo was elsewhere.
+        next = IC_INVENTORY_HOME;
+      } else if (payload.mode === "prototype" && returnTo.startsWith("/inspired-closets")) {
+        next = returnTo;
+      }
+
+      router.replace(next);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
@@ -58,26 +77,37 @@ export default function InspiredClosetsAccessForm() {
             />
             <p className={styles.eyebrow}>Inspired Closets · private preview</p>
           </div>
-          <h1 className={styles.title}>Executive dashboard</h1>
+          <h1 className={styles.title}>Sign in</h1>
           <p className={styles.lead}>
-            This prototype is password-protected. Enter the access code Milton shared with you.
+            Office login with your username and password. Shared access code still works — leave
+            username blank and enter the code Milton shared.
           </p>
         </div>
         <form className={styles.form} onSubmit={onSubmit}>
+          <input
+            id="access-username"
+            className={styles.input}
+            type="text"
+            autoComplete="username"
+            aria-label="Username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="Username (optional for access code)"
+          />
           <input
             id="access-password"
             className={styles.input}
             type="password"
             autoComplete="current-password"
-            aria-label="Access code"
+            aria-label="Password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="Enter access code"
+            placeholder="Password or access code"
             required
           />
           {error ? <p className={styles.error}>{error}</p> : null}
           <button className={styles.button} type="submit" disabled={loading || !password.trim()}>
-            {loading ? "Checking…" : "View dashboard"}
+            {loading ? "Checking…" : "Sign in"}
           </button>
         </form>
       </div>

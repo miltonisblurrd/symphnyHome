@@ -1,10 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import OpsRoleGate from "@/components/inspired-closets/OpsRoleGate";
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
+import OpsNotificationBell from "@/components/inspired-closets/OpsNotificationBell";
+import {
+  IC_STAFF_NAME_COOKIE,
+  IC_STAFF_ROLE_COOKIE,
+} from "@/lib/inspired-closets-ops-field";
+import {
+  canAccessOpsPage,
+  filterNavHrefForRole,
+  IC_INVENTORY_HOME,
+  isInventoryRole,
+} from "@/lib/inspired-closets-ops-roles";
 import styles from "./ops-shell.module.css";
 
 type NavItem = { href: string; label: string; icon: string };
@@ -40,6 +51,16 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const row = document.cookie
+    .split("; ")
+    .filter(Boolean)
+    .find((entry) => entry.startsWith(`${name}=`));
+  if (!row) return null;
+  return decodeURIComponent(row.slice(name.length + 1));
+}
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/inspired-closets/ops") return pathname === href;
@@ -85,7 +106,41 @@ export default function OpsShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [staffRole, setStaffRole] = useState<string | null>(() => readCookie(IC_STAFF_ROLE_COOKIE));
+  const [staffName, setStaffName] = useState<string | null>(() => readCookie(IC_STAFF_NAME_COOKIE));
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    setStaffRole(readCookie(IC_STAFF_ROLE_COOKIE));
+    setStaffName(readCookie(IC_STAFF_NAME_COOKIE));
+  }, []);
+
+  useEffect(() => {
+    if (!isInventoryRole(staffRole)) return;
+    if (canAccessOpsPage(staffRole, pathname)) return;
+    router.replace(IC_INVENTORY_HOME);
+  }, [staffRole, pathname, router]);
+
+  const navGroups = useMemo(() => {
+    return NAV_GROUPS.map((group) => ({
+      ...group,
+      items: group.items.filter((item) => filterNavHrefForRole(staffRole, item.href)),
+    })).filter((group) => group.items.length > 0);
+  }, [staffRole]);
+
+  const inventoryOnly = isInventoryRole(staffRole);
+
+  async function signOut() {
+    setSigningOut(true);
+    try {
+      await fetch("/api/inspired-closets/access", { method: "DELETE" });
+      window.location.href = "/inspired-closets/access";
+    } catch {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <OpsRoleGate>
@@ -104,10 +159,11 @@ export default function OpsShell({
           <div className={styles.sidebarBrand}>
             <InspiredClosetsLogo />
             <p className={styles.osLabel}>Inspired Closets OS</p>
+            {inventoryOnly ? null : <OpsNotificationBell />}
           </div>
 
           <nav className={styles.sidebarNav}>
-            {NAV_GROUPS.map((group) => (
+            {navGroups.map((group) => (
               <div key={group.label} className={styles.navGroup}>
                 <p className={styles.navGroupLabel}>{group.label}</p>
                 <ul className={styles.navList}>
@@ -134,20 +190,37 @@ export default function OpsShell({
           </nav>
 
           <div className={styles.sidebarBottom}>
-            <Link
-              href="/inspired-closets/ops/designer-sales"
-              className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/ops/designer-sales") ? styles.sidebarLinkActive : ""}`}
-              onClick={() => setSidebarOpen(false)}
-            >
-              Craig’s dashboard
-            </Link>
-            <Link
-              href="/inspired-closets/gavin"
-              className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/gavin") ? styles.sidebarLinkActive : ""}`}
-              onClick={() => setSidebarOpen(false)}
-            >
-              Gavin dashboard
-            </Link>
+            {inventoryOnly ? null : (
+              <>
+                <Link
+                  href="/inspired-closets/ops/designer-sales"
+                  className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/ops/designer-sales") ? styles.sidebarLinkActive : ""}`}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  Craig’s dashboard
+                </Link>
+                <Link
+                  href="/inspired-closets/gavin"
+                  className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/gavin") ? styles.sidebarLinkActive : ""}`}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  Gavin dashboard
+                </Link>
+              </>
+            )}
+            {staffName || inventoryOnly ? (
+              <div className={styles.sidebarSession}>
+                {staffName ? <p className={styles.sidebarSessionName}>{staffName}</p> : null}
+                <button
+                  type="button"
+                  className={styles.signOutBtn}
+                  onClick={() => void signOut()}
+                  disabled={signingOut}
+                >
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </aside>
 

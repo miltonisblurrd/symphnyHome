@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import styles from "./ops-payroll.module.css";
 
@@ -52,7 +53,27 @@ type UnmatchedSo = {
   so_number: string | null;
   order_name: string | null;
   source_filename: string | null;
+  status?: string;
+  created_at?: string;
 };
+
+type StowPipe = {
+  lastAt: string | null;
+  count: number;
+};
+
+function formatSoWhen(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 type Movement = {
   id: string;
@@ -159,7 +180,8 @@ export default function OpsInventoryWorkspace() {
     excess: 0,
     valueCents: 0,
   });
-  const [filter, setFilter] = useState<"all" | "low">("all");
+  const [deskTab, setDeskTab] = useState<"all" | "low" | "sales" | "rto">("all");
+  const [partsFilter, setPartsFilter] = useState<"all" | "low">("all");
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
@@ -178,6 +200,7 @@ export default function OpsInventoryWorkspace() {
   const [attention, setAttention] = useState<Attention | null>(null);
   const [rtoQueue, setRtoQueue] = useState<RtoJob[]>([]);
   const [unmatchedSo, setUnmatchedSo] = useState<UnmatchedSo[]>([]);
+  const [stowPipe, setStowPipe] = useState<StowPipe | null>(null);
   const [soAttach, setSoAttach] = useState<Record<string, string>>({});
   const [soBusy, setSoBusy] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
@@ -203,7 +226,7 @@ export default function OpsInventoryWorkspace() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filter !== "all") params.set("filter", filter);
+      if (partsFilter === "low") params.set("filter", "low");
 
       const partsReq = fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`);
       const jobsReq = fetch("/api/inspired-closets/ops/jobs");
@@ -224,12 +247,19 @@ export default function OpsInventoryWorkspace() {
       const [jobsRes, attentionRes, soRes] = await Promise.all([
         jobsReq,
         attentionReq,
-        fetch("/api/inspired-closets/ops/stow-orders?status=unmatched"),
+        fetch("/api/inspired-closets/ops/stow-orders"),
       ]);
       const jobsPayload = (await jobsRes.json()) as ApiResponse;
       const attentionPayload = (await attentionRes.json()) as ApiResponse;
       const soPayload = (await soRes.json()) as { ok?: boolean; orders?: UnmatchedSo[] };
-      if (soPayload.ok) setUnmatchedSo(soPayload.orders ?? []);
+      if (soPayload.ok) {
+        const orders = soPayload.orders ?? [];
+        setUnmatchedSo(orders.filter((order) => (order.status ?? "unmatched") === "unmatched"));
+        setStowPipe({
+          lastAt: orders[0]?.created_at ?? null,
+          count: orders.length,
+        });
+      }
       if (jobsPayload.ok) {
         const openJobs = (jobsPayload.jobs ?? []).filter(
           (job) => !["closed", "cancelled"].includes(job.stage),
@@ -242,6 +272,7 @@ export default function OpsInventoryWorkspace() {
         );
       }
       if (attentionPayload.ok) setAttention(attentionPayload.attention ?? null);
+      setLoading(false);
     } catch (error) {
       setNotice({
         kind: "error",
@@ -249,7 +280,7 @@ export default function OpsInventoryWorkspace() {
       });
       setLoading(false);
     }
-  }, [filter]);
+  }, [partsFilter]);
 
   useEffect(() => {
     void load();
@@ -757,110 +788,142 @@ export default function OpsInventoryWorkspace() {
         </div>
       </section>
 
-      {unmatchedSo.length > 0 ? (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
-          <p className={styles.detailSectionTitle}>Stow sales orders — pick a job</p>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            These landed from Gmail and could not be matched. Attach them. Frank still uploads the
-            summary / slip as usual.
+      <div className={styles.listToolbar}>
+        <nav className={styles.tabs} aria-label="Inventory views">
+          {(
+            [
+              ["all", "All parts", null],
+              ["low", "Low stock", summary.lowStock || null],
+              ["sales", "Sales orders", unmatchedSo.length || null],
+              ["rto", "Ready to order", rtoQueue.length || null],
+            ] as const
+          ).map(([id, label, count]) => (
+            <button
+              key={id}
+              type="button"
+              className={`${styles.tab} ${deskTab === id ? styles.tabActive : ""}`}
+              onClick={() => {
+                setDeskTab(id);
+                if (id === "all" || id === "low") setPartsFilter(id);
+              }}
+            >
+              {label}
+              {count ? <span className={styles.tabCount}>{count}</span> : null}
+            </button>
+          ))}
+        </nav>
+        {deskTab === "all" || deskTab === "low" ? (
+          <div className={styles.toolbarRight}>
+            <p className={styles.updatedStamp}>
+              {listUpdatedAt
+                ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}`
+                : loading
+                  ? "Updating…"
+                  : "—"}
+            </p>
+            <button
+              type="button"
+              className={styles.buttonPrimary}
+              onClick={() => setSetupOpen(true)}
+            >
+              Add parts / upload count
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {deskTab === "sales" ? (
+        <section className={styles.panel}>
+          <p className={styles.detailSectionTitle}>
+            {unmatchedSo.length > 0 ? "Stow sales orders — pick a job" : "Stow sales orders"}
           </p>
-          <ul className={styles.pulseList}>
-            {unmatchedSo.map((order) => (
-              <li key={order.id} style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
-                <span>
-                  {order.so_number ? `SO ${order.so_number}` : order.source_filename ?? "Sales order"}
-                  {order.order_name ? ` · ${order.order_name}` : ""}
-                </span>
-                <select
-                  className={styles.input}
-                  value={soAttach[order.id] ?? ""}
-                  onChange={(event) =>
-                    setSoAttach((current) => ({ ...current, [order.id]: event.target.value }))
-                  }
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            Gmail posts Order PDFs every 5 minutes.
+            {stowPipe?.lastAt
+              ? ` Last received ${formatSoWhen(stowPipe.lastAt)} · ${stowPipe.count} in the OS.`
+              : " None received yet."}{" "}
+            Frank uploads the Studio PDF and the packing list in Receiving.
+          </p>
+          {stowPipe?.lastAt && Date.now() - new Date(stowPipe.lastAt).getTime() > 5 * 24 * 60 * 60 * 1000 ? (
+            <p className={styles.empty}>
+              No new sales order in 5 days. If Gmail has newer Stow Order mail, run
+              processStowSalesOrders in Apps Script — the timer may have stopped.
+            </p>
+          ) : null}
+          {unmatchedSo.length > 0 ? (
+            <ul className={styles.pulseList}>
+              {unmatchedSo.map((order) => (
+                <li
+                  key={order.id}
+                  style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}
                 >
-                  <option value="">Choose job…</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.client?.name ?? "Job"} · {job.stage}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className={styles.buttonGhost}
-                  disabled={!soAttach[order.id] || soBusy === order.id}
-                  onClick={() => void attachSalesOrder(order.id)}
-                >
-                  {soBusy === order.id ? "Saving…" : "Attach"}
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <span>
+                    {order.so_number ? `SO ${order.so_number}` : order.source_filename ?? "Sales order"}
+                    {order.order_name ? ` · ${order.order_name}` : ""}
+                    {order.created_at ? ` · ${formatSoWhen(order.created_at)}` : ""}
+                  </span>
+                  <select
+                    className={styles.input}
+                    value={soAttach[order.id] ?? ""}
+                    onChange={(event) =>
+                      setSoAttach((current) => ({ ...current, [order.id]: event.target.value }))
+                    }
+                  >
+                    <option value="">Choose job…</option>
+                    {jobs.map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {job.client?.name ?? "Job"} · {job.stage}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={styles.buttonGhost}
+                    disabled={!soAttach[order.id] || soBusy === order.id}
+                    onClick={() => void attachSalesOrder(order.id)}
+                  >
+                    {soBusy === order.id ? "Saving…" : "Attach"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.empty}>No unmatched sales orders. New Stow mail lands here to attach.</p>
+          )}
         </section>
       ) : null}
 
-      {rtoQueue.length > 0 ? (
-        <section className={styles.panel} style={{ marginBottom: "1rem" }}>
+      {deskTab === "rto" ? (
+        <section className={styles.panel}>
           <p className={styles.detailSectionTitle}>Ready to order</p>
           <p className={styles.empty} style={{ marginTop: 0 }}>
             Craig marked these RTO. Upload the product summary on the project so stock can be
             assigned.
           </p>
-          <ul className={styles.pulseList}>
-            {rtoQueue.map((job) => (
-              <li key={job.id}>
-                <a href={`/inspired-closets/ops/projects?id=${job.id}`}>
-                  {job.client?.name ?? "Job"}
-                </a>
-                {job.designer?.name ? ` · ${job.designer.name}` : ""}
-                {job.summary_count ? " · summary uploaded, not assigned" : " · needs summary"}
-              </li>
-            ))}
-          </ul>
+          {rtoQueue.length > 0 ? (
+            <ul className={styles.pulseList}>
+              {rtoQueue.map((job) => (
+                <li key={job.id}>
+                  <a href={`/inspired-closets/ops/projects?id=${job.id}`}>
+                    {job.client?.name ?? "Job"}
+                  </a>
+                  {job.designer?.name ? ` · ${job.designer.name}` : ""}
+                  {job.summary_count ? " · summary uploaded, not assigned" : " · needs summary"}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.empty}>No jobs waiting on a product summary.</p>
+          )}
         </section>
       ) : null}
 
-      <div className={styles.listToolbar}>
-        <nav className={styles.tabs} aria-label="Inventory views">
-          {(
-            [
-              ["all", "All parts"],
-              ["low", "Low stock"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`${styles.tab} ${filter === id ? styles.tabActive : ""}`}
-              onClick={() => setFilter(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-        <div className={styles.toolbarRight}>
-          <p className={styles.updatedStamp}>
-            {listUpdatedAt
-              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}`
-              : loading
-                ? "Updating…"
-                : "—"}
-          </p>
-          <button
-            type="button"
-            className={styles.buttonPrimary}
-            onClick={() => setSetupOpen(true)}
-          >
-            Add parts / upload count
-          </button>
-        </div>
-      </div>
-
+      {deskTab === "all" || deskTab === "low" ? (
       <section className={styles.panel}>
         <div className={styles.summaryRow}>
           <span>
@@ -1293,6 +1356,7 @@ export default function OpsInventoryWorkspace() {
         ) : null}
 
       </section>
+      ) : null}
 
       {setupOpen ? (
         <div

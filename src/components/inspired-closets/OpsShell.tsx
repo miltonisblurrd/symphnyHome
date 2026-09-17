@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import OpsRoleGate from "@/components/inspired-closets/OpsRoleGate";
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
-import OpsNotificationBell from "@/components/inspired-closets/OpsNotificationBell";
 import {
   IC_STAFF_NAME_COOKIE,
   IC_STAFF_ROLE_COOKIE,
@@ -159,7 +158,6 @@ export default function OpsShell({
           <div className={styles.sidebarBrand}>
             <InspiredClosetsLogo />
             <p className={styles.osLabel}>Inspired Closets OS</p>
-            {inventoryOnly ? null : <OpsNotificationBell />}
           </div>
 
           <nav className={styles.sidebarNav}>

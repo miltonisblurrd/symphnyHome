@@ -6,6 +6,7 @@
 import { getSupabaseAdmin } from "@/db/client";
 import {
   codesMatch,
+  findJobFromFilename,
   findJobId,
   linkItemToOs,
   notifyReceiving,
@@ -387,7 +388,12 @@ export function dropshipLinesFromSummary(lines: DropshipSummaryLine[]): Dropship
 export async function findJobForStudioOrder(input: {
   orderName: string | null;
   soNumber: string | null;
+  filename?: string | null;
 }): Promise<string | null> {
+  if (input.filename) {
+    const fromFile = await findJobFromFilename(input.filename);
+    if (fromFile) return fromFile;
+  }
   const supabase = getSupabaseAdmin();
   if (input.soNumber) {
     const { data } = await supabase
@@ -669,25 +675,31 @@ export async function ingestStudioOrderFromReceiving(input: {
       filename: input.filename,
       mimeType: input.mimeType,
       bytes: input.bytes,
+      allowPartial: true,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not read Studio summary.";
-    await supabase.from("ic_shipments").insert({
-      notice: studioNotice(input.filename.replace(/\.[^.]+$/, ""), null),
-      vendor: "stow",
-      status: "ready",
-      source_filename: input.filename,
-      storage_path: path,
-      public_url: publicUrl,
-      parse_error: message,
-      parse_quality: { source: STUDIO_SOURCE },
-      created_by: input.actorId,
-    });
-    throw new Error(message);
+  } catch {
+    parsed = {
+      order_name: input.filename.replace(/\.[^.]+$/, "") || null,
+      order_id: null,
+      so_number: null,
+      purchased_on: null,
+      ship_date: null,
+      item_count: 0,
+      total_cents: 0,
+      lines: [],
+      parse_quality: { source: STUDIO_SOURCE, filename: input.filename, error: "parse_failed" },
+    };
+  }
+  if (!parsed.order_name) {
+    parsed = {
+      ...parsed,
+      order_name: input.filename.replace(/\.[^.]+$/, "") || null,
+    };
   }
   const jobId = await findJobForStudioOrder({
     orderName: parsed.order_name,
     soNumber: parsed.so_number,
+    filename: input.filename,
   });
 
   let summaryId: string | null = null;
@@ -750,8 +762,8 @@ export async function ingestStudioOrderFromReceiving(input: {
   const catalog = dropship.imported + dropship.updated + dropship.skipped;
   const orderLabel = parsed.order_name ?? parsed.so_number ?? input.filename;
   const matchNote = jobId
-    ? "Matched the project."
-    : "Could not match a project yet — Bryant can still scan the list.";
+    ? `Attached to the job from ${input.filename}.`
+    : `No job matched ${input.filename} yet — Bryant can still scan the list.`;
   const message = `Studio summary ${orderLabel}: ${lineCount} lines read, ${catalog} catalog lines on Receiving. ${matchNote}`;
 
   return {

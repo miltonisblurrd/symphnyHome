@@ -7,7 +7,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getSupabaseAdmin } from "@/db/client";
 import { applyStockMovement } from "@/lib/inspired-closets-ops-inventory";
 import { extractPdfText } from "@/lib/inspired-closets-ops-pdf-text";
-import { looksLikePackingSlip, looksLikeProductSummary } from "@/lib/inspired-closets-ops-product-summary-text";
+import {
+  looksLikePackingSlip,
+  looksLikeProductSummary,
+  parseStowProductSummaryText,
+} from "@/lib/inspired-closets-ops-product-summary-text";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 import { codeKeys, codesMatch } from "@/lib/inspired-closets-ops-scan-codes";
 
@@ -118,6 +122,36 @@ export function clientHintFromSlip(custRef?: string | null, jobName?: string | n
     .map((word) => word.trim())
     .filter((word) => word && !SKIP_JOB_WORDS.has(word.toLowerCase()) && !/^\d+$/.test(word));
   return words[words.length - 1] || words[0] || "";
+}
+
+/**
+ * Frank names files after the client: SKINNER-090426.pdf, STOW-JOHNSON.pdf, Wright_072426.pdf.
+ */
+export function clientHintFromFilename(filename: string | null | undefined): string {
+  const base = String(filename ?? "")
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.[^.]+$/, "")
+    .trim();
+  if (!base) return "";
+  const withoutStamp = base.replace(/^\d{8}[_-]?\d{0,6}[_-]*/, "");
+  const stripped = withoutStamp.replace(
+    /^(stow|studio|summary|product|packing|pack|slip|order|so)[_-\s]+/i,
+    "",
+  );
+  const hint = clientHintFromSlip(stripped, stripped.split(/[-_\s]/)[0] ?? stripped);
+  if (hint && hint.length >= 2 && !/^\d+$/.test(hint)) return hint;
+  return clientHintFromSlip(withoutStamp, withoutStamp.split(/[-_\s]/)[0] ?? withoutStamp);
+}
+
+export async function findJobFromFilename(filename: string | null | undefined): Promise<string | null> {
+  const hint = clientHintFromFilename(filename);
+  if (!hint) return null;
+  return findJobId({
+    item_number: "",
+    qty: 1,
+    cust_ref: hint,
+    job_name: hint,
+  });
 }
 
 export function lineStatus(received: number, qty: number, damaged = 0, forced?: string): string {
@@ -362,7 +396,7 @@ export async function linkItemToOs(
   const partId = options.createPart === false
     ? await findPartId([item.item_number, item.vendor_sku ?? ""])
     : await ensurePartForSlipItem(item);
-  const jobId = await findJobId(item);
+  const jobId = item.job_id || (await findJobId(item));
   return { job_id: jobId, part_id: partId };
 }
 
@@ -579,10 +613,66 @@ Return ONLY JSON: {"notice": string|null, "ship_date": "MM/DD/YYYY"|null, "vendo
 Each item: item_number (SKU / barcode digits), so_number, cust_ref (client name as printed, often NAME_MMDDYY), job_name (client last name), project_number, description, qty (integer), container_id (pallet), source_page, vendor_sku.
 Do not invent SKUs. Qty defaults to 1 if missing. cust_ref is the client label Frank wrote on the order.`;
 
+function stampSlipItems(
+  items: ParsedSlipItem[],
+  filename: string,
+  jobId: string | null,
+): ParsedSlipItem[] {
+  const hint = clientHintFromFilename(filename);
+  return items.map((item) => {
+    const hasOwnJob = Boolean(item.cust_ref || item.job_name);
+    return {
+      ...item,
+      cust_ref: item.cust_ref || hint || null,
+      job_name: item.job_name || hint || null,
+      job_id: item.job_id || (hasOwnJob ? null : jobId) || null,
+    };
+  });
+}
+
+function slipFromStudioSummary(
+  filename: string,
+  text: string,
+  pages: number,
+): {
+  notice: string | null;
+  ship_date: string | null;
+  vendor: string;
+  total_pages: number;
+  items: ParsedSlipItem[];
+  parse_quality: Record<string, unknown>;
+} | null {
+  if (!looksLikeProductSummary(text)) return null;
+  const summary = parseStowProductSummaryText(text, filename);
+  if (!summary || summary.lines.length === 0) return null;
+  const hint = clientHintFromFilename(filename) || jobNameFromCustRef(summary.order_name);
+  return {
+    notice: summary.order_name || summary.so_number,
+    ship_date: summary.ship_date,
+    vendor: "stow",
+    total_pages: pages,
+    items: summary.lines.map((line) => ({
+      item_number: line.item_code,
+      so_number: summary.so_number,
+      cust_ref: hint || summary.order_name,
+      job_name: hint || jobNameFromCustRef(summary.order_name),
+      description: [line.description, line.product_type, line.finish].filter(Boolean).join(" ") || null,
+      qty: line.qty,
+      vendor_sku: /^\d{6,}$/.test(line.item_code) ? line.item_code : null,
+    })),
+    parse_quality: {
+      source: "studio-order-table",
+      total_items: summary.lines.length,
+      filename,
+    },
+  };
+}
+
 export async function parsePackingSlip(input: {
   filename: string;
   mimeType: string;
   bytes: Buffer;
+  jobId?: string | null;
 }): Promise<{
   notice: string | null;
   ship_date: string | null;
@@ -591,97 +681,138 @@ export async function parsePackingSlip(input: {
   items: ParsedSlipItem[];
   parse_quality: Record<string, unknown>;
 }> {
+  const fileHint = clientHintFromFilename(input.filename);
+  let pages = 0;
+  let extractedText = "";
+  try {
+    const extracted = await extractPdfText(input.bytes);
+    extractedText = extracted.text;
+    pages = extracted.pages;
+  } catch {
+    // Photos / locked PDFs go to the model.
+  }
+
+  const fromStudio = extractedText ? slipFromStudioSummary(input.filename, extractedText, pages) : null;
+  if (fromStudio) {
+    return {
+      ...fromStudio,
+      items: stampSlipItems(fromStudio.items, input.filename, input.jobId ?? null),
+    };
+  }
+
+  const empty = {
+    notice: fileHint || null,
+    ship_date: null as string | null,
+    vendor: "stow",
+    total_pages: pages,
+    items: [] as ParsedSlipItem[],
+    parse_quality: {
+      total_items: 0,
+      filename: input.filename,
+      client_hint: fileHint || null,
+    } as Record<string, unknown>,
+  };
+
   const apiKey =
     process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim() ||
     process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return empty;
 
-  if (!apiKey) {
-    throw new Error("Packing-slip parse needs INSPIRED_CLOSETS_ANTHROPIC_API_KEY.");
-  }
+  try {
+    const client = new Anthropic({ apiKey });
+    const model =
+      process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() ||
+      process.env.ANTHROPIC_MODEL?.trim() ||
+      "claude-sonnet-5";
+    const isPdf = input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
+    const mediaType = isPdf
+      ? "application/pdf"
+      : input.mimeType.startsWith("image/")
+        ? input.mimeType
+        : "application/pdf";
 
-  const client = new Anthropic({ apiKey });
-  const model =
-    process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() ||
-    process.env.ANTHROPIC_MODEL?.trim() ||
-    "claude-sonnet-5";
-  const isPdf = input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
-  const mediaType = isPdf
-    ? "application/pdf"
-    : input.mimeType.startsWith("image/")
-      ? input.mimeType
-      : "application/pdf";
-
-  const content: Anthropic.MessageCreateParams["messages"][0]["content"] = [
-    isPdf
-      ? {
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: "application/pdf",
-            data: input.bytes.toString("base64"),
+    const content: Anthropic.MessageCreateParams["messages"][0]["content"] = [
+      isPdf
+        ? {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: input.bytes.toString("base64"),
+            },
+          }
+        : {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+              data: input.bytes.toString("base64"),
+            },
           },
-        }
-      : {
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-            data: input.bytes.toString("base64"),
-          },
-        },
-    {
-      type: "text",
-      text: `Extract every line from this packing slip (${input.filename}). JSON only.`,
-    },
-  ];
+      {
+        type: "text",
+        text: `Extract every line from this packing slip (${input.filename}). Client on the filename is ${fileHint || "unknown"}. JSON only.`,
+      },
+    ];
 
-  const message = await client.messages.create({
-    model,
-    max_tokens: 16000,
-    system: PARSE_SYSTEM,
-    messages: [{ role: "user", content }],
-  });
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-  const jsonText = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  const parsed = JSON.parse(jsonText) as {
-    notice?: string | null;
-    ship_date?: string | null;
-    vendor?: string;
-    total_pages?: number;
-    items?: ParsedSlipItem[];
-  };
-  const items = (parsed.items ?? [])
-    .map((row) => ({
-      item_number: String(row.item_number ?? "").trim(),
-      so_number: row.so_number ? String(row.so_number) : null,
-      cust_ref: row.cust_ref ? String(row.cust_ref) : null,
-      job_name: row.job_name ? String(row.job_name) : jobNameFromCustRef(String(row.cust_ref ?? "")),
-      project_number: row.project_number ? String(row.project_number) : null,
-      description: row.description ? String(row.description) : null,
-      qty: Math.max(1, Math.round(Number(row.qty) || 1)),
-      container_id: row.container_id ? String(row.container_id) : null,
-      source_page: row.source_page ? Number(row.source_page) : null,
-      vendor_sku: row.vendor_sku ? String(row.vendor_sku) : null,
-    }))
-    .filter((row) => row.item_number);
-  if (items.length === 0) {
-    throw new Error("Parser found no line items. Use the original PDF, not a photo.");
+    const message = await client.messages.create({
+      model,
+      max_tokens: 16000,
+      system: PARSE_SYSTEM,
+      messages: [{ role: "user", content }],
+    });
+    const text = message.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+    const jsonText = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const parsed = JSON.parse(jsonText) as {
+      notice?: string | null;
+      ship_date?: string | null;
+      vendor?: string;
+      total_pages?: number;
+      items?: ParsedSlipItem[];
+    };
+    const items = stampSlipItems(
+      (parsed.items ?? [])
+        .map((row) => ({
+          item_number: String(row.item_number ?? "").trim(),
+          so_number: row.so_number ? String(row.so_number) : null,
+          cust_ref: row.cust_ref ? String(row.cust_ref) : null,
+          job_name: row.job_name ? String(row.job_name) : jobNameFromCustRef(String(row.cust_ref ?? "")),
+          project_number: row.project_number ? String(row.project_number) : null,
+          description: row.description ? String(row.description) : null,
+          qty: Math.max(1, Math.round(Number(row.qty) || 1)),
+          container_id: row.container_id ? String(row.container_id) : null,
+          source_page: row.source_page ? Number(row.source_page) : null,
+          vendor_sku: row.vendor_sku ? String(row.vendor_sku) : null,
+        }))
+        .filter((row) => row.item_number),
+      input.filename,
+      input.jobId ?? null,
+    );
+    return {
+      notice: parsed.notice ? String(parsed.notice) : fileHint || null,
+      ship_date: parsed.ship_date ? String(parsed.ship_date) : null,
+      vendor: parsed.vendor || "stow",
+      total_pages: Number(parsed.total_pages) || pages,
+      items,
+      parse_quality: {
+        total_items: items.length,
+        missing_cust_ref: items.filter((item) => !item.cust_ref).length,
+        missing_description: items.filter((item) => !item.description).length,
+        client_hint: fileHint || null,
+      },
+    };
+  } catch (error) {
+    return {
+      ...empty,
+      parse_quality: {
+        ...empty.parse_quality,
+        error: error instanceof Error ? error.message : "parse_failed",
+      },
+    };
   }
-  return {
-    notice: parsed.notice ? String(parsed.notice) : null,
-    ship_date: parsed.ship_date ? String(parsed.ship_date) : null,
-    vendor: parsed.vendor || "stow",
-    total_pages: Number(parsed.total_pages) || 0,
-    items,
-    parse_quality: {
-      total_items: items.length,
-      missing_cust_ref: items.filter((i) => !i.cust_ref).length,
-      missing_description: items.filter((i) => !i.description).length,
-    },
-  };
 }
 
 export function fixtureItemsToParsed(

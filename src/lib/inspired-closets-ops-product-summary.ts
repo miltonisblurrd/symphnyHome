@@ -182,39 +182,55 @@ export async function parseProductSummary(input: {
   filename: string;
   mimeType: string;
   bytes: Buffer;
+  allowPartial?: boolean;
 }): Promise<ParsedProductSummary> {
+  const allowPartial = Boolean(input.allowPartial);
+  const fallback = parsedProductSummaryFromUnknown(
+    { order_name: input.filename.replace(/\.[^.]+$/, "") || null, lines: [] },
+    input.filename,
+  );
   const isPdf = input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
   if (isPdf) {
-    let extracted: { text: string; pages: number };
+    let extracted: { text: string; pages: number } | null = null;
     try {
       extracted = await extractPdfText(input.bytes);
     } catch {
-      throw new Error(FRANK_SUMMARY_ERROR);
+      extracted = null;
     }
-    if (looksLikePackingSlip(extracted.text) && !looksLikeProductSummary(extracted.text)) {
-      throw new Error(PACKING_SLIP_ON_JOB_ERROR);
+    if (extracted) {
+      if (
+        looksLikePackingSlip(extracted.text) &&
+        !looksLikeProductSummary(extracted.text) &&
+        !allowPartial
+      ) {
+        throw new Error(PACKING_SLIP_ON_JOB_ERROR);
+      }
+      const local = parseStowProductSummaryText(extracted.text, input.filename);
+      if (local && (summaryParseIsUsable(local) || (allowPartial && local.lines.length > 0))) {
+        local.parse_quality = {
+          ...local.parse_quality,
+          pages: extracted.pages,
+          chars: extracted.text.length,
+        };
+        return local;
+      }
     }
-    const local = parseStowProductSummaryText(extracted.text, input.filename);
-    if (local && summaryParseIsUsable(local)) {
-      local.parse_quality = {
-        ...local.parse_quality,
-        pages: extracted.pages,
-        chars: extracted.text.length,
-      };
-      return local;
+    try {
+      return await parseProductSummaryWithModel({ ...input, asPdf: true });
+    } catch (error) {
+      const local = extracted ? parseStowProductSummaryText(extracted.text, input.filename) : null;
+      if (local && local.lines.length > 0) return local;
+      if (allowPartial) {
+        return {
+          ...fallback,
+          parse_quality: {
+            ...fallback.parse_quality,
+            error: error instanceof Error ? error.message : "parse_failed",
+          },
+        };
+      }
+      throw error instanceof Error ? error : new Error(FRANK_SUMMARY_ERROR);
     }
-    if (!extracted.text.trim() || extracted.text.replace(/\s/g, "").length < 80) {
-      throw new Error(FRANK_SUMMARY_ERROR);
-    }
-    if (looksLikePackingSlip(extracted.text)) {
-      throw new Error(PACKING_SLIP_ON_JOB_ERROR);
-    }
-    if (!looksLikeProductSummary(extracted.text)) {
-      throw new Error(FRANK_SUMMARY_ERROR);
-    }
-    throw new Error(
-      `Could not read every line from ${input.filename}. Re-export the Product Summary from Studio and try again.`,
-    );
   }
 
   return parseProductSummaryWithModel(input);
@@ -224,6 +240,7 @@ async function parseProductSummaryWithModel(input: {
   filename: string;
   mimeType: string;
   bytes: Buffer;
+  asPdf?: boolean;
 }): Promise<ParsedProductSummary> {
   const apiKey =
     process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim() ||
@@ -237,6 +254,26 @@ async function parseProductSummaryWithModel(input: {
     process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() ||
     process.env.ANTHROPIC_MODEL?.trim() ||
     "claude-sonnet-5";
+  const asPdf = Boolean(input.asPdf) || input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
+  const fileBlock: Anthropic.MessageCreateParams["messages"][0]["content"][number] = asPdf
+    ? {
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: input.bytes.toString("base64"),
+        },
+      }
+    : {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: (input.mimeType.startsWith("image/")
+            ? input.mimeType
+            : "image/jpeg") as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+          data: input.bytes.toString("base64"),
+        },
+      };
 
   const stream = client.messages.stream({
     model,
@@ -246,16 +283,7 @@ async function parseProductSummaryWithModel(input: {
       {
         role: "user",
         content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: (input.mimeType.startsWith("image/")
-                ? input.mimeType
-                : "image/jpeg") as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-              data: input.bytes.toString("base64"),
-            },
-          },
+          fileBlock,
           {
             type: "text",
             text: `Extract every line from this product summary (${input.filename}). JSON only.`,

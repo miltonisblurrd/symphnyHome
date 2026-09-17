@@ -121,6 +121,13 @@ export async function GET() {
     ...(stowResult.error ? [] : (stowResult.data ?? []).map((row) => row.job_id)),
     ...(summaryResult.error ? [] : (summaryResult.data ?? []).map((row) => row.job_id)),
     ...[...slipMeta.values()].map((row) => row.jobId),
+    ...slips.map((row) => {
+      const quality =
+        row.parse_quality && typeof row.parse_quality === "object" && !Array.isArray(row.parse_quality)
+          ? (row.parse_quality as Record<string, unknown>)
+          : {};
+      return typeof quality.job_id === "string" ? quality.job_id : null;
+    }),
   ]);
 
   if (!stowResult.error) {
@@ -166,11 +173,11 @@ export async function GET() {
 
   for (const row of slips) {
     const meta = slipMeta.get(row.id);
-    const jobId = meta?.jobId ?? null;
     const quality =
       row.parse_quality && typeof row.parse_quality === "object" && !Array.isArray(row.parse_quality)
         ? (row.parse_quality as Record<string, unknown>)
         : {};
+    const jobId = meta?.jobId ?? (typeof quality.job_id === "string" ? quality.job_id : null);
     const isStudio =
       quality.source === "studio_order" ||
       Boolean(row.notice && /^(STUDIO|DROP)-/i.test(String(row.notice)));

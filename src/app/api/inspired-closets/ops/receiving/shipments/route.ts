@@ -12,6 +12,8 @@ import {
 } from "@/lib/inspired-closets-ops-dropship-receiving";
 import {
   fixtureItemsToParsed,
+  findJobFromFilename,
+  clientHintFromFilename,
   linkItemToOs,
   loadShipmentItemRows,
   missingReceivingTable,
@@ -45,7 +47,7 @@ function toIsoDate(value: string | null): string | null {
 async function insertItems(
   fallbackShipmentId: string,
   items: ParsedSlipItem[],
-  options?: { routeByJob?: boolean },
+  options?: { routeByJob?: boolean; fallbackJobId?: string | null },
 ): Promise<{
   imported: number;
   unassigned: string[];
@@ -94,7 +96,7 @@ async function insertItems(
 
   for (const item of items) {
     const links = await linkItemToOs(item, { createPart: true });
-    const jobId = item.job_id || links.job_id;
+    const jobId = item.job_id || links.job_id || options?.fallbackJobId || null;
     const destId = await destForJob(jobId);
     if (destId !== fallbackShipmentId) jobShipmentIds.add(destId);
     else fallbackCount += 1;
@@ -408,15 +410,23 @@ export async function POST(request: Request) {
     }
 
     try {
+      const filenameJobId = await findJobFromFilename(file.name);
       const parsed = await parsePackingSlip({
         filename: file.name,
         mimeType: file.type || (ext === "pdf" ? "application/pdf" : "image/jpeg"),
         bytes,
+        jobId: filenameJobId,
       });
-      const inserted = await insertItems(ship.id, parsed.items, { routeByJob: true });
+      const inserted = await insertItems(ship.id, parsed.items, {
+        routeByJob: true,
+        fallbackJobId: filenameJobId,
+      });
       await warnUnassigned(parsed.notice, inserted.unassigned);
       for (const route of inserted.jobRoutes) {
         await absorbJobItemsOntoShipment(route.jobId, route.shipmentId);
+      }
+      if (filenameJobId) {
+        await absorbJobItemsOntoShipment(filenameJobId, ship.id);
       }
       if (inserted.jobShipmentIds.length > 0) {
         await appendPackingListMeta(inserted.jobShipmentIds, {
@@ -426,6 +436,13 @@ export async function POST(request: Request) {
           public_url: publicUrl,
         });
       }
+
+      const hint = clientHintFromFilename(file.name);
+      const matchNote = filenameJobId
+        ? `Attached to the job from ${file.name}.`
+        : hint
+          ? `Saved ${file.name}. No open job matched ${hint} yet.`
+          : `Saved ${file.name}.`;
 
       if (inserted.fallbackCount === 0 && inserted.imported + inserted.jobShipmentIds.length > 0) {
         await pruneEmptyShipment(ship.id);
@@ -438,27 +455,29 @@ export async function POST(request: Request) {
         return NextResponse.json({
           ok: true,
           kind: "packing_list",
+          job_id: filenameJobId,
           shipment: primary ?? ship,
           imported: inserted.imported,
           unassigned: inserted.unassigned,
           merged_into: inserted.jobShipmentIds,
-          message:
-            inserted.jobShipmentIds.length > 0
-              ? `Read ${inserted.imported} packing-list lines onto the job receiving list Bryant already has.`
-              : `Read ${inserted.imported} lines from the packing list.`,
+          message: `Read ${inserted.imported} packing-list lines. ${matchNote}`,
         });
       }
 
       const { data: updated } = await supabase
         .from("ic_shipments")
         .update({
-          notice: parsed.notice,
+          notice: parsed.notice || hint || null,
           ship_date: toIsoDate(parsed.ship_date),
           vendor: parsed.vendor || "stow",
           status: "ready",
           total_pages: parsed.total_pages,
-          parse_quality: parsed.parse_quality,
-          parse_error: null,
+          parse_quality: {
+            ...parsed.parse_quality,
+            job_id: filenameJobId,
+            client_hint: hint || null,
+          },
+          parse_error: parsed.items.length === 0 ? "No line items found in this PDF." : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", ship.id)
@@ -467,30 +486,36 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         kind: "packing_list",
+        job_id: filenameJobId,
         shipment: updated ?? ship,
         imported: inserted.imported,
         unassigned: inserted.unassigned,
         merged_into: inserted.jobShipmentIds,
-        message:
-          inserted.jobShipmentIds.length > 0
-            ? `Read ${inserted.imported} packing-list lines. Job pieces went onto that job's receiving list; leftover truck lines stayed on this slip.`
-            : `Read ${inserted.imported} lines from the packing list.`,
+        message: `Read ${inserted.imported} packing-list lines. ${matchNote}`,
       });
     } catch (parseError) {
       const message =
         parseError instanceof Error ? parseError.message : "Could not read packing slip.";
+      const hint = clientHintFromFilename(file.name);
+      const filenameJobId = await findJobFromFilename(file.name);
       await supabase
         .from("ic_shipments")
         .update({
+          notice: hint || null,
           status: "ready",
           parse_error: message,
+          parse_quality: { job_id: filenameJobId, client_hint: hint || null },
           updated_at: new Date().toISOString(),
         })
         .eq("id", ship.id);
-      return NextResponse.json(
-        { ok: false, error: message, shipment_id: ship.id },
-        { status: 400 },
-      );
+      return NextResponse.json({
+        ok: true,
+        kind: "packing_list",
+        job_id: filenameJobId,
+        shipment: { id: ship.id },
+        imported: 0,
+        message: `Saved ${file.name}. ${filenameJobId ? `Attached to the job from the filename.` : message}`,
+      });
     }
   } catch (error) {
     return NextResponse.json(

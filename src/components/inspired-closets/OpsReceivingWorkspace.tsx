@@ -81,11 +81,12 @@ export default function OpsReceivingWorkspace() {
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<"slip" | "summary" | false>(false);
   const [showDocs, setShowDocs] = useState(true);
   const [docCount, setDocCount] = useState(0);
   const [docsTick, setDocsTick] = useState(0);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const slipRef = useRef<HTMLInputElement>(null);
+  const summaryRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -119,12 +120,13 @@ export default function OpsReceivingWorkspace() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  async function uploadFile(file: File) {
-    setUploading(true);
+  async function uploadFile(file: File, kind: "packing_list" | "studio_order") {
+    setUploading(kind === "studio_order" ? "summary" : "slip");
     setNotice(null);
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("kind", kind);
       const response = await fetch("/api/inspired-closets/ops/receiving/shipments", {
         method: "POST",
         body: form,
@@ -141,9 +143,9 @@ export default function OpsReceivingWorkspace() {
         kind: "info",
         text:
           payload.message ??
-          (payload.kind === "studio_order"
-            ? `Studio order: ${payload.imported ?? 0} lines ready for Bryant.`
-            : `Read ${payload.imported ?? 0} lines from the packing list.`),
+          (kind === "studio_order"
+            ? `Studio summary: ${payload.imported ?? 0} lines saved.`
+            : `Packing slip: ${payload.imported ?? 0} lines saved.`),
       });
       await load();
       setDocsTick((n) => n + 1);
@@ -170,27 +172,46 @@ export default function OpsReceivingWorkspace() {
   return (
     <OpsShell
       title="Receiving"
-      subtitle="Packing list from the truck and the Studio order. One Studio order is one scan list for Bryant — Stow and 3rd party together. Harbor / no-barcode lines can be added by hand."
+      subtitle="Two different PDFs. Packaging slip is the truck list. Studio product summary is the order table."
       actions={
         <>
           <input
-            ref={fileRef}
+            ref={slipRef}
             type="file"
             accept=".pdf,application/pdf"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
-              if (file) void uploadFile(file);
+              if (file) void uploadFile(file, "packing_list");
+            }}
+          />
+          <input
+            ref={summaryRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadFile(file, "studio_order");
             }}
           />
           <button
             type="button"
             className={payroll.buttonPrimary}
-            disabled={uploading}
-            onClick={() => fileRef.current?.click()}
+            disabled={Boolean(uploading)}
+            onClick={() => slipRef.current?.click()}
           >
-            {uploading ? "Reading PDF…" : "Upload Packaging Slip + Studio Order Summary PDF"}
+            {uploading === "slip" ? "Reading slip…" : "Upload packaging slip"}
+          </button>
+          <button
+            type="button"
+            className={payroll.buttonPrimary}
+            disabled={Boolean(uploading)}
+            onClick={() => summaryRef.current?.click()}
+          >
+            {uploading === "summary" ? "Reading summary…" : "Upload Studio product summary"}
           </button>
           <button
             type="button"
@@ -215,7 +236,7 @@ export default function OpsReceivingWorkspace() {
             <p className={payroll.empty}>Loading shipments…</p>
           ) : shipments.length === 0 ? (
             <p className={payroll.empty}>
-              No trucks or Studio lists yet. Upload a packing list or a Studio order PDF.
+              No trucks or Studio lists yet. Upload a packaging slip or a Studio product summary.
             </p>
           ) : (
             <table className={payroll.table}>

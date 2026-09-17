@@ -6,7 +6,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getSupabaseAdmin } from "@/db/client";
 import { applyStockMovement } from "@/lib/inspired-closets-ops-inventory";
+import { extractPdfText } from "@/lib/inspired-closets-ops-pdf-text";
+import { looksLikePackingSlip, looksLikeProductSummary } from "@/lib/inspired-closets-ops-product-summary-text";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
+import { codeKeys, codesMatch } from "@/lib/inspired-closets-ops-scan-codes";
+
+export { codeKeys, codesMatch, normalizeCode } from "@/lib/inspired-closets-ops-scan-codes";
 
 export const RECEIVING_VENDORS = ["stow", "richelieu", "hafele", "other"] as const;
 export const PALLET_MISSING_THRESHOLD = 0.7;
@@ -91,24 +96,6 @@ export async function loadShipmentItemRows(
   }
   if (first.error) throw first.error;
   return (first.data ?? []) as ShipmentItemRow[];
-}
-
-export function normalizeCode(value: string): string {
-  return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-}
-
-/** Codes Bryant may scan: Hafele 792.10.521, Stow 400005129, padded 000…400005129. */
-export function codeKeys(value: string | null | undefined): string[] {
-  const raw = String(value ?? "").trim();
-  if (!raw) return [];
-  const norm = normalizeCode(raw);
-  const stripped = norm.replace(/^0+/, "") || "0";
-  return [...new Set([raw, norm, stripped])];
-}
-
-export function codesMatch(scanned: string, candidate: string | null | undefined): boolean {
-  const keys = new Set(codeKeys(scanned));
-  return codeKeys(candidate).some((key) => keys.has(key));
 }
 
 const SKIP_JOB_WORDS = new Set(["demo", "new", "cart", "the", "a", "and"]);
@@ -223,6 +210,14 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
   const palletsTotal = pallets.length;
   const palletPct = palletsTotal > 0 ? palletsScanned / palletsTotal : 0;
 
+  const soNumbers = [
+    ...new Set(
+      items
+        .map((row) => (row.so_number ?? "").trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
+
   return {
     total_items: items.length,
     total_qty: totalQty,
@@ -233,6 +228,7 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
     missing: missingLines,
     credit: creditLines,
     pct,
+    so_numbers: soNumbers,
     by_job: [...byJob.values()].sort((a, b) => a.job_name.localeCompare(b.job_name)),
     by_container: pallets,
     pallets_total: palletsTotal,
@@ -322,7 +318,7 @@ async function ensurePartForSlipItem(item: ParsedSlipItem): Promise<string | nul
   return (data?.id as string) ?? null;
 }
 
-async function findJobId(item: ParsedSlipItem): Promise<string | null> {
+export async function findJobId(item: ParsedSlipItem): Promise<string | null> {
   const hint = clientHintFromSlip(item.cust_ref, item.job_name);
   if (!hint) return null;
   const supabase = getSupabaseAdmin();
@@ -461,8 +457,8 @@ export async function installBlockedByReceiving(jobId: string): Promise<{
   const pieces = open.reduce((sum, row) => sum + Math.max(0, (row.qty ?? 1) - (row.received_qty ?? 0)), 0);
   const name = String(open[0]?.job_name || open[0]?.cust_ref || "This job");
   return {
-    blocked: true,
-    message: `${name} still has ${pieces} piece${pieces === 1 ? "" : "s"} not received. Finish Receiving or mark the line missing before install can be scheduled.`,
+    blocked: false,
+    message: `${name} still has ${pieces} piece${pieces === 1 ? "" : "s"} not received. Date stays tentative until receiving is done.`,
   };
 }
 
@@ -558,6 +554,26 @@ export async function notifyReceiving(input: {
   }
 }
 
+export type ReceivingPdfKind = "studio_order" | "packing_list" | "unknown";
+
+/** Frank drops both PDFs in Receiving. Detect Studio vs Stow packing list from the printed text. */
+export async function classifyReceivingPdf(input: {
+  filename: string;
+  mimeType: string;
+  bytes: Buffer;
+}): Promise<ReceivingPdfKind> {
+  const isPdf = input.mimeType.includes("pdf") || /\.pdf$/i.test(input.filename);
+  if (!isPdf) return "unknown";
+  try {
+    const { text } = await extractPdfText(input.bytes);
+    if (looksLikeProductSummary(text) && !looksLikePackingSlip(text)) return "studio_order";
+    if (looksLikePackingSlip(text)) return "packing_list";
+  } catch {
+    // Photos / unreadable PDFs fall through to the packing-slip reader.
+  }
+  return "unknown";
+}
+
 const PARSE_SYSTEM = `You extract line items from Inspired Closets / Stow packing slips.
 Return ONLY JSON: {"notice": string|null, "ship_date": "MM/DD/YYYY"|null, "vendor": "stow"|"richelieu"|"hafele"|"other", "total_pages": number, "items": [...]}.
 Each item: item_number (SKU / barcode digits), so_number, cust_ref (client name as printed, often NAME_MMDDYY), job_name (client last name), project_number, description, qty (integer), container_id (pallet), source_page, vendor_sku.
@@ -578,6 +594,7 @@ export async function parsePackingSlip(input: {
   const apiKey =
     process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim() ||
     process.env.ANTHROPIC_API_KEY?.trim();
+
   if (!apiKey) {
     throw new Error("Packing-slip parse needs INSPIRED_CLOSETS_ANTHROPIC_API_KEY.");
   }

@@ -305,7 +305,13 @@ export default function OpsReceivingDocuments({
                 </td>
                 <td>{doc.itemCount ?? "—"}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <Link href={doc.href}>{doc.kind === "packing_slip" ? "Receiving" : "Job"}</Link>
+                  <Link href={doc.href} target={doc.href.startsWith("http") ? "_blank" : undefined}>
+                    {doc.href.includes("/receiving/")
+                      ? "Receiving"
+                      : doc.kind === "product_summary"
+                        ? "PDF"
+                        : "Job"}
+                  </Link>
                   {doc.publicUrl ? (
                     <>
                       {" · "}

@@ -76,7 +76,7 @@ export async function GET() {
       .limit(80),
     supabase
       .from("ic_shipments")
-      .select("id, notice, source_filename, public_url, status, created_at")
+      .select("id, notice, source_filename, public_url, status, created_at, parse_quality")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(80),
@@ -159,7 +159,7 @@ export async function GET() {
         itemCount: row.item_count ?? 0,
         createdAt: row.created_at,
         publicUrl: row.public_url ?? null,
-        href: `/inspired-closets/ops/projects?id=${row.job_id}`,
+        href: row.public_url || `/inspired-closets/ops/projects?id=${row.job_id}`,
       });
     }
   }
@@ -167,12 +167,30 @@ export async function GET() {
   for (const row of slips) {
     const meta = slipMeta.get(row.id);
     const jobId = meta?.jobId ?? null;
+    const quality =
+      row.parse_quality && typeof row.parse_quality === "object" && !Array.isArray(row.parse_quality)
+        ? (row.parse_quality as Record<string, unknown>)
+        : {};
+    const isStudio =
+      quality.source === "studio_order" ||
+      Boolean(row.notice && /^(STUDIO|DROP)-/i.test(String(row.notice)));
+    if (
+      isStudio &&
+      documents.some(
+        (doc) =>
+          doc.kind === "product_summary" &&
+          doc.filename &&
+          doc.filename === row.source_filename,
+      )
+    ) {
+      continue;
+    }
     documents.push({
       id: row.id,
-      kind: "packing_slip",
-      title: row.notice || row.source_filename || "Packing slip",
+      kind: isStudio ? "product_summary" : "packing_slip",
+      title: row.notice || row.source_filename || (isStudio ? "Studio summary" : "Packing slip"),
       filename: row.source_filename ?? null,
-      soNumber: null,
+      soNumber: typeof quality.so_number === "string" ? quality.so_number : null,
       jobId,
       jobName: (jobId ? names.get(jobId) : null) || meta?.jobHint || null,
       status: row.status ?? "ready",

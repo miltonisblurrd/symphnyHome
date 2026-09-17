@@ -36,6 +36,7 @@
     "stripe": "^22.3.2",
     "svix": "^1.97.0",
     "tesseract.js": "^5.1.1",
+    "unpdf": "^1.8.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {

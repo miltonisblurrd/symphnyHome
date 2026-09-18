@@ -131,6 +131,7 @@ export function clientHintFromFilename(filename: string | null | undefined): str
   const base = String(filename ?? "")
     .replace(/^.*[\\/]/, "")
     .replace(/\.[^.]+$/, "")
+    .replace(/[=]+/g, "-")
     .trim();
   if (!base) return "";
   const withoutStamp = base.replace(/^\d{8}[_-]?\d{0,6}[_-]*/, "");

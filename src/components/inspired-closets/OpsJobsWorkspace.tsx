@@ -13,6 +13,7 @@ import {
   JOB_LIST_VIEWS,
   jobMatchesListView,
 } from "@/lib/inspired-closets-ops-jobs";
+import { tierLabel, type SuggestedWindow } from "@/lib/inspired-closets-ops-tiers";
 import styles from "./ops-payroll.module.css";
 
 type Stage = { id: string; label: string };
@@ -71,6 +72,17 @@ type Job = {
   deposit_intake_status?: string | null;
   deposit_paid?: boolean;
   completion_paid?: boolean;
+  install_confidence?: "tentative" | "confirmed" | null;
+  project_tier?: string | null;
+  ready_to_order?: boolean;
+  suggested_window?: SuggestedWindow | null;
+  window_early?: boolean;
+  rto_at?: string | null;
+  ordered_at?: string | null;
+  deposit_received_at?: string | null;
+  job_check_scheduled_at?: string | null;
+  job_check_completed_at?: string | null;
+  fully_received_at?: string | null;
 };
 
 type ApiResponse = {
@@ -81,6 +93,7 @@ type ApiResponse = {
   staff?: Staff[];
   clients?: Client[];
   job?: Job;
+  receiving_warning?: { message?: string | null } | null;
   clientsCreated?: number;
   jobsCreated?: number;
   jobsLinked?: number;
@@ -561,6 +574,9 @@ export default function OpsJobsWorkspace() {
         ),
       );
       if (selectedJobId === jobId) void loadProjectFile(jobId);
+      if (payload.receiving_warning?.message) {
+        setNotice({ kind: "info", text: payload.receiving_warning.message });
+      }
     } catch (error) {
       setNotice({
         kind: "error",
@@ -867,6 +883,7 @@ export default function OpsJobsWorkspace() {
                 <th>Designer</th>
                 <th>Stage</th>
                 <th>Truck</th>
+                <th>Pipeline</th>
                 <th>Sold</th>
                 <th>Install</th>
                 <th>Contract</th>
@@ -921,8 +938,8 @@ export default function OpsJobsWorkspace() {
                       <span
                         title={
                           (job.receiving_open_qty ?? 0) > 0
-                            ? "Still short on the packing slip"
-                            : "All slip pieces received"
+                            ? "Still short in Receiving"
+                            : "All receiving pieces scanned"
                         }
                       >
                         {job.receiving_received_qty}/{job.receiving_total_qty}
@@ -931,6 +948,22 @@ export default function OpsJobsWorkspace() {
                     ) : (
                       "—"
                     )}
+                  </td>
+                  <td>
+                    <div className={styles.badgeRow}>
+                      {job.install_date ? (
+                        <span
+                          className={`${styles.badge} ${job.install_confidence === "confirmed" ? styles.badgeConfirmed : styles.badgeTentative}`}
+                        >
+                          {job.install_confidence === "confirmed" ? "Confirmed" : "Tentative"}
+                        </span>
+                      ) : null}
+                      {job.project_tier && job.project_tier !== "unknown" ? (
+                        <span className={`${styles.badge} ${job.project_tier === "custom" ? styles.badgeCustom : ""}`}>
+                          {tierLabel(job.project_tier)}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td>{job.sold_date ?? "—"}</td>
                   <td>
@@ -1002,6 +1035,21 @@ export default function OpsJobsWorkspace() {
                   if (selectedJobId) void patchJob(selectedJobId, { notes: value.trim() || null });
                 }}
                 onUploadProposal={(file) => void uploadProposal(file)}
+                onConfirmInstall={() => {
+                  if (selectedJobId) void patchJob(selectedJobId, { install_confidence: "confirmed" });
+                }}
+                onPushInstall={() => {
+                  if (selectedJobId) void patchJob(selectedJobId, { action: "push_install", days: 7 });
+                }}
+                onJobCheckDone={() => {
+                  if (selectedJobId) void patchJob(selectedJobId, { action: "job_check_done" });
+                }}
+                onTier={(tier) => {
+                  if (!selectedJobId) return;
+                  if (!tier) void patchJob(selectedJobId, { action: "reset_tier" });
+                  else void patchJob(selectedJobId, { project_tier: tier });
+                }}
+                onMaterialsChanged={() => setMatTick((n) => n + 1)}
                 onStagePart={(lineId) =>
                   void (async () => {
                     await fetch("/api/inspired-closets/ops/inventory/job-materials", {

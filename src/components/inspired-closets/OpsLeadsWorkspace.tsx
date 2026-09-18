@@ -238,6 +238,7 @@ export default function OpsLeadsWorkspace() {
     job_check_owner_id: "",
     tentative_install_notes: "",
     site_ready_notes: "",
+    project_tier: "",
   });
   const [proposalFile, setProposalFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<Partial<Lead> | null>(null);
@@ -602,6 +603,7 @@ export default function OpsLeadsWorkspace() {
           job_check_owner_id: soldForm.job_check_owner_id || null,
           tentative_install_notes: soldForm.tentative_install_notes || null,
           site_ready_notes: soldForm.site_ready_notes || null,
+          project_tier: soldForm.project_tier || null,
           designer_id: draft?.designer_id || null,
         }),
       });
@@ -652,6 +654,7 @@ export default function OpsLeadsWorkspace() {
       job_check_owner_id: "",
       tentative_install_notes: "",
       site_ready_notes: "",
+      project_tier: "",
     });
     setProposalFile(null);
     setSoldOpen(true);
@@ -1764,6 +1767,19 @@ export default function OpsLeadsWorkspace() {
                     value={soldForm.studio_ref}
                     onChange={(e) => setSoldForm((f) => ({ ...f, studio_ref: e.target.value }))}
                   />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Pipeline (if you already know)</span>
+                  <select
+                    className={styles.input}
+                    value={soldForm.project_tier}
+                    onChange={(e) => setSoldForm((f) => ({ ...f, project_tier: e.target.value }))}
+                  >
+                    <option value="">Unknown — PDF will set this</option>
+                    <option value="basic">Basic · melamine · 3 weeks</option>
+                    <option value="middle">Middle · LEDs / baskets / rods · 4 weeks</option>
+                    <option value="custom">Custom · Element / Richelieu / glass · 6–7 weeks</option>
+                  </select>
                 </label>
                 <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
                   <span className={styles.fieldLabel}>Tentative install window</span>

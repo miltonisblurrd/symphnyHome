@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { listPendingMergeCandidates } from "@/lib/inspired-closets-ops-clients";
 import { listJobPhotos } from "@/lib/inspired-closets-ops-media";
+import { decorateScheduleFields, receivingReadiness } from "@/lib/inspired-closets-ops-job-spine";
 
 export const runtime = "nodejs";
 
@@ -196,11 +197,14 @@ export async function GET(
       candidate.client_ids.includes(canonicalClientId ?? "") ||
       candidate.client_ids.includes(job.client_id ?? ""),
     ) ?? null;
+  const receiving = await receivingReadiness(id);
+  const schedule = decorateScheduleFields(job);
 
   return NextResponse.json({
     ok: true,
     job: {
       ...job,
+      ...schedule,
       client: client
         ? {
             id: client.id,
@@ -215,6 +219,10 @@ export async function GET(
       jobCheckOwner: job.job_check_owner_id
         ? staffById.get(job.job_check_owner_id) ?? null
         : null,
+      receiving_open_qty: receiving.open_qty,
+      receiving_received_qty: receiving.received_qty,
+      receiving_total_qty: receiving.total_qty,
+      receiving_missing: receiving.missing,
     },
     lead,
     appointments,

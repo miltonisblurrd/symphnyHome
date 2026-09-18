@@ -83,29 +83,6 @@ export default function OpsProductSummary({
     [summaries, openId],
   );
 
-  async function upload(file: File) {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const form = new FormData();
-      form.set("job_id", jobId);
-      form.set("file", file);
-      const response = await fetch("/api/inspired-closets/ops/jobs/summaries", {
-        method: "POST",
-        body: form,
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string; summary?: Summary };
-      if (!payload.ok) throw new Error(payload.error ?? "Upload failed.");
-      setNotice(`Read ${payload.summary?.item_count ?? 0} lines. Review stock vs order, then confirm.`);
-      if (payload.summary) setOpenId(payload.summary.id);
-      await load();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Upload failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function confirm() {
     if (!open) return;
     setBusy(true);
@@ -145,25 +122,9 @@ export default function OpsProductSummary({
     <div>
       <p className={styles.fieldLabel}>Product summaries</p>
       <p className={styles.empty} style={{ marginTop: 0 }}>
-        Upload the Studio/Stow product summary. The OS checks hardware against inventory, assigns
-        what’s here, and lists what Frank still needs to order.
+        Frank uploads the Studio order in Receiving. The PDF lands here. The job stays short until
+        Bryant scans every line.
       </p>
-      <div className={styles.formActions} style={{ justifyContent: "flex-start", marginBottom: "0.85rem" }}>
-        <label className={styles.buttonGhost} style={{ cursor: busy ? "wait" : "pointer" }}>
-          {busy ? "Reading summary…" : "Upload product summary"}
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            hidden
-            disabled={busy}
-            onChange={(event) => {
-              const next = event.target.files?.[0];
-              if (next) void upload(next);
-              event.target.value = "";
-            }}
-          />
-        </label>
-      </div>
       {hint ? <p className={styles.empty}>{hint}</p> : null}
       {notice ? <p className={styles.notice}>{notice}</p> : null}
 

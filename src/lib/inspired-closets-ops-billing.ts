@@ -5,6 +5,7 @@
 import { getSupabaseAdmin } from "@/db/client";
 import type { IcPaymentMilestone, IcPaymentMethod, IcPaymentStatus } from "@/db/ops-schema";
 import { notifyDepositCleared } from "@/lib/inspired-closets-ops-handoffs";
+import { stampJobFirst } from "@/lib/inspired-closets-ops-job-spine";
 
 export const PAYMENT_MILESTONES: {
   id: IcPaymentMilestone;
@@ -324,6 +325,9 @@ export async function recordPaymentAmount(input: {
 
   const justClearedDeposit =
     current.milestone === "deposit_50" && current.status !== "paid" && status === "paid";
+  if (justClearedDeposit) {
+    await stampJobFirst(current.job_id, "deposit_received_at");
+  }
   // Sold-as-paid already pings Frank from notifySoldHandoff — don't double-fire.
   if (justClearedDeposit && input.notes !== "Marked paid from Sold intake") {
     try {

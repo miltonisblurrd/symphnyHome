@@ -1,0 +1,791 @@
+/* Craig’s dashboard — an Excel-shaped desk. Quiet until you touch it. */
+
+.wrap {
+  --ic-red: #821f2d;
+  --ic-blush: #fdeae6;
+  --ic-bone: #efe9e5;
+  --ink: #000;
+  --muted: rgba(0, 0, 0, 0.55);
+  --faint: rgba(0, 0, 0, 0.38);
+  --line: rgba(0, 0, 0, 0.1);
+  --hair: rgba(0, 0, 0, 0.06);
+  --ok: #1f6f43;
+  --ok-bg: #e6f3ea;
+  --warn: #8a5a00;
+  --warn-bg: #fbf1d8;
+  --lost: rgba(0, 0, 0, 0.45);
+  --lost-bg: rgba(0, 0, 0, 0.05);
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  gap: 1rem;
+}
+
+/* ---- Tabs + toolbar ---- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.42rem 0.95rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tabActive {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.tabCount {
+  display: inline-block;
+  margin-left: 0.4rem;
+  min-width: 1.25rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--ic-red);
+  color: #fff;
+  font-size: 0.66rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.monthNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.3rem;
+}
+
+.monthBtn {
+  border: 0;
+  background: transparent;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.monthBtn:hover:not(:disabled) {
+  background: var(--ic-bone);
+  color: var(--ink);
+}
+
+.monthBtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.monthLabel {
+  min-width: 9.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.yearInput {
+  width: 5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font: inherit;
+  font-weight: 800;
+  text-align: center;
+  background: #fff;
+}
+
+.savedPill {
+  font-size: 0.72rem;
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.6rem;
+  font-size: 0.82rem;
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.noticeError {
+  background: #fff2f2;
+  color: #7a1212;
+}
+
+/* ---- Home ---- */
+
+.pulseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+
+.pulse {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pulse:hover {
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.pulseStatic {
+  cursor: default;
+}
+
+.pulseStatic:hover {
+  border-color: var(--line);
+}
+
+.pulseLabel {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pulseValue {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.pulseValueRed {
+  color: var(--ic-red);
+}
+
+.pulseSub {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.pulseUp {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.pulseDown {
+  color: var(--ic-red);
+  font-weight: 700;
+}
+
+.homeGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 68rem) {
+  .homeGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.cardHint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.linkBtn {
+  border: 0;
+  background: transparent;
+  color: var(--ic-red);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.linkBtn:hover {
+  text-decoration: underline;
+}
+
+.board {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.boardRow {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) 6.5rem 6rem;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.boardName {
+  font-weight: 800;
+}
+
+.bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--ic-bone);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: var(--ink);
+  border-radius: 999px;
+}
+
+.barFillOver {
+  background: var(--ok);
+}
+
+.boardMoney {
+  text-align: right;
+  font-weight: 700;
+}
+
+.boardGoal {
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.todo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.todoItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 0.8rem;
+}
+
+.todoItem:last-child {
+  border-bottom: 0;
+}
+
+.todoWho {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-left: 0.4rem;
+}
+
+.todoAction {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.todoAction:hover {
+  border-color: var(--ink);
+}
+
+.todoActionRed {
+  border-color: var(--ic-red);
+  color: var(--ic-red);
+}
+
+.empty {
+  margin: 0;
+  padding: 1rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---- Sheet ---- */
+
+.sheetWrap {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  overflow-x: auto;
+}
+
+.sheet {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+  min-width: 72rem;
+}
+
+.sheet th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  text-align: left;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.6rem 0.6rem 0.45rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.sheet td {
+  padding: 0;
+  border-bottom: 1px solid var(--hair);
+  height: 2.1rem;
+  vertical-align: middle;
+  white-space: nowrap;
+  background: #fff;
+}
+
+/* Freeze panes: date + customer stay put while the sheet scrolls. */
+.frozen th:nth-child(1),
+.frozen td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.frozen th:nth-child(2),
+.frozen td:nth-child(2) {
+  position: sticky;
+  left: 4.5rem;
+  z-index: 1;
+  box-shadow: inset -1px 0 0 var(--hair);
+}
+
+.frozen th:nth-child(1),
+.frozen th:nth-child(2) {
+  z-index: 3;
+}
+
+.frozen .groupRow td {
+  position: static;
+}
+
+.frozen .groupCell {
+  position: sticky;
+  left: 0;
+  width: max-content;
+}
+
+.sheet tbody tr:hover td {
+  background: #fafafa;
+}
+
+.num {
+  text-align: right;
+}
+
+.sheet th.num {
+  text-align: right;
+}
+
+.cellText {
+  padding: 0 0.6rem;
+}
+
+.cellMuted {
+  padding: 0 0.6rem;
+  color: var(--muted);
+}
+
+.cellStrong {
+  padding: 0 0.6rem;
+  font-weight: 700;
+}
+
+.cellCenter {
+  text-align: center;
+}
+
+.cell {
+  width: 100%;
+  height: 2.1rem;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  border-radius: 0.3rem;
+  outline: none;
+}
+
+.cell::placeholder {
+  color: rgba(0, 0, 0, 0.22);
+}
+
+.cell:hover {
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.cell:focus {
+  background: #fff;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
+}
+
+.cellNum {
+  text-align: right;
+}
+
+.check {
+  width: 100%;
+  height: 2.1rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.checkBox {
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0.25rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #fff;
+}
+
+.check:hover .checkBox {
+  border-color: var(--ink);
+}
+
+.checkOn .checkBox {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.checkRto.checkOn .checkBox {
+  background: var(--ic-red);
+  border-color: var(--ic-red);
+}
+
+.rtoRow td {
+  background: #f8f1f2;
+}
+
+.rtoRow td:first-child {
+  box-shadow: inset 3px 0 0 var(--ic-red);
+  padding-left: 0.35rem;
+}
+
+.sheet tbody tr.rtoRow:hover td {
+  background: #f4eaeb;
+}
+
+.groupRow td {
+  background: var(--ic-bone);
+  border-bottom: 1px solid var(--line);
+  height: 2.25rem;
+}
+
+.sheet tbody tr.groupRow:hover td {
+  background: var(--ic-bone);
+}
+
+.groupCell {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0 0.6rem;
+}
+
+.groupName {
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  font-size: 0.78rem;
+}
+
+.groupMeta {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.groupMoney {
+  font-weight: 800;
+}
+
+.groupToggle {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  width: 1.1rem;
+}
+
+.addRow td {
+  height: 2rem;
+}
+
+.addBtn {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--faint);
+  cursor: pointer;
+  padding: 0 0.6rem;
+  height: 2rem;
+}
+
+.addBtn:hover {
+  color: var(--ic-red);
+}
+
+.status {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.statusSold {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.statusOpen {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.statusLost {
+  background: var(--lost-bg);
+  color: var(--lost);
+}
+
+.statusPlain {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--ink);
+}
+
+.statusCell {
+  position: relative;
+}
+
+.statusCell .cell {
+  position: relative;
+  z-index: 1;
+  color: transparent;
+  caret-color: var(--ink);
+}
+
+.statusCell .cell:focus {
+  color: var(--ink);
+}
+
+.statusCell .cell:focus + .statusGhost {
+  display: none;
+}
+
+.statusGhost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem;
+  pointer-events: none;
+}
+
+.onSheet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ok);
+  font-weight: 800;
+  font-size: 0.74rem;
+  text-decoration: none;
+  padding: 0 0.6rem;
+}
+
+.onSheet:hover {
+  text-decoration: underline;
+}
+
+.savedMark {
+  color: var(--ok);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0 0.5rem;
+}
+
+.rowLink {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.rowLink:hover {
+  color: var(--ic-red);
+}
+
+/* ---- Sales & goals ---- */
+
+.thisMonth {
+  background: var(--ic-blush) !important;
+}
+
+.pace {
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.paceOk {
+  color: var(--ok);
+}
+
+.paceBehind {
+  color: var(--ic-red);
+}
+
+.miniBar {
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--ic-bone);
+  overflow: hidden;
+  margin-top: 0.2rem;
+  width: 6rem;
+}
+
+.totalRow td {
+  background: var(--ic-bone);
+  font-weight: 800;
+  border-top: 1px solid var(--line);
+}
+
+.sheet tbody tr.totalRow:hover td {
+  background: var(--ic-bone);
+}
+
+/* ---- Jobs ---- */
+
+.sectionTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.sectionTitle h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sectionTitle span {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.sectionRed h3 {
+  color: var(--ic-red);
+}
+
+.ghostBtn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.ghostBtn:hover {
+  border-color: var(--ink);
+}
+
+.ghostBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

@@ -69,8 +69,8 @@ export default function OpsStowSalesOrder({ jobId }: { jobId: string }) {
     <div style={{ marginBottom: "1.25rem" }}>
       <p className={styles.fieldLabel}>Stow sales order</p>
       <p className={styles.empty} style={{ marginTop: 0 }}>
-        Stow confirmation from Gmail. Frank still uploads the summary / slip as usual. This is the
-        check — missing pieces or extras Stow is charging.
+        Stow confirmation from Gmail. Frank uploads the Studio PDF and the packing list in Receiving.
+        This is the check — missing pieces or extras Stow is charging.
       </p>
       {hint ? <p className={styles.empty}>{hint}</p> : null}
       {notice ? <p className={styles.notice}>{notice}</p> : null}
@@ -99,8 +99,8 @@ export default function OpsStowSalesOrder({ jobId }: { jobId: string }) {
 
           {open.check.waiting ? (
             <p className={styles.empty}>
-              Sales order is on the job. Waiting on Frank&apos;s product summary or packing slip
-              to compare.
+              Sales order is on the job. Waiting on Frank&apos;s Studio PDF or packing list in
+              Receiving to compare.
             </p>
           ) : (
             <>

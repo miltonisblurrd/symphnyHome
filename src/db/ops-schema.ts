@@ -340,6 +340,17 @@ export const icJobs = pgTable("ic_jobs", {
   installGradedAt: timestamp("install_graded_at", { withTimezone: true }),
   /** Designer marked a simple closet: skip the job-check visit and move toward order. */
   skipJobCheck: boolean("skip_job_check").notNull().default(false),
+  installConfidence: text("install_confidence").notNull().default("tentative"),
+  projectTier: text("project_tier").notNull().default("unknown"),
+  tierOverride: boolean("tier_override").notNull().default(false),
+  tierReasons: jsonb("tier_reasons").notNull().default([]),
+  depositReceivedAt: timestamp("deposit_received_at", { withTimezone: true }),
+  jobCheckScheduledAt: timestamp("job_check_scheduled_at", { withTimezone: true }),
+  jobCheckCompletedAt: timestamp("job_check_completed_at", { withTimezone: true }),
+  rtoAt: timestamp("rto_at", { withTimezone: true }),
+  orderedAt: timestamp("ordered_at", { withTimezone: true }),
+  firstReceivedAt: timestamp("first_received_at", { withTimezone: true }),
+  fullyReceivedAt: timestamp("fully_received_at", { withTimezone: true }),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
@@ -981,6 +992,19 @@ export const icSalesGoals = pgTable("ic_sales_goals", {
   designerName: text("designer_name"),
   goalCents: integer("goal_cents").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const icNotifications = pgTable("ic_notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id").references(() => icJobs.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body"),
+  severity: text("severity").notNull().default("info"),
+  thresholdDays: integer("threshold_days"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
 });
 
 export type IcShipment = typeof icShipments.$inferSelect;

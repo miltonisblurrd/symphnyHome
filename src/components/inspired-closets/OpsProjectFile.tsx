@@ -7,8 +7,19 @@ import {
 import Link from "next/link";
 import { PAYMENT_MILESTONES } from "@/lib/inspired-closets-ops-billing";
 import { JOB_KINDS } from "@/lib/inspired-closets-ops-jobs";
+import {
+  customReasonCopy,
+  daysBetween,
+  suggestedInstallWindow,
+  tierLabel,
+  todayYmd,
+  type ProjectTier,
+  type SuggestedWindow,
+  type TierReason,
+} from "@/lib/inspired-closets-ops-tiers";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
 import { isImageMime, type JobPhoto } from "@/lib/inspired-closets-ops-media";
+import OpsJobReceivingFiles from "@/components/inspired-closets/OpsJobReceivingFiles";
 import OpsProductSummary from "@/components/inspired-closets/OpsProductSummary";
 import OpsStowSalesOrder from "@/components/inspired-closets/OpsStowSalesOrder";
 import styles from "./ops-payroll.module.css";
@@ -58,6 +69,16 @@ export type ProjectJob = {
   receiving_open_qty?: number;
   receiving_received_qty?: number;
   receiving_total_qty?: number;
+  receiving_missing?: string[];
+  install_confidence?: "tentative" | "confirmed" | null;
+  project_tier?: string | null;
+  tier_override?: boolean | null;
+  tier_reasons?: TierReason[] | null;
+  suggested_window?: SuggestedWindow | null;
+  window_early?: boolean;
+  ready_to_order?: boolean;
+  summary_confirmed?: boolean;
+  job_check_completed_at?: string | null;
 };
 
 export type ProjectLead = {
@@ -251,6 +272,10 @@ export default function OpsProjectFile({
   onMaterialsChanged,
   onSelectJob,
   onResolveMerge,
+  onConfirmInstall,
+  onPushInstall,
+  onJobCheckDone,
+  onTier,
 }: {
   job: ProjectJob;
   file: ProjectFile | null;
@@ -274,6 +299,10 @@ export default function OpsProjectFile({
   onMaterialsChanged?: () => void;
   onSelectJob?: (jobId: string) => void;
   onResolveMerge?: (action: "merge" | "keep_separate", intoClientId?: string) => void;
+  onConfirmInstall?: () => void;
+  onPushInstall?: () => void;
+  onJobCheckDone?: () => void;
+  onTier?: (tier: string) => void;
 }) {
   const lead = file?.lead ?? null;
   const client = file?.job.client ?? job.client;
@@ -429,18 +458,99 @@ export default function OpsProjectFile({
 
       {loading && !file ? <p className={styles.empty}>Loading project…</p> : null}
 
-      {(job.receiving_total_qty ?? 0) > 0 ? (
-        <p
-          className={`${styles.notice} ${(job.receiving_open_qty ?? 0) > 0 ? styles.noticeError : ""}`}
-          style={{ marginTop: 0 }}
-        >
-          {(job.receiving_open_qty ?? 0) > 0
-            ? `Not install-ready — ${job.receiving_received_qty ?? 0}/${job.receiving_total_qty} pieces received. Finish Receiving before calling this job ready.`
-            : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
-          {" "}
-          <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
-        </p>
-      ) : null}
+      {(() => {
+        const tier = (job.project_tier ?? "unknown") as ProjectTier;
+        const reasons = Array.isArray(job.tier_reasons) ? job.tier_reasons : [];
+        const customCopy = customReasonCopy(reasons);
+        const window =
+          job.suggested_window ??
+          suggestedInstallWindow({
+            project_tier: job.project_tier,
+            sold_date: job.sold_date,
+            ordered_at: (job as { ordered_at?: string | null }).ordered_at,
+          });
+        const daysOut = daysBetween(todayYmd(), job.install_date);
+        const open = (job.receiving_open_qty ?? 0) > 0 || ((job.receiving_total_qty ?? 0) === 0 && Boolean(job.install_date));
+        const missing = job.receiving_missing?.length
+          ? ` Missing: ${job.receiving_missing.join(", ")}.`
+          : "";
+        const tentative = Boolean(job.install_date) && job.install_confidence !== "confirmed";
+        return (
+          <>
+            {tier === "custom" ? (
+              <p className={`${styles.notice} ${styles.noticeWarn}`} style={{ marginTop: 0 }}>
+                Custom items on this job{customCopy ? `: ${customCopy}` : ""}. These typically arrive
+                after Stow material. Keep the date tentative until they are scanned in.
+              </p>
+            ) : null}
+            {job.install_date ? (
+              <p
+                className={`${styles.notice} ${open && (daysOut ?? 99) <= 14 ? styles.noticeError : open ? styles.noticeWarn : ""}`}
+                style={{ marginTop: 0 }}
+              >
+                {open
+                  ? `Install ${daysOut != null && daysOut >= 0 ? `in ${daysOut} day${daysOut === 1 ? "" : "s"}` : job.install_date} · ${job.receiving_received_qty ?? 0}/${job.receiving_total_qty ?? 0} received.${missing} Confirm this date or push it.`
+                  : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
+                {" "}
+                <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
+              </p>
+            ) : (job.receiving_total_qty ?? 0) > 0 ? (
+              <p
+                className={`${styles.notice} ${(job.receiving_open_qty ?? 0) > 0 ? styles.noticeWarn : ""}`}
+                style={{ marginTop: 0 }}
+              >
+                {(job.receiving_open_qty ?? 0) > 0
+                  ? `${job.receiving_received_qty ?? 0}/${job.receiving_total_qty} pieces received. Date can still be booked.`
+                  : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
+                {" "}
+                <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
+              </p>
+            ) : null}
+            <div className={styles.badgeRow} style={{ marginBottom: "0.75rem" }}>
+              {job.install_date ? (
+                <span className={`${styles.badge} ${tentative ? styles.badgeTentative : styles.badgeConfirmed}`}>
+                  {tentative ? "Tentative" : "Confirmed"}
+                </span>
+              ) : null}
+              {tier !== "unknown" ? (
+                <span className={`${styles.badge} ${tier === "custom" ? styles.badgeCustom : ""}`}>
+                  {tierLabel(tier)}
+                </span>
+              ) : null}
+              {(job.receiving_total_qty ?? 0) > 0 ? (
+                <span className={styles.badge}>
+                  {job.receiving_received_qty}/{job.receiving_total_qty} in
+                </span>
+              ) : null}
+              {window ? <span className={styles.badge}>{window.label}</span> : null}
+              {job.window_early ? (
+                <span className={`${styles.badge} ${styles.badgeTentative}`}>Earlier than the custom window</span>
+              ) : null}
+            </div>
+            {job.install_date ? (
+              <div className={styles.formActions} style={{ margin: "0 0 0.85rem" }}>
+                {tentative && onConfirmInstall ? (
+                  <button type="button" className={styles.buttonGhost} disabled={busy} onClick={onConfirmInstall}>
+                    Confirm date
+                  </button>
+                ) : null}
+                {onPushInstall ? (
+                  <button type="button" className={styles.buttonGhost} disabled={busy} onClick={onPushInstall}>
+                    Push 1 week
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {!job.ready_to_order && onJobCheckDone ? (
+              <div className={styles.formActions} style={{ margin: "0 0 0.85rem" }}>
+                <button type="button" className={styles.buttonPrimary} disabled={busy} onClick={onJobCheckDone}>
+                  Job check done — ready to order
+                </button>
+              </div>
+            ) : null}
+          </>
+        );
+      })()}
 
       <div className={`${styles.detailSection} ${styles.fileBand}`}>
         <p className={styles.detailSectionTitle}>Project</p>
@@ -462,6 +572,20 @@ export default function OpsProjectFile({
                   {stage.label}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Pipeline</span>
+            <select
+              className={styles.input}
+              value={job.project_tier && job.project_tier !== "unknown" ? job.project_tier : ""}
+              disabled={busy || !onTier}
+              onChange={(e) => onTier?.(e.target.value)}
+            >
+              <option value="">Unknown — PDF will set this</option>
+              <option value="basic">Basic · 3 weeks</option>
+              <option value="middle">Middle · 4 weeks</option>
+              <option value="custom">Custom · 6–7 weeks</option>
             </select>
           </label>
           <label className={styles.field}>
@@ -752,6 +876,7 @@ export default function OpsProjectFile({
           </label>
         </div>
         <OpsStowSalesOrder jobId={job.id} />
+        <OpsJobReceivingFiles jobId={job.id} />
         <OpsProductSummary jobId={job.id} onChanged={onMaterialsChanged} />
         <p className={`${styles.fieldLabel} ${styles.fileSubhead}`}>
           Materials on this project ·{" "}

@@ -63,6 +63,11 @@ type InstallJob = {
   designer: Staff | null;
   installer?: Staff | null;
   jobCheckOwner?: Staff | null;
+  install_confidence?: string | null;
+  project_tier?: string | null;
+  receiving_open_qty?: number;
+  receiving_received_qty?: number;
+  receiving_total_qty?: number;
 };
 
 type LeadOption = {
@@ -358,7 +363,18 @@ export default function OpsScheduleWorkspace({
         date: ymdFromIso(job.install_date),
         timeLabel: "All day",
         title: job.client?.name ?? "Job",
-        meta: [job.installer?.name, job.designer?.name].filter(Boolean).join(" · ") || undefined,
+        meta:
+          [
+            job.install_confidence === "confirmed" ? "Confirmed" : job.install_date ? "Tentative" : null,
+            job.project_tier && job.project_tier !== "unknown" ? job.project_tier : null,
+            (job.receiving_total_qty ?? 0) > 0
+              ? `${job.receiving_received_qty}/${job.receiving_total_qty}`
+              : null,
+            job.installer?.name,
+            job.designer?.name,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined,
       });
     }
     for (const row of timeOff) {
@@ -413,11 +429,15 @@ export default function OpsScheduleWorkspace({
           scheduled_at: when.toISOString(),
         }),
       });
-      const payload = (await response.json()) as ApiResponse;
+      const payload = (await response.json()) as ApiResponse & {
+        receiving_warning?: { message?: string | null } | null;
+      };
       if (!payload.ok) throw new Error(payload.error ?? "Failed to create appointment.");
       setNotice({
         kind: "info",
-        text: "Event saved. It will show on this schedule and on the lead.",
+        text: payload.receiving_warning?.message
+          ? `Event saved. ${payload.receiving_warning.message}`
+          : "Event saved. It will show on this schedule and on the lead.",
       });
       setForm({ ...EMPTY_EVENT });
       setEventOpen(false);
@@ -763,7 +783,13 @@ export default function OpsScheduleWorkspace({
                   })}
                 </select>
               </td>
-              <td>{job.stage}</td>
+              <td>
+                {job.install_confidence === "confirmed" ? "Confirmed" : "Tentative"}
+                {job.project_tier && job.project_tier !== "unknown" ? ` · ${job.project_tier}` : ""}
+                {(job.receiving_total_qty ?? 0) > 0
+                  ? ` · ${job.receiving_received_qty}/${job.receiving_total_qty}`
+                  : ""}
+              </td>
               {withInstallConfirm ? (
                 <td>
                   <button

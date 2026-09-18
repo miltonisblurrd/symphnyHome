@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { extractScanCandidates, pickScanCode } from "@/lib/inspired-closets-ops-scan-codes";
 import styles from "./receiving.module.css";
 
 type Item = {
   id: string;
   item_number: string;
+  vendor_sku?: string | null;
   cust_ref: string | null;
   job_name: string | null;
   description: string | null;
+  note?: string | null;
   qty: number;
   received_qty: number;
   container_id: string | null;
@@ -86,6 +89,27 @@ function beep(ok: boolean) {
   }
 }
 
+type DetectedBarcode = { rawValue?: string };
+
+type BarcodeDetectorLike = {
+  detect: (source: ImageBitmapSource) => Promise<DetectedBarcode[]>;
+};
+
+async function readBarcodes(canvas: HTMLCanvasElement): Promise<string[]> {
+  const Detector = (globalThis as { BarcodeDetector?: new (options?: { formats?: string[] }) => BarcodeDetectorLike })
+    .BarcodeDetector;
+  if (!Detector) return [];
+  try {
+    const detector = new Detector({
+      formats: ["code_128", "code_39", "code_93", "itf", "ean_13", "upc_a", "codabar"],
+    });
+    const hits = await detector.detect(canvas);
+    return hits.map((hit) => String(hit.rawValue ?? "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   const [tab, setTab] = useState<"scan" | "search" | "browse">("scan");
   const [items, setItems] = useState<Item[]>([]);
@@ -108,6 +132,8 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   const rafRef = useRef(0);
   const lastCodeRef = useRef({ code: "", at: 0 });
   const streamRef = useRef<MediaStream | null>(null);
+  const itemsRef = useRef<Item[]>([]);
+  itemsRef.current = items;
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/inspired-closets/ops/receiving/shipments/${shipmentId}`);
@@ -155,7 +181,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
         const tesseract = await import("tesseract.js");
         const worker = await tesseract.createWorker("eng", 1);
         await worker.setParameters({
-          tessedit_char_whitelist: "0123456789 ",
+          tessedit_char_whitelist: "0123456789. ",
         });
         if (cancelled) {
           await worker.terminate();
@@ -282,18 +308,20 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       rafRef.current = requestAnimationFrame(() => void loop());
       return;
     }
-    const bandY = Math.floor(video.videoHeight * 0.36);
-    const bandH = Math.floor(video.videoHeight * 0.28);
+    const bandY = Math.floor(video.videoHeight * 0.24);
+    const bandH = Math.floor(video.videoHeight * 0.52);
     canvas.width = video.videoWidth;
     canvas.height = bandH;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, bandY, video.videoWidth, bandH, 0, 0, canvas.width, canvas.height);
     try {
+      const fromBars = await readBarcodes(canvas);
       const { data } = await workerRef.current.recognize(canvas);
-      const code = (data.text || "").replace(/\D/g, "");
+      const candidates = extractScanCandidates(`${fromBars.join(" ")}\n${data.text || ""}`);
+      const code = pickScanCode(candidates, itemsRef.current);
       const now = Date.now();
-      if (code.length >= 6 && (code !== lastCodeRef.current.code || now - lastCodeRef.current.at > 1200)) {
+      if (code && (code !== lastCodeRef.current.code || now - lastCodeRef.current.at > 1200)) {
         lastCodeRef.current = { code, at: now };
         await postScan(code);
       }
@@ -410,7 +438,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     return items.filter((item) => {
       if (pallet && item.container_id !== pallet) return false;
       if (!q) return true;
-      return `${item.item_number} ${item.cust_ref} ${item.job_name} ${item.description}`
+      return `${item.item_number} ${item.cust_ref} ${item.job_name} ${item.description} ${item.note ?? ""}`
         .toLowerCase()
         .includes(q);
     });
@@ -581,6 +609,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
                   <div className={styles.mono}>{item.item_number}</div>
                   <div style={{ fontSize: "0.78rem", color: "#94a3b8" }}>
                     {item.description ?? "—"} · {item.received_qty}/{item.qty}
+                    {item.note ? ` · ${item.note}` : ""}
                     {item.needs_credit ? " · credit later" : ""}
                   </div>
                 </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
+import { decorateScheduleFields, receivingReadiness } from "@/lib/inspired-closets-ops-job-spine";
 
 export const runtime = "nodejs";
 
@@ -99,16 +100,24 @@ export async function GET(
     installer: row.installer_id ? staffById.get(row.installer_id) ?? null : null,
   }));
 
+  const receiving = await receivingReadiness(id);
+  const schedule = decorateScheduleFields(job);
+
   return NextResponse.json({
     ok: true,
     job: {
       ...job,
+      ...schedule,
       client: clientResult.data ?? null,
       designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
       installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
       jobCheckOwner: job.job_check_owner_id
         ? staffById.get(job.job_check_owner_id) ?? null
         : null,
+      receiving_open_qty: receiving.open_qty,
+      receiving_received_qty: receiving.received_qty,
+      receiving_total_qty: receiving.total_qty,
+      receiving_missing: receiving.missing,
     },
     lead,
     appointments,

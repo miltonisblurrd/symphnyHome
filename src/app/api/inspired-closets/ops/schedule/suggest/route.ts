@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { jobKindTag, resolveJobKind } from "@/lib/inspired-closets-ops-jobs";
 import { suggestInstallSchedule } from "@/lib/inspired-closets-ops-schedule";
+import { suggestedInstallWindow } from "@/lib/inspired-closets-ops-tiers";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   const full = await supabase
     .from("ic_jobs")
     .select(
-      "id, client_id, stage, install_date, receive_date, crew_size, estimated_install_days, contract_cents, notes, job_kind",
+      "id, client_id, stage, install_date, receive_date, crew_size, estimated_install_days, contract_cents, notes, job_kind, project_tier, sold_date, ordered_at",
     )
     .is("deleted_at", null)
     .limit(2000);
@@ -70,6 +71,11 @@ export async function POST(request: Request) {
       const serviceTag = jobKindTag(kind);
       const installDate = typeof job.install_date === "string" ? job.install_date : null;
       const inWindow = Boolean(installDate && installDate >= from && installDate < to);
+      const window = suggestedInstallWindow({
+        project_tier: typeof job.project_tier === "string" ? job.project_tier : null,
+        sold_date: typeof job.sold_date === "string" ? job.sold_date : null,
+        ordered_at: typeof job.ordered_at === "string" ? job.ordered_at : null,
+      });
       return {
         id: String(job.id),
         clientName:
@@ -77,6 +83,7 @@ export async function POST(request: Request) {
         stage: String(job.stage),
         installDate: inWindow ? installDate : null,
         receiveDate: typeof job.receive_date === "string" ? job.receive_date : null,
+        earliestInstall: window?.earliest ?? null,
         crewSize: Number(job.crew_size) || (serviceTag ? 1 : 2),
         estimatedInstallDays: Number(job.estimated_install_days) || 1,
         serviceTag,

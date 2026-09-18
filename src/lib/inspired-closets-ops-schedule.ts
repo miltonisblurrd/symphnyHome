@@ -10,6 +10,7 @@ export type SuggestJob = {
   stage: string;
   installDate: string | null;
   receiveDate: string | null;
+  earliestInstall?: string | null;
   crewSize: number;
   estimatedInstallDays: number;
   serviceTag: "SVC" | "G/B" | null;
@@ -87,9 +88,11 @@ export function suggestInstallSchedule(input: {
   for (const job of queue) {
     const days = Math.max(1, job.estimatedInstallDays || (job.serviceTag ? 1 : 1));
     const crew = Math.max(1, job.crewSize || (job.serviceTag ? 1 : 2));
-    const earliest = job.receiveDate
-      ? addDays(job.receiveDate, 1)
-      : input.from;
+    const earliest = job.earliestInstall
+      ? job.earliestInstall
+      : job.receiveDate
+        ? addDays(job.receiveDate, 1)
+        : input.from;
     const startFloor = earliest > input.from ? earliest : input.from;
     const window = eachDay(startFloor, input.to);
     let placed: string | null = null;
@@ -116,9 +119,11 @@ export function suggestInstallSchedule(input: {
     }
     const endDate = addDays(placed, days - 1);
     const kind = job.serviceTag ? "service" : "install";
-    const reason = job.receiveDate
+    const reason = job.earliestInstall
+      ? `Tier window from ${job.earliestInstall}; ${crew} guys × ${days} day${days === 1 ? "" : "s"} from ${placed}`
+      : job.receiveDate
       ? `Materials ${job.receiveDate}; ${crew} guys × ${days} day${days === 1 ? "" : "s"} from ${placed}`
-      : `No receive date — slotted ${placed} (${crew} guys × ${days}d). Confirm with Frank.`;
+      : `No receive date — slotted ${placed} (${crew} guys × ${days}d).`;
     placements.push({
       jobId: job.id,
       clientName: job.clientName,

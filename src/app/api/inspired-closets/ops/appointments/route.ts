@@ -12,7 +12,14 @@ import {
   type IcConsultOutcome,
 } from "@/lib/inspired-closets-ops-appointments";
 import { isDepositPaid } from "@/lib/inspired-closets-ops-billing";
-import { installBlockedByReceiving } from "@/lib/inspired-closets-ops-receiving";
+import {
+  decorateScheduleFields,
+  receivingReadiness,
+  receivingWarningPayload,
+  stampJobFirst,
+  updateJobCompat,
+} from "@/lib/inspired-closets-ops-job-spine";
+import { receivingRollupByJobIds } from "@/lib/inspired-closets-ops-receiving";
 import {
   getGoogleCalendarStatus,
   pushAppointmentById,
@@ -157,6 +164,8 @@ export async function GET(request: Request) {
 
   const readyIds = (readyResult.data ?? []).map((j) => j.id);
   const installIds = (jobsResult.data ?? []).map((j) => j.id);
+  const awaitingIds = (awaitingResult.data ?? []).map((j) => j.id);
+  const receivingByJob = await receivingRollupByJobIds([...new Set([...readyIds, ...installIds, ...awaitingIds])]);
   const materialJobIds = [...new Set([...readyIds, ...installIds])];
   const materialsByJob = new Map<string, number>();
   if (materialJobIds.length > 0) {
@@ -181,8 +190,11 @@ export async function GET(request: Request) {
     const installerIdVal = job.installer_id as string | null;
     const ownerId = job.job_check_owner_id as string | null;
     const jobId = job.id as string;
+    const receiving = receivingByJob.get(jobId);
+    const schedule = decorateScheduleFields(job);
     return {
       ...job,
+      ...schedule,
       job_kind: kind,
       visit_window: (job.visit_window as string | null) ?? null,
       materials_cents: Math.max(0, materialsByJob.get(jobId) ?? 0),
@@ -191,6 +203,9 @@ export async function GET(request: Request) {
       installer: installerIdVal ? staffById.get(installerIdVal) ?? null : null,
       jobCheckOwner: ownerId ? staffById.get(ownerId) ?? null : null,
       serviceTag: jobKindTag(kind),
+      receiving_open_qty: receiving?.open_qty ?? 0,
+      receiving_received_qty: receiving?.received_qty ?? 0,
+      receiving_total_qty: receiving?.total_qty ?? 0,
     };
   }
 
@@ -287,6 +302,7 @@ export async function POST(request: Request) {
       ? body.visit_window.trim()
       : null;
 
+  let receivingWarning: ReturnType<typeof receivingWarningPayload> = null;
   if (kind === "install") {
     if (!jobId) {
       return NextResponse.json(
@@ -304,10 +320,8 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    const receiving = await installBlockedByReceiving(jobId);
-    if (receiving.blocked) {
-      return NextResponse.json({ ok: false, error: receiving.message }, { status: 409 });
-    }
+    const receiving = await receivingReadiness(jobId);
+    receivingWarning = receivingWarningPayload(receiving);
   }
 
   const supabase = getSupabaseAdmin();
@@ -400,18 +414,14 @@ export async function POST(request: Request) {
       stage: "install_scheduled",
       install_date: installDate,
       installer_id: installerId,
+      install_confidence: "tentative",
       updated_at: new Date().toISOString(),
       updated_by: actor,
     };
     if (designerId) jobUpdate.designer_id = designerId;
     if (jobKind) jobUpdate.job_kind = jobKind;
     if (visitWindow !== null) jobUpdate.visit_window = visitWindow;
-    const jobWrite = await supabase.from("ic_jobs").update(jobUpdate).eq("id", jobId);
-    if (jobWrite.error && /job_kind|visit_window|column|schema cache/i.test(jobWrite.error.message)) {
-      delete jobUpdate.job_kind;
-      delete jobUpdate.visit_window;
-      await supabase.from("ic_jobs").update(jobUpdate).eq("id", jobId);
-    }
+    await updateJobCompat(jobId, jobUpdate);
 
     const [{ data: jobRow }, { data: installerRow }] = await Promise.all([
       supabase
@@ -470,6 +480,10 @@ export async function POST(request: Request) {
     }
   }
 
+  if (jobId && kind === "job_check") {
+    await stampJobFirst(jobId, "job_check_scheduled_at");
+  }
+
   await supabase.from("ic_activity_log").insert({
     entity_type: "appointment",
     entity_id: data.id,
@@ -489,6 +503,7 @@ export async function POST(request: Request) {
     ok: true,
     appointment: refreshed ?? data,
     googleCalendar: calendar,
+    receiving_warning: receivingWarning,
   });
 }
 

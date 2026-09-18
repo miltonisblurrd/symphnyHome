@@ -5,7 +5,17 @@ import {
   ensurePaymentMilestones,
   markInstallFortyDue,
 } from "@/lib/inspired-closets-ops-billing";
-import { installBlockedByReceiving, receivingRollupByJobIds } from "@/lib/inspired-closets-ops-receiving";
+import { receivingRollupByJobIds } from "@/lib/inspired-closets-ops-receiving";
+import {
+  applyJobTierFromLines,
+  decorateScheduleFields,
+  dismissNotifications,
+  insertNotification,
+  receivingReadiness,
+  receivingWarningPayload,
+  stripSpineColumns,
+} from "@/lib/inspired-closets-ops-job-spine";
+import { addDaysYmd, isProjectTier } from "@/lib/inspired-closets-ops-tiers";
 
 export const runtime = "nodejs";
 
@@ -35,6 +45,11 @@ const EDITABLE = new Set([
   "risk_flag",
   "lead_id",
   "account_id",
+  "ready_to_order",
+  "archived_at",
+  "install_confidence",
+  "project_tier",
+  "tier_override",
 ]);
 
 const VALID_STAGES = new Set(JOB_STAGES.map((stage) => stage.id));
@@ -47,6 +62,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const stage = searchParams.get("stage");
   const designerId = searchParams.get("designerId");
+  const includeArchived = searchParams.get("archived") === "1";
+  const readyOnly = searchParams.get("ready_to_order") === "1";
 
   const supabase = getSupabaseAdmin();
 
@@ -56,6 +73,9 @@ export async function GET(request: Request) {
     .is("deleted_at", null)
     .order("sold_date", { ascending: false, nullsFirst: false })
     .limit(2000);
+  if (!includeArchived) {
+    jobsQuery = jobsQuery.is("archived_at", null);
+  }
 
   if (stage && VALID_STAGES.has(stage as IcJobStage)) {
     jobsQuery = jobsQuery.eq("stage", stage);
@@ -63,8 +83,11 @@ export async function GET(request: Request) {
   if (designerId) {
     jobsQuery = jobsQuery.eq("designer_id", designerId);
   }
+  if (readyOnly) {
+    jobsQuery = jobsQuery.eq("ready_to_order", true);
+  }
 
-  const [jobsResult, staffResult, clientsResult] = await Promise.all([
+  let [jobsResult, staffResult, clientsResult] = await Promise.all([
     jobsQuery,
     supabase
       .from("ic_staff")
@@ -79,6 +102,17 @@ export async function GET(request: Request) {
       .limit(3000),
   ]);
 
+  if (jobsResult.error && /archived_at|ready_to_order|column|schema cache/i.test(jobsResult.error.message)) {
+    let fallback = supabase
+      .from("ic_jobs")
+      .select("*")
+      .is("deleted_at", null)
+      .order("sold_date", { ascending: false, nullsFirst: false })
+      .limit(2000);
+    if (stage && VALID_STAGES.has(stage as IcJobStage)) fallback = fallback.eq("stage", stage);
+    if (designerId) fallback = fallback.eq("designer_id", designerId);
+    jobsResult = await fallback;
+  }
   if (jobsResult.error) {
     return NextResponse.json({ ok: false, error: jobsResult.error.message }, { status: 500 });
   }
@@ -93,16 +127,34 @@ export async function GET(request: Request) {
   const clientsById = new Map((clientsResult.data ?? []).map((client) => [client.id, client]));
   const visible = (jobsResult.data ?? []).filter((job) => job.community_ref !== "FIELD-TEST");
   const receivingByJob = await receivingRollupByJobIds(visible.map((job) => job.id));
+  const { data: summaryRows } = visible.length
+    ? await supabase
+        .from("ic_job_summaries")
+        .select("id, job_id, status, confirmed_at")
+        .in("job_id", visible.map((job) => job.id))
+    : { data: [] as Array<{ id: string; job_id: string; status: string; confirmed_at: string | null }> };
+  const summaryByJob = new Map<string, { count: number; confirmed: boolean }>();
+  for (const row of summaryRows ?? []) {
+    const current = summaryByJob.get(row.job_id) ?? { count: 0, confirmed: false };
+    current.count += 1;
+    if (row.status === "confirmed" || row.confirmed_at) current.confirmed = true;
+    summaryByJob.set(row.job_id, current);
+  }
   const jobs = visible.map((job) => {
     const receiving = receivingByJob.get(job.id);
+    const summary = summaryByJob.get(job.id);
+    const schedule = decorateScheduleFields(job);
     return {
       ...job,
+      ...schedule,
       client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
       designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
       installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
       receiving_open_qty: receiving?.open_qty ?? 0,
       receiving_received_qty: receiving?.received_qty ?? 0,
       receiving_total_qty: receiving?.total_qty ?? 0,
+      summary_count: summary?.count ?? 0,
+      summary_confirmed: summary?.confirmed ?? false,
     };
   });
 
@@ -238,58 +290,131 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: false, error: "Job not found." }, { status: 404 });
   }
 
-  if (
-    typeof body.stage === "string" &&
-    (body.stage === "install_scheduled" || body.stage === "install_in_progress") &&
-    current.stage !== body.stage
-  ) {
-    const receiving = await installBlockedByReceiving(id);
-    if (receiving.blocked) {
-      return NextResponse.json({ ok: false, error: receiving.message }, { status: 409 });
+  const action = typeof body.action === "string" ? body.action : null;
+  const actorId = typeof body.actor_id === "string" ? body.actor_id : null;
+  const now = new Date().toISOString();
+
+  if (action === "push_install") {
+    const days = Math.max(1, Math.round(Number(body.days) || 7));
+    const currentDate = typeof current.install_date === "string" ? current.install_date : null;
+    if (!currentDate) {
+      return NextResponse.json({ ok: false, error: "No install date to push." }, { status: 400 });
     }
+    body.install_date = addDaysYmd(currentDate, days);
+    body.install_confidence = "tentative";
+    await dismissNotifications(id, (kind) => kind.startsWith("readiness_"));
+  }
+
+  if (action === "job_check_done") {
+    body.ready_to_order = true;
+    body.job_check_completed_at = current.job_check_completed_at ?? now;
+    body.rto_at = current.rto_at ?? now;
+    const { data: client } = current.client_id
+      ? await supabase.from("ic_clients").select("name").eq("id", current.client_id).maybeSingle()
+      : { data: null };
+    await insertNotification({
+      jobId: id,
+      kind: "rto_ready",
+      title: `${client?.name ?? "Job"} is ready to order`,
+      body: "Job check is done. Upload the project summary PDF.",
+      severity: "info",
+    });
+  }
+
+  if (action === "reset_tier") {
+    body.tier_override = false;
+    const { data: summaries } = await supabase
+      .from("ic_job_summaries")
+      .select("id")
+      .eq("job_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const summaryId = summaries?.[0]?.id;
+    const { data: lines } = summaryId
+      ? await supabase
+          .from("ic_job_summary_lines")
+          .select("description, product_type, item_code, qty")
+          .eq("summary_id", summaryId)
+      : { data: [] };
+    const classified = await applyJobTierFromLines({
+      jobId: id,
+      lines: lines ?? [],
+      force: true,
+    });
+    if (classified) {
+      body.project_tier = classified.tier;
+    }
+  }
+
+  if (typeof body.project_tier === "string") {
+    if (!isProjectTier(body.project_tier)) {
+      return NextResponse.json({ ok: false, error: "project_tier must be basic, middle, custom, or unknown." }, { status: 400 });
+    }
+    if (action !== "reset_tier") body.tier_override = true;
+  }
+
+  if (typeof body.install_date === "string" && body.install_date && body.install_date !== current.install_date) {
+    if (body.install_confidence == null) body.install_confidence = "tentative";
+    await dismissNotifications(id, (kind) => kind.startsWith("readiness_"));
+  }
+
+  if (body.ready_to_order === true && !current.ready_to_order) {
+    body.rto_at = current.rto_at ?? now;
+  }
+  if (body.deposit_intake_status === "paid" && current.deposit_intake_status !== "paid") {
+    body.deposit_received_at = current.deposit_received_at ?? now;
   }
 
   const update: Record<string, unknown> = {};
   const changes: Record<string, { from: unknown; to: unknown }> = {};
+  const extraKeys = new Set(["job_check_completed_at", "rto_at", "deposit_received_at", "tier_reasons", "install_confidence"]);
   for (const [key, value] of Object.entries(body)) {
-    if (!EDITABLE.has(key)) continue;
+    if (!EDITABLE.has(key) && !extraKeys.has(key)) continue;
     if (current[key] === value) continue;
     update[key] = value;
     changes[key] = { from: current[key], to: value };
   }
 
   if (Object.keys(update).length === 0) {
-    return NextResponse.json({ ok: true, job: current, unchanged: true });
+    const hint = await receivingReadiness(id);
+    return NextResponse.json({
+      ok: true,
+      job: { ...current, ...decorateScheduleFields(current) },
+      unchanged: true,
+      receiving_warning: receivingWarningPayload(hint),
+    });
   }
 
-  const actorId = typeof body.actor_id === "string" ? body.actor_id : null;
-  update.updated_at = new Date().toISOString();
+  update.updated_at = now;
   if (actorId) update.updated_by = actorId;
 
-  const { data: updated, error: updateError } = await supabase
+  let { data: updated, error: updateError } = await supabase
     .from("ic_jobs")
     .update(update)
     .eq("id", id)
     .select("*")
     .single();
-  if (updateError) {
-    if (/column|schema cache/i.test(updateError.message)) {
-      const base = { ...update };
-      delete base.crew_size;
-      delete base.estimated_install_days;
-      delete base.job_kind;
-      delete base.visit_window;
-      const retry = await supabase.from("ic_jobs").update(base).eq("id", id).select("*").single();
-      if (retry.error) {
-        return NextResponse.json({ ok: false, error: retry.error.message }, { status: 500 });
-      }
+  if (updateError && /column|schema cache/i.test(updateError.message)) {
+    const base = stripSpineColumns({ ...update });
+    delete base.crew_size;
+    delete base.estimated_install_days;
+    delete base.job_kind;
+    delete base.visit_window;
+    const retry = await supabase.from("ic_jobs").update(base).eq("id", id).select("*").single();
+    updated = retry.data;
+    updateError = retry.error;
+    if (!updateError && retry.data) {
+      const hint = await receivingReadiness(id);
       return NextResponse.json({
         ok: true,
-        job: retry.data,
-        hint: "Run drizzle/0014_ic_job_kind_credit.sql for job kind / visit window.",
+        job: { ...retry.data, ...decorateScheduleFields(retry.data) },
+        hint: "Run drizzle/0026_ic_job_scheduling_readiness.sql for tentative / tier columns.",
+        receiving_warning: receivingWarningPayload(hint),
       });
     }
-    return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });
+  }
+  if (updateError || !updated) {
+    return NextResponse.json({ ok: false, error: updateError?.message ?? "Could not update job." }, { status: 500 });
   }
 
   await supabase.from("ic_activity_log").insert({
@@ -329,5 +454,10 @@ export async function PATCH(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, job: updated });
+  const hint = await receivingReadiness(id);
+  return NextResponse.json({
+    ok: true,
+    job: { ...updated, ...decorateScheduleFields(updated) },
+    receiving_warning: receivingWarningPayload(hint),
+  });
 }

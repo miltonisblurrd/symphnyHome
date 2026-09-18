@@ -12,6 +12,7 @@ import {
   shipmentRollup,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
+import { refreshReceivingStamps } from "@/lib/inspired-closets-ops-job-spine";
 
 export const runtime = "nodejs";
 
@@ -197,6 +198,17 @@ export async function POST(request: Request, ctx: Ctx) {
           });
         }
       }
+    }
+  }
+
+  const jobIds = [
+    ...new Set(results.map((row) => row.item?.job_id).filter((id): id is string => Boolean(id))),
+  ];
+  for (const jobId of jobIds) {
+    try {
+      await refreshReceivingStamps(jobId);
+    } catch {
+      /* stamps are best-effort */
     }
   }
 

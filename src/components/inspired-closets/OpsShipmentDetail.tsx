@@ -207,10 +207,26 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
 
   const pct = stats?.pct ?? 0;
 
+  const jobNames = (stats?.by_job ?? [])
+    .map((job) => job.job_name)
+    .filter((name) => name && name !== "Unassigned");
+  const title =
+    jobNames.length > 0
+      ? jobNames.join(", ")
+      : (ship.notice ?? "").replace(/^(STUDIO|DROP)-/, "") || "Shipment";
+  const vendorLabel =
+    ship.vendor === "other"
+      ? "Stow + 3rd party"
+      : ship.vendor === "hafele"
+        ? "Häfele"
+        : ship.vendor === "richelieu"
+          ? "Richelieu"
+          : ship.vendor || "Stow";
+
   return (
     <OpsShell
-      title={ship.notice ?? "Shipment"}
-      subtitle={`${ship.vendor} · ${ship.ship_date ?? "no ship date"} · ${ship.source_filename ?? ""}`}
+      title={title}
+      subtitle={`${vendorLabel} · ${ship.ship_date ?? "no ship date"} · ${ship.source_filename ?? ""}`}
       actions={
         <div className={`${payroll.actions} ${styles.noPrint}`}>
           <Link

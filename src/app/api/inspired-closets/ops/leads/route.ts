@@ -237,6 +237,7 @@ export async function GET(request: Request) {
   if (stage && VALID_STAGES.has(stage)) query = query.eq("stage", stage);
   if (source && VALID_SOURCES.has(source)) query = query.eq("source", source);
   if (ownerId) query = query.eq("owner_id", ownerId);
+  if (view === "craig") query = query.eq("source_raw", "craig_designers_sheet");
 
   const [leadsResult, staffResult, clientsResult, apptsResult, accounts] = await Promise.all([
     query,
@@ -500,6 +501,11 @@ export async function POST(request: Request) {
     contact_preference:
       typeof body.contact_preference === "string" ? body.contact_preference : null,
     account_id: typeof body.account_id === "string" ? body.account_id : null,
+    source_raw: typeof body.source_raw === "string" ? body.source_raw.trim() || null : null,
+    pipeline_source_label:
+      typeof body.pipeline_source_label === "string"
+        ? body.pipeline_source_label.trim() || null
+        : null,
     created_by: actorId,
     updated_by: actorId,
   };
@@ -564,6 +570,60 @@ export async function PATCH(request: Request) {
   }
   if (!existing) {
     return NextResponse.json({ ok: false, error: "Lead not found." }, { status: 404 });
+  }
+
+  if (action === "put_on_sheet") {
+    if (existing.converted_job_id) {
+      return NextResponse.json({ ok: true, job_id: existing.converted_job_id, lead: existing });
+    }
+    const contractCents = Math.max(0, Math.round(Number(existing.pipeline_sold_cents) || 0));
+    const depositCents =
+      Math.round(Number(existing.pipeline_deposit_cents) || 0) || Math.round(contractCents * 0.5);
+    const jobInsert = {
+      client_id: existing.client_id,
+      lead_id: leadId,
+      designer_id: existing.designer_id,
+      stage: contractCents > 0 ? "deposit_pending" : "lead",
+      contract_cents: contractCents,
+      deposit_cents: depositCents,
+      collected_cents: 0,
+      sold_date: nowIso.slice(0, 10),
+      ready_to_order: Boolean(existing.pipeline_rto),
+      notes: existing.notes,
+      created_by: actorId,
+      updated_by: actorId,
+    };
+    let { data: job, error: jobError } = await supabase
+      .from("ic_jobs")
+      .insert(jobInsert)
+      .select("*")
+      .single();
+    if (jobError && /ready_to_order|column|schema cache/i.test(jobError.message)) {
+      const { ready_to_order: _rto, ...base } = jobInsert;
+      void _rto;
+      ({ data: job, error: jobError } = await supabase.from("ic_jobs").insert(base).select("*").single());
+    }
+    if (jobError || !job) {
+      return NextResponse.json(
+        { ok: false, error: jobError?.message ?? "Could not create project." },
+        { status: 500 },
+      );
+    }
+    const { data: lead, error: leadError } = await supabase
+      .from("ic_leads")
+      .update({
+        converted_job_id: job.id,
+        converted_at: nowIso,
+        updated_at: nowIso,
+        updated_by: actorId,
+      })
+      .eq("id", leadId)
+      .select("*")
+      .single();
+    if (leadError) {
+      return NextResponse.json({ ok: false, error: leadError.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, lead, job, job_id: job.id });
   }
 
   if (action === "attempt") {
@@ -915,6 +975,10 @@ export async function PATCH(request: Request) {
         : null;
     const siteReadyNotes =
       typeof body.site_ready_notes === "string" ? body.site_ready_notes.trim() || null : null;
+    const projectTier =
+      typeof body.project_tier === "string" && ["basic", "middle", "custom"].includes(body.project_tier)
+        ? body.project_tier
+        : null;
 
     // If already sold, update intake on the existing job instead of creating another.
     if (existing.converted_job_id && action === "sell") {
@@ -934,6 +998,14 @@ export async function PATCH(request: Request) {
         updated_at: nowIso,
         updated_by: actorId,
       };
+      if (projectTier) {
+        jobUpdateFull.project_tier = projectTier;
+        jobUpdateFull.tier_override = true;
+        jobUpdateFull.tier_reasons = [{ label: "Tagged at sale", qty: 1, source: "sale" }];
+      }
+      if (depositIntakeStatus === "paid") {
+        jobUpdateFull.deposit_received_at = nowIso;
+      }
       let { data: job, error: jobError } = await supabase
         .from("ic_jobs")
         .update(jobUpdateFull)
@@ -1009,6 +1081,14 @@ export async function PATCH(request: Request) {
       notes: [existing.notes, siteReadyNotes].filter(Boolean).join("\n") || null,
       created_by: actorId,
       updated_by: actorId,
+      ...(projectTier
+        ? {
+            project_tier: projectTier,
+            tier_override: true,
+            tier_reasons: [{ label: "Tagged at sale", qty: 1, source: "sale" }],
+          }
+        : {}),
+      ...(depositIntakeStatus === "paid" ? { deposit_received_at: nowIso } : {}),
     };
     let { data: job, error: jobError } = await supabase
       .from("ic_jobs")
@@ -1217,8 +1297,14 @@ export async function PATCH(request: Request) {
   }
 
   // Craig pipeline fields
-  if (typeof body.pipeline_status === "string" && VALID_PIPELINE.has(body.pipeline_status)) {
-    updates.pipeline_status = body.pipeline_status;
+  if (typeof body.pipeline_status === "string" || body.pipeline_status === null) {
+    const status = body.pipeline_status;
+    if (status === null || VALID_PIPELINE.has(status) || String(status).trim()) {
+      updates.pipeline_status = status === null ? null : String(status).trim() || null;
+    }
+  }
+  if (typeof body.notes === "string" || body.notes === null) {
+    updates.notes = body.notes;
   }
   if (typeof body.pipeline_signed === "boolean") updates.pipeline_signed = body.pipeline_signed;
   if (typeof body.pipeline_rto === "boolean") updates.pipeline_rto = body.pipeline_rto;
@@ -1289,6 +1375,18 @@ export async function PATCH(request: Request) {
     actor_label: actorName,
     changes: Object.keys(changeLog).length ? changeLog : updates,
   });
+
+  if (typeof updates.pipeline_rto === "boolean" && data.converted_job_id) {
+    const rtoUpdate: Record<string, unknown> = {
+      ready_to_order: updates.pipeline_rto,
+      updated_at: nowIso,
+    };
+    if (updates.pipeline_rto === true) rtoUpdate.rto_at = nowIso;
+    const rto = await supabase.from("ic_jobs").update(rtoUpdate).eq("id", data.converted_job_id);
+    if (rto.error && !/ready_to_order|column|schema cache/i.test(rto.error.message)) {
+      // ignore missing column; job flag lands after drizzle/0023
+    }
+  }
 
   return NextResponse.json({ ok: true, lead: data });
 }

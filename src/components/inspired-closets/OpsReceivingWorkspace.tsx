@@ -144,7 +144,7 @@ export default function OpsReceivingWorkspace() {
         text:
           payload.message ??
           (kind === "studio_order"
-            ? `Studio summary: ${payload.imported ?? 0} lines saved.`
+            ? `Project summary: ${payload.imported ?? 0} lines saved.`
             : `Packing slip: ${payload.imported ?? 0} lines saved.`),
       });
       await load();
@@ -172,7 +172,7 @@ export default function OpsReceivingWorkspace() {
   return (
     <OpsShell
       title="Receiving"
-      subtitle="Two different PDFs. Packaging slip is the truck list. Studio product summary is the order table."
+      subtitle="Packaging slips for Bryant to scan. Project summaries go to their own tab. Sales orders come from Gmail."
       actions={
         <>
           <input
@@ -211,7 +211,7 @@ export default function OpsReceivingWorkspace() {
             disabled={Boolean(uploading)}
             onClick={() => summaryRef.current?.click()}
           >
-            {uploading === "summary" ? "Reading summary…" : "Upload Studio product summary"}
+            {uploading === "summary" ? "Reading summary…" : "Upload project summary"}
           </button>
           <button
             type="button"
@@ -236,7 +236,7 @@ export default function OpsReceivingWorkspace() {
             <p className={payroll.empty}>Loading shipments…</p>
           ) : shipments.length === 0 ? (
             <p className={payroll.empty}>
-              No trucks or Studio lists yet. Upload a packaging slip or a Studio product summary.
+              No trucks yet. Upload a packaging slip for Bryant to scan.
             </p>
           ) : (
             <table className={payroll.table}>

@@ -2,8 +2,8 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
-import { syncDropshipReceivingFromSummary } from "@/lib/inspired-closets-ops-dropship-receiving";
 import {
+  attachJobProductSummary,
   missingSummaryTable,
   parsedProductSummaryFromUnknown,
   parseProductSummary,
@@ -23,15 +23,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
   }
   const jobId = new URL(request.url).searchParams.get("jobId");
-  if (!jobId) {
-    return NextResponse.json({ ok: false, error: "jobId is required." }, { status: 400 });
-  }
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("ic_job_summaries")
-    .select("*")
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false });
+  let query = supabase.from("ic_job_summaries").select("*").order("created_at", { ascending: false });
+  if (jobId) query = query.eq("job_id", jobId);
+  else query = query.limit(80);
+  const { data, error } = await query;
   if (error) {
     if (missingSummaryTable(error.message)) {
       return NextResponse.json({
@@ -41,6 +37,10 @@ export async function GET(request: Request) {
       });
     }
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
+
+  if (!jobId) {
+    return NextResponse.json({ ok: true, summaries: data ?? [] });
   }
 
   const ids = (data ?? []).map((row) => row.id);
@@ -66,6 +66,34 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!isDbConfigured()) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
+    }
+    const summaryId = typeof body.id === "string" ? body.id : "";
+    const jobId = typeof body.job_id === "string" ? body.job_id : "";
+    if (!summaryId || !jobId) {
+      return NextResponse.json({ ok: false, error: "id and job_id are required." }, { status: 400 });
+    }
+    try {
+      const summary = await attachJobProductSummary({ summaryId, jobId });
+      return NextResponse.json({ ok: true, summary });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not attach.";
+      if (missingSummaryTable(message)) {
+        return NextResponse.json(
+          { ok: false, error: "Run drizzle/0023_ic_job_summaries.sql in Supabase." },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
   }
 
   const form = await request.formData();
@@ -143,31 +171,8 @@ export async function POST(request: Request) {
   const summary = saved.summary;
   const matched = saved.lines;
 
-  let dropship: Awaited<ReturnType<typeof syncDropshipReceivingFromSummary>> | null = null;
-  let dropship_error: string | null = null;
-  try {
-    dropship = await syncDropshipReceivingFromSummary({
-      jobId,
-      summaryId: String(summary.id),
-      orderName: parsed.order_name,
-      soNumber: parsed.so_number,
-      shipDate: parsed.ship_date,
-      lines: matched.map((line) => ({
-        item_code: line.item_code,
-        description: line.description,
-        product_type: line.product_type,
-        qty: line.qty,
-      })),
-      actorId: actor,
-    });
-  } catch (error) {
-    dropship_error = error instanceof Error ? error.message : "Could not add catalog lines to Receiving.";
-  }
-
   return NextResponse.json({
     ok: true,
     summary: { ...summary, lines: matched },
-    dropship,
-    dropship_error,
   });
 }

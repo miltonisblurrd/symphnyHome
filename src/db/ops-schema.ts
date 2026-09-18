@@ -850,9 +850,7 @@ export type IcFieldIssue = typeof icFieldIssues.$inferSelect;
 /** Stow/Studio product summary uploaded to a job (Frank order check). */
 export const icJobSummaries = pgTable("ic_job_summaries", {
   id: uuid("id").primaryKey().defaultRandom(),
-  jobId: uuid("job_id")
-    .notNull()
-    .references(() => icJobs.id, { onDelete: "cascade" }),
+  jobId: uuid("job_id").references(() => icJobs.id, { onDelete: "cascade" }),
   orderName: text("order_name"),
   orderId: text("order_id"),
   soNumber: text("so_number"),

@@ -56,6 +56,18 @@ type UnmatchedSo = {
   created_at?: string;
 };
 
+type ProjectSummary = {
+  id: string;
+  job_id: string | null;
+  so_number: string | null;
+  order_name: string | null;
+  source_filename: string | null;
+  public_url: string | null;
+  status?: string;
+  item_count?: number;
+  created_at?: string;
+};
+
 type StowPipe = {
   lastAt: string | null;
   count: number;
@@ -179,7 +191,7 @@ export default function OpsInventoryWorkspace() {
     excess: 0,
     valueCents: 0,
   });
-  const [deskTab, setDeskTab] = useState<"all" | "low" | "sales" | "rto">("all");
+  const [deskTab, setDeskTab] = useState<"all" | "low" | "sales" | "summaries" | "rto">("all");
   const [partsFilter, setPartsFilter] = useState<"all" | "low">("all");
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [query, setQuery] = useState("");
@@ -199,6 +211,9 @@ export default function OpsInventoryWorkspace() {
   const [attention, setAttention] = useState<Attention | null>(null);
   const [rtoQueue, setRtoQueue] = useState<RtoJob[]>([]);
   const [unmatchedSo, setUnmatchedSo] = useState<UnmatchedSo[]>([]);
+  const [summaries, setSummaries] = useState<ProjectSummary[]>([]);
+  const [summaryAttach, setSummaryAttach] = useState<Record<string, string>>({});
+  const [summaryBusy, setSummaryBusy] = useState<string | null>(null);
   const [stowPipe, setStowPipe] = useState<StowPipe | null>(null);
   const [soAttach, setSoAttach] = useState<Record<string, string>>({});
   const [soBusy, setSoBusy] = useState<string | null>(null);
@@ -243,14 +258,16 @@ export default function OpsInventoryWorkspace() {
       setListUpdatedAt(new Date());
       setLoading(false);
 
-      const [jobsRes, attentionRes, soRes] = await Promise.all([
+      const [jobsRes, attentionRes, soRes, summaryRes] = await Promise.all([
         jobsReq,
         attentionReq,
         fetch("/api/inspired-closets/ops/stow-orders"),
+        fetch("/api/inspired-closets/ops/jobs/summaries"),
       ]);
       const jobsPayload = (await jobsRes.json()) as ApiResponse;
       const attentionPayload = (await attentionRes.json()) as ApiResponse;
       const soPayload = (await soRes.json()) as { ok?: boolean; orders?: UnmatchedSo[] };
+      const summaryPayload = (await summaryRes.json()) as { ok?: boolean; summaries?: ProjectSummary[] };
       if (soPayload.ok) {
         const orders = soPayload.orders ?? [];
         setUnmatchedSo(orders.filter((order) => (order.status ?? "unmatched") === "unmatched"));
@@ -258,6 +275,9 @@ export default function OpsInventoryWorkspace() {
           lastAt: orders[0]?.created_at ?? null,
           count: orders.length,
         });
+      }
+      if (summaryPayload.ok) {
+        setSummaries(summaryPayload.summaries ?? []);
       }
       if (jobsPayload.ok) {
         const openJobs = (jobsPayload.jobs ?? []).filter(
@@ -308,6 +328,33 @@ export default function OpsInventoryWorkspace() {
     }
   }
 
+  async function attachSummary(summaryId: string) {
+    const jobId = summaryAttach[summaryId];
+    if (!jobId) return;
+    setSummaryBusy(summaryId);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/jobs/summaries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: summaryId, job_id: jobId }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not attach project summary.");
+      setSummaries((rows) =>
+        rows.map((row) =>
+          row.id === summaryId ? { ...row, job_id: jobId, status: "review" } : row,
+        ),
+      );
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not attach project summary.",
+      });
+    } finally {
+      setSummaryBusy(null);
+    }
+  }
+
   const selectedPart = useMemo(
     () => parts.find((part) => part.id === selectedPartId) ?? null,
     [parts, selectedPartId],
@@ -342,6 +389,11 @@ export default function OpsInventoryWorkspace() {
     const pieces = parts.reduce((sum, part) => sum + (part.qty_on_hand ?? 0), 0);
     return { pieces, vendors: vendors.length };
   }, [parts, vendors.length]);
+
+  const unmatchedSummaries = useMemo(
+    () => summaries.filter((row) => !row.job_id),
+    [summaries],
+  );
 
   const noJobLines = (attention?.receivingUnassigned ?? []).reduce(
     (sum, row) => sum + row.lines,
@@ -794,6 +846,7 @@ export default function OpsInventoryWorkspace() {
               ["all", "All parts", null],
               ["low", "Low stock", summary.lowStock || null],
               ["sales", "Sales orders", unmatchedSo.length || null],
+              ["summaries", "Project summaries", unmatchedSummaries.length || null],
               ["rto", "Ready to order", rtoQueue.length || null],
             ] as const
           ).map(([id, label, count]) => (
@@ -846,7 +899,7 @@ export default function OpsInventoryWorkspace() {
             {stowPipe?.lastAt
               ? ` Last received ${formatSoWhen(stowPipe.lastAt)} · ${stowPipe.count} in the OS.`
               : " None received yet."}{" "}
-            Frank uploads the Studio PDF and the packing list in Receiving.
+            Frank uploads the project summary and the packing slip in Receiving.
           </p>
           {stowPipe?.lastAt && Date.now() - new Date(stowPipe.lastAt).getTime() > 5 * 24 * 60 * 60 * 1000 ? (
             <p className={styles.empty}>
@@ -893,6 +946,78 @@ export default function OpsInventoryWorkspace() {
             </ul>
           ) : (
             <p className={styles.empty}>No unmatched sales orders. New Stow mail lands here to attach.</p>
+          )}
+        </section>
+      ) : null}
+
+      {deskTab === "summaries" ? (
+        <section className={styles.panel}>
+          <p className={styles.detailSectionTitle}>
+            {unmatchedSummaries.length > 0
+              ? "Project summaries — pick a job"
+              : "Project summaries"}
+          </p>
+          <p className={styles.empty} style={{ marginTop: 0 }}>
+            Frank uploads these with Upload project summary. The OS assigns the job from the
+            filename. They never go to Bryant&apos;s scan list.
+          </p>
+          {summaries.length === 0 ? (
+            <p className={styles.empty}>No project summaries yet.</p>
+          ) : (
+            <ul className={styles.pulseList}>
+              {summaries.map((row) => {
+                const job = jobs.find((item) => item.id === row.job_id);
+                return (
+                  <li
+                    key={row.id}
+                    style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}
+                  >
+                    <span>
+                      {row.order_name || row.source_filename || "Project summary"}
+                      {row.so_number ? ` · SO ${row.so_number}` : ""}
+                      {row.item_count ? ` · ${row.item_count} lines` : ""}
+                      {row.created_at ? ` · ${formatSoWhen(row.created_at)}` : ""}
+                    </span>
+                    {row.job_id ? (
+                      <span>{job?.client?.name ?? "On a job"}</span>
+                    ) : (
+                      <>
+                        <select
+                          className={styles.input}
+                          value={summaryAttach[row.id] ?? ""}
+                          onChange={(event) =>
+                            setSummaryAttach((current) => ({
+                              ...current,
+                              [row.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Choose job…</option>
+                          {jobs.map((jobOption) => (
+                            <option key={jobOption.id} value={jobOption.id}>
+                              {jobOption.client?.name ?? "Job"} · {jobOption.stage}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className={styles.buttonGhost}
+                          disabled={!summaryAttach[row.id] || summaryBusy === row.id}
+                          onClick={() => void attachSummary(row.id)}
+                        >
+                          {summaryBusy === row.id ? "Saving…" : "Attach"}
+                        </button>
+                      </>
+                    )}
+                    {row.public_url ? (
+                      <a href={row.public_url} target="_blank" rel="noreferrer">
+                        PDF
+                      </a>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </section>
       ) : null}

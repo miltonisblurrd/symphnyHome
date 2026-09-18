@@ -414,7 +414,7 @@ function lineRow(summaryId: string, line: MatchedSummaryLine) {
 }
 
 export async function persistJobProductSummary(input: {
-  jobId: string;
+  jobId: string | null;
   filename: string;
   storagePath: string;
   publicUrl: string | null;
@@ -441,7 +441,7 @@ export async function persistJobProductSummary(input: {
       source_filename: input.filename,
       storage_path: input.storagePath,
       public_url: input.publicUrl,
-      status: "review",
+      status: input.jobId ? "review" : "unmatched",
       parse_quality: input.parsed.parse_quality,
       created_by: input.actorId,
       created_at: now,
@@ -450,7 +450,11 @@ export async function persistJobProductSummary(input: {
     .select("*")
     .single();
   if (insertError || !summary) {
-    throw new Error(insertError?.message ?? "Could not save summary.");
+    const message = insertError?.message ?? "Could not save summary.";
+    if (!input.jobId && /job_id|null value/i.test(message)) {
+      throw new Error("Run drizzle/0026_ic_job_summaries_unmatched.sql in Supabase.");
+    }
+    throw new Error(message);
   }
 
   const rows = matched.map((line) => lineRow(summary.id, line));
@@ -460,29 +464,98 @@ export async function persistJobProductSummary(input: {
     if (error) throw error;
   }
 
-  if (input.parsed.order_name || input.parsed.so_number) {
+  if (input.jobId) {
+    await stampSummaryOntoJob({
+      jobId: input.jobId,
+      orderName: input.parsed.order_name,
+      soNumber: input.parsed.so_number,
+      lines: matched,
+    });
+    await supabase.from("ic_activity_log").insert({
+      entity_type: "job",
+      entity_id: input.jobId,
+      action: "summary_uploaded",
+      actor_id: input.actorId,
+      changes: { filename: input.filename, lines: matched.length, source: "project_summary" },
+    });
+  }
+
+  return { summary, lines: matched };
+}
+
+export async function attachJobProductSummary(input: {
+  summaryId: string;
+  jobId: string;
+}): Promise<Record<string, unknown>> {
+  const supabase = getSupabaseAdmin();
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("ic_job_summaries")
+    .update({
+      job_id: input.jobId,
+      status: "review",
+      updated_at: now,
+    })
+    .eq("id", input.summaryId)
+    .select("*")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Could not attach project summary.");
+
+  const { data: lineRows } = await supabase
+    .from("ic_job_summary_lines")
+    .select("item_code, description, product_type, dimensions, finish, qty, total_cents, classification, part_id, available_qty, reserve_qty, order_qty")
+    .eq("summary_id", input.summaryId);
+  const lines = (lineRows ?? []).map((line) => ({
+    line_no: null,
+    item_code: String(line.item_code ?? ""),
+    description: String(line.description ?? ""),
+    product_type: String(line.product_type ?? ""),
+    dimensions: (line.dimensions as string | null) ?? null,
+    finish: (line.finish as string | null) ?? null,
+    qty: Number(line.qty) || 1,
+    total_cents: Number(line.total_cents) || 0,
+    classification: (line.classification as SummaryClass) ?? "unmatched",
+    part_id: (line.part_id as string | null) ?? null,
+    part_name: null,
+    available_qty: Number(line.available_qty) || 0,
+    reserve_qty: Number(line.reserve_qty) || 0,
+    order_qty: Number(line.order_qty) || 0,
+  }));
+
+  await stampSummaryOntoJob({
+    jobId: input.jobId,
+    orderName: (data.order_name as string | null) ?? null,
+    soNumber: (data.so_number as string | null) ?? null,
+    lines,
+  });
+  await supabase.from("ic_activity_log").insert({
+    entity_type: "job",
+    entity_id: input.jobId,
+    action: "summary_attached",
+    changes: { summary_id: input.summaryId, filename: data.source_filename },
+  });
+  return data;
+}
+
+async function stampSummaryOntoJob(input: {
+  jobId: string;
+  orderName: string | null;
+  soNumber: string | null;
+  lines: MatchedSummaryLine[];
+}): Promise<void> {
+  if (input.orderName || input.soNumber) {
     try {
       await updateJobCompat(input.jobId, {
-        studio_ref: input.parsed.order_name ?? input.parsed.so_number,
+        studio_ref: input.orderName ?? input.soNumber,
       });
     } catch {
       /* studio_ref / spine columns may not exist yet */
     }
   }
   try {
-    await applyJobTierFromLines({ jobId: input.jobId, lines: matched });
+    await applyJobTierFromLines({ jobId: input.jobId, lines: input.lines });
     await stampJobFirst(input.jobId, "ordered_at");
   } catch {
     /* tier columns are optional for the upload to succeed */
   }
-
-  await supabase.from("ic_activity_log").insert({
-    entity_type: "job",
-    entity_id: input.jobId,
-    action: "summary_uploaded",
-    actor_id: input.actorId,
-    changes: { filename: input.filename, lines: matched.length, source: "receiving" },
-  });
-
-  return { summary, lines: matched };
 }

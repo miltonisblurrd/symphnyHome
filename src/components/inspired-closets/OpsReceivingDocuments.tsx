@@ -43,7 +43,7 @@ function whenLabel(value: string | null | undefined): string {
 function kindLabel(kind: DocKind): string {
   if (kind === "stow_sales_order") return "Stow sales order";
   if (kind === "packing_slip") return "Packaging slip";
-  return "Studio order";
+  return "Project summary";
 }
 
 function statusLabel(kind: DocKind, status: string): string {
@@ -61,6 +61,7 @@ function statusLabel(kind: DocKind, status: string): string {
   }
   if (status === "confirmed") return "Confirmed";
   if (status === "review") return "Needs confirm";
+  if (status === "unmatched") return "Needs a job";
   return status;
 }
 
@@ -175,6 +176,39 @@ export default function OpsReceivingDocuments({
     }
   }
 
+  async function attachSummary(summaryId: string) {
+    const jobId = attach[summaryId];
+    if (!jobId) return;
+    setBusyId(summaryId);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/jobs/summaries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: summaryId, job_id: jobId }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not attach project summary.");
+      const jobName = jobs.find((job) => job.id === jobId)?.client?.name ?? null;
+      setDocuments((rows) =>
+        rows.map((row) =>
+          row.kind === "product_summary" && row.id === summaryId
+            ? {
+                ...row,
+                status: "review",
+                jobId,
+                jobName,
+                href: `/inspired-closets/ops/projects?id=${jobId}`,
+              }
+            : row,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not attach project summary.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div>
       <div className={payroll.summaryRow}>
@@ -185,7 +219,7 @@ export default function OpsReceivingDocuments({
           <span className={payroll.summaryStrong}>{counts.packing_slip}</span> packaging slips
         </span>
         <span>
-          <span className={payroll.summaryStrong}>{counts.product_summary}</span> Studio orders
+          <span className={payroll.summaryStrong}>{counts.product_summary}</span> project summaries
         </span>
       </div>
       <label className={payroll.field} style={{ marginBottom: "0.65rem", maxWidth: "28rem" }}>
@@ -203,7 +237,7 @@ export default function OpsReceivingDocuments({
             ["all", `All (${counts.all})`],
             ["stow_sales_order", `Stow sales orders (${counts.stow_sales_order})`],
             ["packing_slip", `Packaging slips (${counts.packing_slip})`],
-            ["product_summary", `Studio orders (${counts.product_summary})`],
+            ["product_summary", `Project summaries (${counts.product_summary})`],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -223,7 +257,7 @@ export default function OpsReceivingDocuments({
         <p className={payroll.empty}>
           {query.trim() || kind !== "all"
             ? "No documents match that filter."
-            : "Nothing in yet. Stow sales orders land from Gmail. Frank uploads the packaging slip and Studio order here."}
+            : "Nothing in yet. Sales orders land from Gmail. Frank uploads packaging slips and project summaries with the buttons above."}
         </p>
       ) : (
         <table className={`${payroll.table} ${payroll.docsTable}`}>
@@ -259,7 +293,8 @@ export default function OpsReceivingDocuments({
                 <td style={{ whiteSpace: "normal", minWidth: "12rem" }}>
                   {doc.jobId ? (
                     <Link href={doc.href}>{doc.jobName ?? "Open job"}</Link>
-                  ) : doc.kind === "stow_sales_order" && doc.status === "unmatched" ? (
+                  ) : (doc.kind === "stow_sales_order" || doc.kind === "product_summary") &&
+                    (doc.status === "unmatched" || !doc.jobId) ? (
                     <span style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
                       <select
                         className={payroll.input}
@@ -279,7 +314,11 @@ export default function OpsReceivingDocuments({
                         type="button"
                         className={payroll.buttonGhost}
                         disabled={!attach[doc.id] || busyId === doc.id}
-                        onClick={() => void attachSalesOrder(doc.id)}
+                        onClick={() =>
+                          void (doc.kind === "product_summary"
+                            ? attachSummary(doc.id)
+                            : attachSalesOrder(doc.id))
+                        }
                       >
                         {busyId === doc.id ? "Saving…" : "Attach"}
                       </button>

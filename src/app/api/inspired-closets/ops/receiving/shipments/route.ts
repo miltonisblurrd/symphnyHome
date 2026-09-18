@@ -7,6 +7,7 @@ import {
   appendPackingListMeta,
   findJobScanShipment,
   ingestStudioOrderFromReceiving,
+  isStudioReceivingShipment,
   pruneEmptyShipment,
   receivingLinesMatch,
 } from "@/lib/inspired-closets-ops-dropship-receiving";
@@ -235,6 +236,7 @@ export async function GET(request: Request) {
 
   const shipments = [];
   for (const ship of data ?? []) {
+    if (isStudioReceivingShipment(ship)) continue;
     const items = await loadShipmentItemRows(ship.id);
     const scoped = jobId
       ? ((items ?? []) as ShipmentItemRow[]).filter((row) => row.job_id === jobId)
@@ -348,7 +350,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           error:
-            "Choose Upload packaging slip or Upload Studio product summary. Those are different files.",
+            "Choose Upload packaging slip or Upload project summary. Those are different files.",
         },
         { status: 400 },
       );
@@ -367,9 +369,8 @@ export async function POST(request: Request) {
         so_number: ingested.so_number,
         job_id: ingested.job_id,
         summary_id: ingested.summary_id,
-        shipment: ingested.dropship.shipment_id ? { id: ingested.dropship.shipment_id } : null,
+        shipment: null,
         imported: ingested.imported,
-        dropship: ingested.dropship,
         message: ingested.message,
       });
     }

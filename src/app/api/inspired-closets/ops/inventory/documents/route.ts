@@ -166,7 +166,9 @@ export async function GET() {
         itemCount: row.item_count ?? 0,
         createdAt: row.created_at,
         publicUrl: row.public_url ?? null,
-        href: row.public_url || `/inspired-closets/ops/projects?id=${row.job_id}`,
+        href: row.job_id
+          ? `/inspired-closets/ops/projects?id=${row.job_id}`
+          : row.public_url || "/inspired-closets/ops/inventory",
       });
     }
   }
@@ -177,25 +179,16 @@ export async function GET() {
       row.parse_quality && typeof row.parse_quality === "object" && !Array.isArray(row.parse_quality)
         ? (row.parse_quality as Record<string, unknown>)
         : {};
-    const jobId = meta?.jobId ?? (typeof quality.job_id === "string" ? quality.job_id : null);
     const isStudio =
       quality.source === "studio_order" ||
+      quality.source === "studio-order-table" ||
       Boolean(row.notice && /^(STUDIO|DROP)-/i.test(String(row.notice)));
-    if (
-      isStudio &&
-      documents.some(
-        (doc) =>
-          doc.kind === "product_summary" &&
-          doc.filename &&
-          doc.filename === row.source_filename,
-      )
-    ) {
-      continue;
-    }
+    if (isStudio) continue;
+    const jobId = meta?.jobId ?? (typeof quality.job_id === "string" ? quality.job_id : null);
     documents.push({
       id: row.id,
-      kind: isStudio ? "product_summary" : "packing_slip",
-      title: row.notice || row.source_filename || (isStudio ? "Studio summary" : "Packing slip"),
+      kind: "packing_slip",
+      title: row.notice || row.source_filename || "Packing slip",
       filename: row.source_filename ?? null,
       soNumber: typeof quality.so_number === "string" ? quality.so_number : null,
       jobId,

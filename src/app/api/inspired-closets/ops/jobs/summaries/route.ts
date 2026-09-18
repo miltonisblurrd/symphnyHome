@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
-import { syncDropshipReceivingFromSummary } from "@/lib/inspired-closets-ops-dropship-receiving";
 import {
   missingSummaryTable,
   parsedProductSummaryFromUnknown,
@@ -143,31 +142,9 @@ export async function POST(request: Request) {
   const summary = saved.summary;
   const matched = saved.lines;
 
-  let dropship: Awaited<ReturnType<typeof syncDropshipReceivingFromSummary>> | null = null;
-  let dropship_error: string | null = null;
-  try {
-    dropship = await syncDropshipReceivingFromSummary({
-      jobId,
-      summaryId: String(summary.id),
-      orderName: parsed.order_name,
-      soNumber: parsed.so_number,
-      shipDate: parsed.ship_date,
-      lines: matched.map((line) => ({
-        item_code: line.item_code,
-        description: line.description,
-        product_type: line.product_type,
-        qty: line.qty,
-      })),
-      actorId: actor,
-    });
-  } catch (error) {
-    dropship_error = error instanceof Error ? error.message : "Could not add catalog lines to Receiving.";
-  }
-
+  // Project summaries stay on the job. Receiving only lists packing slips.
   return NextResponse.json({
     ok: true,
     summary: { ...summary, lines: matched },
-    dropship,
-    dropship_error,
   });
 }

@@ -14,6 +14,7 @@ import {
   fixtureItemsToParsed,
   findJobFromFilename,
   clientHintFromFilename,
+  classifyReceivingPdf,
   linkItemToOs,
   loadShipmentItemRows,
   missingReceivingTable,
@@ -21,6 +22,7 @@ import {
   parsePackingSlip,
   relinkShipmentItems,
   shipmentRollup,
+  isStudioReceivingShipment,
   type ParsedSlipItem,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
@@ -235,6 +237,7 @@ export async function GET(request: Request) {
 
   const shipments = [];
   for (const ship of data ?? []) {
+    if (isStudioReceivingShipment(ship)) continue;
     const items = await loadShipmentItemRows(ship.id);
     const scoped = jobId
       ? ((items ?? []) as ShipmentItemRow[]).filter((row) => row.job_id === jobId)
@@ -353,7 +356,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (requestedKind === "studio_order") {
+    const detected = await classifyReceivingPdf({
+      filename: file.name,
+      mimeType,
+      bytes,
+    });
+    const kind = detected === "unknown" ? requestedKind : detected;
+    if (kind === "studio_order") {
       const ingested = await ingestStudioOrderFromReceiving({
         filename: file.name,
         mimeType,
@@ -367,9 +376,8 @@ export async function POST(request: Request) {
         so_number: ingested.so_number,
         job_id: ingested.job_id,
         summary_id: ingested.summary_id,
-        shipment: ingested.dropship.shipment_id ? { id: ingested.dropship.shipment_id } : null,
+        shipment: null,
         imported: ingested.imported,
-        dropship: ingested.dropship,
         message: ingested.message,
       });
     }

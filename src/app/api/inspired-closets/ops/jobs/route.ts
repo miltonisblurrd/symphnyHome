@@ -87,6 +87,7 @@ export async function GET(request: Request) {
     jobsQuery = jobsQuery.eq("ready_to_order", true);
   }
 
+  // eslint-disable-next-line prefer-const -- jobsResult is reassigned on fallback below
   let [jobsResult, staffResult, clientsResult] = await Promise.all([
     jobsQuery,
     supabase

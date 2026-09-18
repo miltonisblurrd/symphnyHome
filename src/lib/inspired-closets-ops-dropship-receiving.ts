@@ -1,16 +1,13 @@
 /**
- * Studio catalog lines Bryant scans: Stow wraps/bottoms (10000…/20000…) plus
- * 40000… hardware (Stow catalog and Häfele / Richelieu). Numbered Stow pieces
- * (300… / 16-VT) come from the packing list onto the same job shipment.
+ * Studio project summaries: stored, read, and attached to the job. They never
+ * become Receiving shipments; only packing slips are on Bryant's scan list.
  */
 import { getSupabaseAdmin } from "@/db/client";
 import {
   codesMatch,
   findJobFromFilename,
   findJobId,
-  linkItemToOs,
-  notifyReceiving,
-  type ParsedSlipItem,
+  isStudioReceivingShipment,
 } from "@/lib/inspired-closets-ops-receiving";
 import {
   persistJobProductSummary,
@@ -56,12 +53,6 @@ export function guessDropshipVendor(
   if (/^(10000|20000)\d+$/.test(code)) return "stow";
   if (/^40000\d+$/.test(code)) return "stow";
   return "other";
-}
-
-function lastName(full: string | null | undefined): string {
-  if (!full) return "";
-  const parts = full.trim().split(/\s+/);
-  return parts[parts.length - 1] ?? full;
 }
 
 export function studioNotice(orderName: string | null, jobId: string | null): string {
@@ -110,6 +101,14 @@ export async function findJobScanShipment(input: {
 }): Promise<JobScanShipment | null> {
   const listed = await listJobScanShipments(input);
   return listed[0] ?? null;
+}
+
+export async function findPackingSlipShipment(input: {
+  jobId?: string | null;
+  orderName?: string | null;
+}): Promise<JobScanShipment | null> {
+  const listed = await listJobScanShipments(input);
+  return listed.find((ship) => !isStudioReceivingShipment(ship)) ?? null;
 }
 
 async function listJobScanShipments(input: {
@@ -431,218 +430,6 @@ export async function findJobForStudioOrder(input: {
   });
 }
 
-export async function syncDropshipReceivingFromSummary(input: {
-  jobId: string | null;
-  summaryId: string | null;
-  orderName: string | null;
-  soNumber: string | null;
-  shipDate: string | null;
-  lines: DropshipSummaryLine[];
-  actorId: string | null;
-  sourceFilename?: string | null;
-  storagePath?: string | null;
-  publicUrl?: string | null;
-}): Promise<DropshipSyncResult> {
-  const dropship = dropshipLinesFromSummary(input.lines);
-  if (dropship.length === 0) {
-    return { shipment_id: null, imported: 0, updated: 0, skipped: 0 };
-  }
-
-  const supabase = getSupabaseAdmin();
-  const { data: job } = input.jobId
-    ? await supabase
-        .from("ic_jobs")
-        .select("id, client_id, studio_ref")
-        .eq("id", input.jobId)
-        .maybeSingle()
-    : { data: null };
-  const { data: client } = job?.client_id
-    ? await supabase.from("ic_clients").select("id, name").eq("id", job.client_id).maybeSingle()
-    : { data: null };
-
-  const jobName = lastName(client?.name) || (input.orderName ?? "").split(/[-_]/)[0] || "Job";
-  const custRef = input.orderName || job?.studio_ref || jobName;
-  const notice = studioNotice(input.orderName, input.jobId);
-
-  const vendors = [...new Set(dropship.map(guessDropshipVendor))];
-  const vendor = vendors.length === 1 ? vendors[0] : "other";
-
-  const existing = await findJobScanShipment({
-    jobId: input.jobId,
-    orderName: input.orderName,
-  });
-
-  const now = new Date().toISOString();
-  const parseQuality: Record<string, unknown> = {
-    ...asQuality(existing?.parse_quality),
-    source: STUDIO_SOURCE,
-    job_id: input.jobId,
-    summary_id: input.summaryId,
-    line_count: dropship.length,
-  };
-  if (existing?.storage_path && input.storagePath && existing.storage_path !== input.storagePath) {
-    parseQuality.studio_order = {
-      storage_path: input.storagePath,
-      public_url: input.publicUrl,
-      source_filename: input.sourceFilename,
-    };
-  }
-  let shipmentId = existing?.id;
-  if (!shipmentId) {
-    const { data: ship, error } = await supabase
-      .from("ic_shipments")
-      .insert({
-        notice,
-        ship_date: input.shipDate,
-        vendor,
-        status: "ready",
-        source_filename: input.sourceFilename ?? "studio-order",
-        storage_path: input.storagePath ?? null,
-        public_url: input.publicUrl ?? null,
-        total_pages: 0,
-        parse_quality: parseQuality,
-        created_by: input.actorId,
-        created_at: now,
-        updated_at: now,
-      })
-      .select("id")
-      .single();
-    if (error || !ship) {
-      throw new Error(error?.message ?? "Could not create Studio receiving list.");
-    }
-    shipmentId = ship.id as string;
-  } else {
-    if (!existing) {
-      throw new Error("Could not update Studio receiving list.");
-    }
-    const patch: Record<string, unknown> = {
-      notice,
-      vendor,
-      ship_date: input.shipDate,
-      parse_quality: parseQuality,
-      parse_error: null,
-      updated_at: now,
-    };
-    if (!existing.storage_path && input.storagePath) {
-      patch.source_filename = input.sourceFilename ?? "studio-order";
-      patch.storage_path = input.storagePath;
-      patch.public_url = input.publicUrl;
-    } else if (!existing.source_filename && input.sourceFilename) {
-      patch.source_filename = input.sourceFilename;
-    }
-    await supabase.from("ic_shipments").update(patch).eq("id", shipmentId);
-  }
-
-  if (!shipmentId) {
-    throw new Error("Could not create Studio receiving list.");
-  }
-
-  const { data: current } = await supabase
-    .from("ic_shipment_items")
-    .select("id, item_number, vendor_sku, qty, received_qty")
-    .eq("shipment_id", shipmentId);
-
-  let imported = 0;
-  let updated = 0;
-  let skipped = 0;
-  const rows: Array<Record<string, unknown>> = [];
-
-  for (const line of dropship) {
-    const sku = catalogSkuDigits(line.item_code);
-    const existingLine = (current ?? []).find((row) =>
-      receivingLinesMatch(
-        { item_number: sku, vendor_sku: sku },
-        {
-          item_number: String(row.item_number),
-          vendor_sku: (row.vendor_sku as string | null) ?? null,
-        },
-      ),
-    );
-    const vendorGuess = guessDropshipVendor(line);
-    const description = [line.description, line.product_type].filter(Boolean).join(" · ") || sku;
-    const note =
-      vendorGuess === "hafele" || vendorGuess === "richelieu"
-        ? "Drop-ship from Studio order"
-        : "Stow catalog from Studio order";
-    if (existingLine) {
-      const received = Number(existingLine.received_qty) || 0;
-      if (received > 0) {
-        skipped += 1;
-        continue;
-      }
-      if (Number(existingLine.qty) !== line.qty) {
-        await supabase
-          .from("ic_shipment_items")
-          .update({
-            qty: line.qty,
-            description,
-            vendor_sku: sku,
-            so_number: input.soNumber,
-            cust_ref: custRef,
-            job_name: jobName,
-            job_id: input.jobId,
-            note,
-            updated_at: now,
-          })
-          .eq("id", existingLine.id);
-        updated += 1;
-      } else {
-        skipped += 1;
-      }
-      continue;
-    }
-
-    const parsed: ParsedSlipItem = {
-      item_number: sku,
-      vendor_sku: sku,
-      so_number: input.soNumber,
-      cust_ref: custRef,
-      job_name: jobName,
-      job_id: input.jobId,
-      description,
-      qty: line.qty,
-    };
-    const links = await linkItemToOs(parsed, { createPart: true });
-    rows.push({
-      shipment_id: shipmentId,
-      item_number: sku,
-      so_number: input.soNumber,
-      cust_ref: custRef,
-      job_name: jobName,
-      description,
-      qty: line.qty,
-      received_qty: 0,
-      damaged_qty: 0,
-      container_id: null,
-      status: "expected",
-      vendor_sku: sku,
-      job_id: input.jobId,
-      part_id: links.part_id,
-      note,
-    });
-    imported += 1;
-  }
-
-  const chunk = 80;
-  for (let i = 0; i < rows.length; i += chunk) {
-    const { error } = await supabase.from("ic_shipment_items").insert(rows.slice(i, i + chunk));
-    if (error) throw error;
-  }
-
-  if (input.jobId) {
-    await absorbJobItemsOntoShipment(input.jobId, shipmentId);
-  }
-
-  if (imported > 0) {
-    await notifyReceiving({
-      title: `Studio list ready · ${jobName}`,
-      message: `${imported} Stow catalog and Häfele / Richelieu lines from the Studio order are on Receiving (${notice}) for Bryant to scan.`,
-    });
-  }
-
-  return { shipment_id: shipmentId, imported, updated, skipped };
-}
-
 export async function ingestStudioOrderFromReceiving(input: {
   filename: string;
   mimeType: string;
@@ -654,12 +441,11 @@ export async function ingestStudioOrderFromReceiving(input: {
   so_number: string | null;
   job_id: string | null;
   summary_id: string | null;
-  dropship: DropshipSyncResult;
   imported: number;
   message: string;
 }> {
   const supabase = getSupabaseAdmin();
-  const path = `receiving/studio/${Date.now()}-${input.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}`;
+  const path = `summaries/uploads/${Date.now()}-${input.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}`;
   const { error: uploadError } = await supabase.storage.from("ic-field-media").upload(path, input.bytes, {
     contentType: input.mimeType || "application/pdf",
     upsert: false,
@@ -721,50 +507,33 @@ export async function ingestStudioOrderFromReceiving(input: {
     }
   }
 
-  const dropship = await syncDropshipReceivingFromSummary({
-    jobId,
-    summaryId,
-    orderName: parsed.order_name,
-    soNumber: parsed.so_number,
-    shipDate: parsed.ship_date,
-    lines: parsed.lines,
-    actorId: input.actorId,
-    sourceFilename: input.filename,
-    storagePath: path,
-    publicUrl,
-  });
-
-  if (!dropship.shipment_id) {
-    const notice = studioNotice(parsed.order_name, jobId);
-    const { data: ship } = await supabase
-      .from("ic_shipments")
-      .insert({
-        notice,
-        vendor: "stow",
-        status: "ready",
-        source_filename: input.filename,
-        storage_path: path,
-        public_url: publicUrl,
-        parse_error: null,
-        parse_quality: {
-          source: STUDIO_SOURCE,
-          job_id: jobId,
-          so_number: parsed.so_number,
-          order_name: parsed.order_name,
-        },
-        created_by: input.actorId,
-      })
-      .select("id")
-      .single();
-    if (ship?.id) dropship.shipment_id = String(ship.id);
+  // No job matched or the job save failed: keep the summary as a document only.
+  // Flagged as a Studio record so Receiving never lists it as a truck.
+  if (!summaryId) {
+    await supabase.from("ic_shipments").insert({
+      notice: studioNotice(parsed.order_name, jobId),
+      vendor: "stow",
+      status: "ready",
+      source_filename: input.filename,
+      storage_path: path,
+      public_url: publicUrl,
+      parse_error: null,
+      parse_quality: {
+        source: STUDIO_SOURCE,
+        job_id: jobId,
+        so_number: parsed.so_number,
+        order_name: parsed.order_name,
+        line_count: lineCount,
+      },
+      created_by: input.actorId,
+    });
   }
 
-  const catalog = dropship.imported + dropship.updated + dropship.skipped;
   const orderLabel = parsed.order_name ?? parsed.so_number ?? input.filename;
   const matchNote = jobId
     ? `Attached to the job from ${input.filename}.`
-    : `No job matched ${input.filename} yet — Bryant can still scan the list.`;
-  const message = `Studio summary ${orderLabel}: ${lineCount} lines read, ${catalog} catalog lines on Receiving. ${matchNote}`;
+    : `No job matched ${input.filename} yet. It is saved under Project summaries.`;
+  const message = `Project summary ${orderLabel}: ${lineCount} lines read. ${matchNote}`;
 
   return {
     kind: "studio_order",
@@ -772,8 +541,7 @@ export async function ingestStudioOrderFromReceiving(input: {
     so_number: parsed.so_number,
     job_id: jobId,
     summary_id: summaryId,
-    dropship,
-    imported: Math.max(lineCount, dropship.imported),
+    imported: lineCount,
     message,
   };
 }

@@ -1,17 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import { partIsLowStock } from "@/lib/inspired-closets-ops-inventory";
+import { stageLabel } from "@/lib/inspired-closets-ops-jobs";
 import styles from "./ops-payroll.module.css";
-
-type AttentionKey =
-  | "low"
-  | "excess"
-  | "unallocated"
-  | "missing"
-  | "unstaged"
-  | "slip"
-  | "nojob";
 
 type Part = {
   id: string;
@@ -41,50 +35,18 @@ type JobOption = {
 type RtoJob = {
   id: string;
   ready_to_order?: boolean;
-  summary_count?: number;
   summary_confirmed?: boolean;
+  title?: string | null;
+  stage: string;
+  sold_date?: string | null;
+  install_date?: string | null;
+  notes?: string | null;
   client: { name: string } | null;
   designer?: { name: string } | null;
+  receiving_open_qty?: number;
+  receiving_received_qty?: number;
+  receiving_total_qty?: number;
 };
-
-type UnmatchedSo = {
-  id: string;
-  so_number: string | null;
-  order_name: string | null;
-  source_filename: string | null;
-  status?: string;
-  created_at?: string;
-};
-
-type ProjectSummary = {
-  id: string;
-  job_id: string | null;
-  so_number: string | null;
-  order_name: string | null;
-  source_filename: string | null;
-  public_url: string | null;
-  status?: string;
-  item_count?: number;
-  created_at?: string;
-};
-
-type StowPipe = {
-  lastAt: string | null;
-  count: number;
-};
-
-function formatSoWhen(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
 
 type Movement = {
   id: string;
@@ -95,46 +57,6 @@ type Movement = {
   unit_cost_cents: number | null;
   note: string | null;
   created_at: string;
-};
-
-type Attention = {
-  lowStock: Array<{
-    id: string;
-    sku: string;
-    name: string;
-    qty_on_hand: number;
-    reorder_point: number;
-    value_cents: number;
-  }>;
-  excessCount: number;
-  excessValueCents: number;
-  unallocatedReceives: Array<{
-    part_id: string;
-    sku: string;
-    name: string;
-    qty: number;
-    created_at: string;
-  }>;
-  missingMaterials: Array<{
-    id: string;
-    stage: string;
-    install_date: string | null;
-    contract_cents: number;
-    client_name: string;
-  }>;
-  unstagedInstalls?: Array<{
-    id: string;
-    client_name: string;
-    install_date: string | null;
-    unstaged: number;
-  }>;
-  receivingShortJobs?: Array<{
-    job_name: string;
-    cust_ref: string;
-    open: number;
-  }>;
-  receivingOpenLines?: number;
-  receivingUnassigned?: Array<{ label: string; lines: number }>;
 };
 
 type ApiResponse = {
@@ -151,7 +73,6 @@ type ApiResponse = {
   };
   jobs?: JobOption[];
   movements?: Movement[];
-  attention?: Attention;
 };
 
 function centsToDisplay(cents: number): string {
@@ -181,7 +102,15 @@ function partTitle(part: { name: string; color?: string | null; size?: string | 
   return [part.name, part.color, part.size].filter(Boolean).join(" · ");
 }
 
+function formatJobDate(value?: string | null): string {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 export default function OpsInventoryWorkspace() {
+  const router = useRouter();
   const [parts, setParts] = useState<Part[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [jobs, setJobs] = useState<JobOption[]>([]);
@@ -191,10 +120,11 @@ export default function OpsInventoryWorkspace() {
     excess: 0,
     valueCents: 0,
   });
-  const [deskTab, setDeskTab] = useState<"all" | "low" | "sales" | "summaries" | "rto">("all");
+  const [deskTab, setDeskTab] = useState<"all" | "low" | "rto">("all");
   const [partsFilter, setPartsFilter] = useState<"all" | "low">("all");
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [query, setQuery] = useState("");
+  const [rtoQuery, setRtoQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
   const [selectedPartId, setSelectedPartId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -208,15 +138,7 @@ export default function OpsInventoryWorkspace() {
   });
   const [saving, setSaving] = useState(false);
   const [movements, setMovements] = useState<Movement[]>([]);
-  const [attention, setAttention] = useState<Attention | null>(null);
   const [rtoQueue, setRtoQueue] = useState<RtoJob[]>([]);
-  const [unmatchedSo, setUnmatchedSo] = useState<UnmatchedSo[]>([]);
-  const [summaries, setSummaries] = useState<ProjectSummary[]>([]);
-  const [summaryAttach, setSummaryAttach] = useState<Record<string, string>>({});
-  const [summaryBusy, setSummaryBusy] = useState<string | null>(null);
-  const [stowPipe, setStowPipe] = useState<StowPipe | null>(null);
-  const [soAttach, setSoAttach] = useState<Record<string, string>>({});
-  const [soBusy, setSoBusy] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     name: "",
     color: "",
@@ -234,7 +156,6 @@ export default function OpsInventoryWorkspace() {
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
-  const [attentionKey, setAttentionKey] = useState<AttentionKey | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -244,7 +165,6 @@ export default function OpsInventoryWorkspace() {
 
       const partsReq = fetch(`/api/inspired-closets/ops/inventory/parts?${params.toString()}`);
       const jobsReq = fetch("/api/inspired-closets/ops/jobs");
-      const attentionReq = fetch("/api/inspired-closets/ops/inventory/attention");
 
       const partsRes = await partsReq;
       const partsPayload = (await partsRes.json()) as ApiResponse;
@@ -258,27 +178,8 @@ export default function OpsInventoryWorkspace() {
       setListUpdatedAt(new Date());
       setLoading(false);
 
-      const [jobsRes, attentionRes, soRes, summaryRes] = await Promise.all([
-        jobsReq,
-        attentionReq,
-        fetch("/api/inspired-closets/ops/stow-orders"),
-        fetch("/api/inspired-closets/ops/jobs/summaries"),
-      ]);
+      const jobsRes = await jobsReq;
       const jobsPayload = (await jobsRes.json()) as ApiResponse;
-      const attentionPayload = (await attentionRes.json()) as ApiResponse;
-      const soPayload = (await soRes.json()) as { ok?: boolean; orders?: UnmatchedSo[] };
-      const summaryPayload = (await summaryRes.json()) as { ok?: boolean; summaries?: ProjectSummary[] };
-      if (soPayload.ok) {
-        const orders = soPayload.orders ?? [];
-        setUnmatchedSo(orders.filter((order) => (order.status ?? "unmatched") === "unmatched"));
-        setStowPipe({
-          lastAt: orders[0]?.created_at ?? null,
-          count: orders.length,
-        });
-      }
-      if (summaryPayload.ok) {
-        setSummaries(summaryPayload.summaries ?? []);
-      }
       if (jobsPayload.ok) {
         const openJobs = (jobsPayload.jobs ?? []).filter(
           (job) => !["closed", "cancelled"].includes(job.stage),
@@ -290,7 +191,6 @@ export default function OpsInventoryWorkspace() {
           ),
         );
       }
-      if (attentionPayload.ok) setAttention(attentionPayload.attention ?? null);
       setLoading(false);
     } catch (error) {
       setNotice({
@@ -304,56 +204,6 @@ export default function OpsInventoryWorkspace() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  async function attachSalesOrder(orderId: string) {
-    const jobId = soAttach[orderId];
-    if (!jobId) return;
-    setSoBusy(orderId);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/stow-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: orderId, job_id: jobId }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
-      if (!payload.ok) throw new Error(payload.error ?? "Could not attach sales order.");
-      setUnmatchedSo((rows) => rows.filter((row) => row.id !== orderId));
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Could not attach sales order.",
-      });
-    } finally {
-      setSoBusy(null);
-    }
-  }
-
-  async function attachSummary(summaryId: string) {
-    const jobId = summaryAttach[summaryId];
-    if (!jobId) return;
-    setSummaryBusy(summaryId);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/jobs/summaries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: summaryId, job_id: jobId }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
-      if (!payload.ok) throw new Error(payload.error ?? "Could not attach project summary.");
-      setSummaries((rows) =>
-        rows.map((row) =>
-          row.id === summaryId ? { ...row, job_id: jobId, status: "review" } : row,
-        ),
-      );
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Could not attach project summary.",
-      });
-    } finally {
-      setSummaryBusy(null);
-    }
-  }
 
   const selectedPart = useMemo(
     () => parts.find((part) => part.id === selectedPartId) ?? null,
@@ -390,83 +240,31 @@ export default function OpsInventoryWorkspace() {
     return { pieces, vendors: vendors.length };
   }, [parts, vendors.length]);
 
-  const unmatchedSummaries = useMemo(
-    () => summaries.filter((row) => !row.job_id),
-    [summaries],
-  );
+  const visibleRto = useMemo(() => {
+    const q = rtoQuery.trim().toLowerCase();
+    return [...rtoQueue]
+      .filter((job) => {
+        if (!q) return true;
+        const hay = [
+          job.client?.name,
+          job.designer?.name,
+          job.title,
+          job.stage,
+          job.notes,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a, b) => (a.client?.name ?? "zzz").localeCompare(b.client?.name ?? "zzz"));
+  }, [rtoQueue, rtoQuery]);
 
-  const noJobLines = (attention?.receivingUnassigned ?? []).reduce(
-    (sum, row) => sum + row.lines,
-    0,
-  );
-  const pulseCards: Array<{
-    key: AttentionKey;
-    label: string;
-    value: string;
-    alert: boolean;
-  }> = [
-    {
-      key: "low",
-      label: "Low stock",
-      value: String(attention?.lowStock.length ?? 0),
-      alert: (attention?.lowStock.length ?? 0) > 0,
-    },
-    {
-      key: "excess",
-      label: "Excess value",
-      value: centsToDisplay(attention?.excessValueCents ?? 0),
-      alert: (attention?.excessCount ?? 0) > 0,
-    },
-    {
-      key: "unallocated",
-      label: "Receives w/o allocate",
-      value: String(attention?.unallocatedReceives.length ?? 0),
-      alert: (attention?.unallocatedReceives.length ?? 0) > 0,
-    },
-    {
-      key: "missing",
-      label: "Installs missing materials",
-      value: String(attention?.missingMaterials.length ?? 0),
-      alert: (attention?.missingMaterials.length ?? 0) > 0,
-    },
-    {
-      key: "unstaged",
-      label: "Unstaged next 3 days",
-      value: String((attention?.unstagedInstalls ?? []).length),
-      alert: (attention?.unstagedInstalls ?? []).length > 0,
-    },
-    {
-      key: "slip",
-      label: "Slip lines still out",
-      value: String(attention?.receivingOpenLines ?? 0),
-      alert: (attention?.receivingOpenLines ?? 0) > 0,
-    },
-    {
-      key: "nojob",
-      label: "Received with no job",
-      value: String(noJobLines),
-      alert: noJobLines > 0,
-    },
-  ];
-
-  const attentionCopy: Record<AttentionKey, { title: string; empty: string }> = {
-    low: { title: "Low stock (below reorder)", empty: "Nothing is below reorder right now." },
-    excess: { title: "Excess / dead stock", empty: "No parts flagged as excess." },
-    unallocated: {
-      title: "Receives this week still unallocated",
-      empty: "Every receive this week is allocated.",
-    },
-    missing: {
-      title: "Jobs with $0 materials (likely missing allocate)",
-      empty: "Install jobs have material against them.",
-    },
-    unstaged: {
-      title: "Installs in the next 3 days with parts not staged/packed",
-      empty: "Nothing unstaged in the next 3 days.",
-    },
-    slip: { title: "Packing-slip jobs still short", empty: "No open slip lines." },
-    nojob: { title: "On a slip with no OS job", empty: "Every slip line is tied to a job." },
-  };
+  const rtoFacts = useMemo(() => {
+    const withInstall = rtoQueue.filter((job) => Boolean(job.install_date)).length;
+    const truckShort = rtoQueue.filter((job) => (job.receiving_open_qty ?? 0) > 0).length;
+    return { withInstall, truckShort };
+  }, [rtoQueue]);
 
   useEffect(() => {
     if (!selectedPart) return;
@@ -483,17 +281,16 @@ export default function OpsInventoryWorkspace() {
   }, [selectedPart]);
 
   useEffect(() => {
-    if (!detailOpen && !setupOpen && !attentionKey && !moveModalOpen) return;
+    if (!detailOpen && !setupOpen && !moveModalOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setDetailOpen(false);
       setSetupOpen(false);
-      setAttentionKey(null);
       setMoveModalOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailOpen, setupOpen, attentionKey, moveModalOpen]);
+  }, [detailOpen, setupOpen, moveModalOpen]);
 
   useEffect(() => {
     if (!selectedPartId) {
@@ -820,33 +617,12 @@ export default function OpsInventoryWorkspace() {
         </p>
       ) : null}
 
-      <section style={{ marginBottom: "1rem" }}>
-        <p className={styles.subtitle} style={{ marginBottom: "0.65rem" }}>
-          Needs attention · what’s leaking money
-        </p>
-        <div className={styles.pulseGrid}>
-          {pulseCards.map((card) => (
-            <button
-              key={card.key}
-              type="button"
-              className={`${styles.pulseCard} ${card.alert ? styles.pulseCardAlert : ""}`}
-              onClick={() => setAttentionKey(card.key)}
-            >
-              <p className={styles.statCardLabel}>{card.label}</p>
-              <p className={styles.statCardValue}>{card.value}</p>
-            </button>
-          ))}
-        </div>
-      </section>
-
       <div className={styles.listToolbar}>
         <nav className={styles.tabs} aria-label="Inventory views">
           {(
             [
               ["all", "All parts", null],
               ["low", "Low stock", summary.lowStock || null],
-              ["sales", "Sales orders", unmatchedSo.length || null],
-              ["summaries", "Project summaries", unmatchedSummaries.length || null],
               ["rto", "Ready to order", rtoQueue.length || null],
             ] as const
           ).map(([id, label, count]) => (
@@ -864,20 +640,20 @@ export default function OpsInventoryWorkspace() {
             </button>
           ))}
         </nav>
-        {deskTab === "all" || deskTab === "low" ? (
-          <div className={styles.toolbarRight}>
-            <p className={styles.updatedStamp}>
-              {listUpdatedAt
-                ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}`
-                : loading
-                  ? "Updating…"
-                  : "—"}
-            </p>
+        <div className={styles.toolbarRight}>
+          <p className={styles.updatedStamp}>
+            {listUpdatedAt
+              ? `Updated ${listUpdatedAt.toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}`
+              : loading
+                ? "Updating…"
+                : "—"}
+          </p>
+          {deskTab === "all" || deskTab === "low" ? (
             <button
               type="button"
               className={styles.buttonPrimary}
@@ -885,164 +661,99 @@ export default function OpsInventoryWorkspace() {
             >
               Add parts / upload count
             </button>
-          </div>
-        ) : null}
-      </div>
-
-      {deskTab === "sales" ? (
-        <section className={styles.panel}>
-          <p className={styles.detailSectionTitle}>
-            {unmatchedSo.length > 0 ? "Stow sales orders — pick a job" : "Stow sales orders"}
-          </p>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            Gmail posts Order PDFs every 5 minutes.
-            {stowPipe?.lastAt
-              ? ` Last received ${formatSoWhen(stowPipe.lastAt)} · ${stowPipe.count} in the OS.`
-              : " None received yet."}{" "}
-            Frank uploads the project summary and the packing slip in Receiving.
-          </p>
-          {stowPipe?.lastAt && Date.now() - new Date(stowPipe.lastAt).getTime() > 5 * 24 * 60 * 60 * 1000 ? (
-            <p className={styles.empty}>
-              No new sales order in 5 days. If Gmail has newer Stow Order mail, run
-              processStowSalesOrders in Apps Script — the timer may have stopped.
-            </p>
           ) : null}
-          {unmatchedSo.length > 0 ? (
-            <ul className={styles.pulseList}>
-              {unmatchedSo.map((order) => (
-                <li
-                  key={order.id}
-                  style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}
-                >
-                  <span>
-                    {order.so_number ? `SO ${order.so_number}` : order.source_filename ?? "Sales order"}
-                    {order.order_name ? ` · ${order.order_name}` : ""}
-                    {order.created_at ? ` · ${formatSoWhen(order.created_at)}` : ""}
-                  </span>
-                  <select
-                    className={styles.input}
-                    value={soAttach[order.id] ?? ""}
-                    onChange={(event) =>
-                      setSoAttach((current) => ({ ...current, [order.id]: event.target.value }))
-                    }
-                  >
-                    <option value="">Choose job…</option>
-                    {jobs.map((job) => (
-                      <option key={job.id} value={job.id}>
-                        {job.client?.name ?? "Job"} · {job.stage}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className={styles.buttonGhost}
-                    disabled={!soAttach[order.id] || soBusy === order.id}
-                    onClick={() => void attachSalesOrder(order.id)}
-                  >
-                    {soBusy === order.id ? "Saving…" : "Attach"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className={styles.empty}>No unmatched sales orders. New Stow mail lands here to attach.</p>
-          )}
-        </section>
-      ) : null}
-
-      {deskTab === "summaries" ? (
-        <section className={styles.panel}>
-          <p className={styles.detailSectionTitle}>
-            {unmatchedSummaries.length > 0
-              ? "Project summaries — pick a job"
-              : "Project summaries"}
-          </p>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            Frank uploads these with Upload project summary. The OS assigns the job from the
-            filename. They never go to Bryant&apos;s scan list.
-          </p>
-          {summaries.length === 0 ? (
-            <p className={styles.empty}>No project summaries yet.</p>
-          ) : (
-            <ul className={styles.pulseList}>
-              {summaries.map((row) => {
-                const job = jobs.find((item) => item.id === row.job_id);
-                return (
-                  <li
-                    key={row.id}
-                    style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}
-                  >
-                    <span>
-                      {row.order_name || row.source_filename || "Project summary"}
-                      {row.so_number ? ` · SO ${row.so_number}` : ""}
-                      {row.item_count ? ` · ${row.item_count} lines` : ""}
-                      {row.created_at ? ` · ${formatSoWhen(row.created_at)}` : ""}
-                    </span>
-                    {row.job_id ? (
-                      <span>{job?.client?.name ?? "On a job"}</span>
-                    ) : (
-                      <>
-                        <select
-                          className={styles.input}
-                          value={summaryAttach[row.id] ?? ""}
-                          onChange={(event) =>
-                            setSummaryAttach((current) => ({
-                              ...current,
-                              [row.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Choose job…</option>
-                          {jobs.map((jobOption) => (
-                            <option key={jobOption.id} value={jobOption.id}>
-                              {jobOption.client?.name ?? "Job"} · {jobOption.stage}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className={styles.buttonGhost}
-                          disabled={!summaryAttach[row.id] || summaryBusy === row.id}
-                          onClick={() => void attachSummary(row.id)}
-                        >
-                          {summaryBusy === row.id ? "Saving…" : "Attach"}
-                        </button>
-                      </>
-                    )}
-                    {row.public_url ? (
-                      <a href={row.public_url} target="_blank" rel="noreferrer">
-                        PDF
-                      </a>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      ) : null}
+        </div>
+      </div>
 
       {deskTab === "rto" ? (
         <section className={styles.panel}>
-          <p className={styles.detailSectionTitle}>Ready to order</p>
-          <p className={styles.empty} style={{ marginTop: 0 }}>
-            Craig marked these RTO. Upload the product summary on the project so stock can be
-            assigned.
-          </p>
-          {rtoQueue.length > 0 ? (
-            <ul className={styles.pulseList}>
-              {rtoQueue.map((job) => (
-                <li key={job.id}>
-                  <a href={`/inspired-closets/ops/projects?id=${job.id}`}>
-                    {job.client?.name ?? "Job"}
-                  </a>
-                  {job.designer?.name ? ` · ${job.designer.name}` : ""}
-                  {job.summary_count ? " · summary uploaded, not assigned" : " · needs summary"}
-                </li>
-              ))}
-            </ul>
+          <div className={styles.summaryRow}>
+            <span>
+              <span className={styles.summaryStrong}>{rtoQueue.length}</span> ready to order
+            </span>
+            {rtoFacts.withInstall > 0 ? (
+              <span>
+                <span className={styles.summaryStrong}>{rtoFacts.withInstall}</span> with install
+              </span>
+            ) : null}
+            {rtoFacts.truckShort > 0 ? (
+              <span>
+                <span className={styles.summaryStrong}>{rtoFacts.truckShort}</span> short on truck
+              </span>
+            ) : null}
+          </div>
+
+          <label className={styles.field} style={{ marginBottom: "0.65rem", maxWidth: "28rem" }}>
+            <span className={styles.fieldLabel}>Find a job</span>
+            <input
+              className={styles.input}
+              value={rtoQuery}
+              onChange={(event) => setRtoQuery(event.target.value)}
+              placeholder="Client, designer, notes…"
+            />
+          </label>
+
+          {loading && rtoQueue.length === 0 ? (
+            <p className={styles.empty}>Loading jobs…</p>
+          ) : visibleRto.length === 0 ? (
+            <p className={styles.empty}>
+              {rtoQuery.trim()
+                ? "No jobs match that search."
+                : "No jobs marked ready to order."}
+            </p>
           ) : (
-            <p className={styles.empty}>No jobs waiting on a product summary.</p>
+            <table className={styles.table} style={{ minWidth: "56rem" }}>
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Designer</th>
+                  <th>Stage</th>
+                  <th>Truck</th>
+                  <th>Sold</th>
+                  <th>Install</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRto.map((job) => (
+                  <tr
+                    key={job.id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => router.push(`/inspired-closets/ops/projects?id=${job.id}`)}
+                  >
+                    <td>
+                      <strong>{job.client?.name ?? "Job"}</strong>
+                      {job.title ? (
+                        <span className={styles.jobTitleMark}> · {job.title}</span>
+                      ) : null}
+                    </td>
+                    <td>{job.designer?.name ?? "—"}</td>
+                    <td>{stageLabel(job.stage)}</td>
+                    <td>
+                      {(job.receiving_total_qty ?? 0) > 0 ? (
+                        <span
+                          title={
+                            (job.receiving_open_qty ?? 0) > 0
+                              ? "Still short on the packing slip"
+                              : "All slip pieces received"
+                          }
+                        >
+                          {job.receiving_received_qty}/{job.receiving_total_qty}
+                          {(job.receiving_open_qty ?? 0) > 0 ? " short" : " in"}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>{formatJobDate(job.sold_date)}</td>
+                    <td>{formatJobDate(job.install_date)}</td>
+                    <td className={styles.notesCell} title={job.notes ?? undefined}>
+                      {job.notes ?? ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </section>
       ) : null}
@@ -1062,10 +773,12 @@ export default function OpsInventoryWorkspace() {
           <span>
             <span className={styles.summaryStrong}>{summary.lowStock}</span> low stock
           </span>
-          <span>
-            On-hand value{" "}
-            <span className={styles.summaryStrong}>{centsToDisplay(summary.valueCents)}</span>
-          </span>
+          {summary.valueCents > 0 ? (
+            <span>
+              On-hand value{" "}
+              <span className={styles.summaryStrong}>{centsToDisplay(summary.valueCents)}</span>
+            </span>
+          ) : null}
         </div>
 
         <label className={styles.field} style={{ marginBottom: "0.65rem", maxWidth: "28rem" }}>
@@ -1122,7 +835,7 @@ export default function OpsInventoryWorkspace() {
             </thead>
             <tbody>
               {visibleParts.map((part) => {
-                const low = part.qty_on_hand <= part.reorder_point;
+                const low = partIsLowStock(part);
                 return (
                   <tr
                     key={part.id}
@@ -1628,127 +1341,6 @@ export default function OpsInventoryWorkspace() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      ) : null}
-
-      {attentionKey ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onClick={() => setAttentionKey(null)}
-        >
-          <div
-            className={styles.modal}
-            role="dialog"
-            aria-label={attentionCopy[attentionKey].title}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className={styles.modalHead}>
-              <div>
-                <h3 className={styles.modalTitle}>{attentionCopy[attentionKey].title}</h3>
-              </div>
-              <button
-                type="button"
-                className={styles.buttonGhost}
-                onClick={() => setAttentionKey(null)}
-              >
-                Close
-              </button>
-            </div>
-            {attentionKey === "low" ? (
-              attention?.lowStock.length ? (
-                <ul className={styles.pulseList}>
-                  {attention.lowStock.map((part) => (
-                    <li key={part.id}>
-                      {part.name} · on hand {part.qty_on_hand} / reorder {part.reorder_point} ·{" "}
-                      {centsToDisplay(part.value_cents)}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.low.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "excess" ? (
-              attention?.excessCount ? (
-                <p className={styles.empty} style={{ marginTop: 0 }}>
-                  {attention.excessCount} parts flagged ·{" "}
-                  {centsToDisplay(attention.excessValueCents)} on the shelf.
-                </p>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.excess.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "unallocated" ? (
-              attention?.unallocatedReceives.length ? (
-                <ul className={styles.pulseList}>
-                  {attention.unallocatedReceives.map((row, idx) => (
-                    <li key={`${row.part_id}-${idx}`}>
-                      {row.name} · +{row.qty} · {new Date(row.created_at).toLocaleDateString()}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.unallocated.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "missing" ? (
-              attention?.missingMaterials.length ? (
-                <ul className={styles.pulseList}>
-                  {attention.missingMaterials.map((job) => (
-                    <li key={job.id}>
-                      {job.client_name} · {job.stage.replace(/_/g, " ")} ·{" "}
-                      {centsToDisplay(job.contract_cents)}
-                      {job.install_date ? ` · install ${job.install_date}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.missing.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "unstaged" ? (
-              (attention?.unstagedInstalls ?? []).length ? (
-                <ul className={styles.pulseList}>
-                  {(attention?.unstagedInstalls ?? []).map((job) => (
-                    <li key={job.id}>
-                      {job.client_name}
-                      {job.install_date ? ` · ${job.install_date}` : ""} · {job.unstaged}{" "}
-                      unstaged
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.unstaged.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "slip" ? (
-              (attention?.receivingShortJobs ?? []).length ? (
-                <ul className={styles.pulseList}>
-                  {(attention?.receivingShortJobs ?? []).map((job) => (
-                    <li key={job.cust_ref}>
-                      {job.job_name} · {job.open} lines not fully received
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.slip.empty}</p>
-              )
-            ) : null}
-            {attentionKey === "nojob" ? (
-              (attention?.receivingUnassigned ?? []).length ? (
-                <ul className={styles.pulseList}>
-                  {(attention?.receivingUnassigned ?? []).map((row) => (
-                    <li key={row.label}>
-                      {row.label} · {row.lines} lines
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.empty}>{attentionCopy.nojob.empty}</p>
-              )
-            ) : null}
           </div>
         </div>
       ) : null}

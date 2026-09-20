@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
-import { hiddenPartSku, PART_CATEGORIES, realItemNumber } from "@/lib/inspired-closets-ops-inventory";
+import {
+  hiddenPartSku,
+  PART_CATEGORIES,
+  partIsLowStock,
+  realItemNumber,
+} from "@/lib/inspired-closets-ops-inventory";
 
 export const runtime = "nodejs";
 
@@ -58,10 +63,10 @@ export async function GET(request: Request) {
     });
   }
   if (filter === "low") {
-    parts = parts.filter((part) => part.qty_on_hand <= part.reorder_point);
+    parts = parts.filter((part) => partIsLowStock(part));
   }
 
-  const lowStock = parts.filter((part) => part.qty_on_hand <= part.reorder_point).length;
+  const lowStock = (data ?? []).filter((part) => partIsLowStock(part)).length;
   const excess = (data ?? []).filter((part) => part.is_excess).length;
   const valueCents = parts.reduce(
     (sum, part) => sum + part.qty_on_hand * part.unit_cost_cents,

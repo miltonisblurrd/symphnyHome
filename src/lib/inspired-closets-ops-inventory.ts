@@ -35,6 +35,13 @@ export function availableQty(onHand: number, reserved: number): number {
   return Math.max(0, (onHand ?? 0) - (reserved ?? 0));
 }
 
+/** Reorder must be set. Qty 0 with reorder 0 is not low stock. */
+export function partIsLowStock(part: { qty_on_hand?: number | null; reorder_point?: number | null }): boolean {
+  const reorder = Number(part.reorder_point) || 0;
+  if (reorder <= 0) return false;
+  return (Number(part.qty_on_hand) || 0) <= reorder;
+}
+
 /** Signed delta applied to qty_on_hand. */
 export function qtyDelta(type: IcStockMovementType, qty: number): number {
   const absolute = Math.abs(qty);

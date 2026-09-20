@@ -15,12 +15,16 @@ import {
   fixtureItemsToParsed,
   findJobFromFilename,
   clientHintFromFilename,
+  ensureShipmentHasShipDate,
+  inferredShipmentShipDate,
   linkItemToOs,
   loadShipmentItemRows,
   missingReceivingTable,
+  normalizeShipDate,
   notifyReceiving,
   parsePackingSlip,
   relinkShipmentItems,
+  resolveShipDate,
   shipmentRollup,
   type ParsedSlipItem,
   type ShipmentItemRow,
@@ -35,14 +39,7 @@ async function actorId(): Promise<string | null> {
 }
 
 function toIsoDate(value: string | null): string | null {
-  if (!value) return null;
-  const m = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) {
-    const [, mm, dd, yyyy] = m;
-    return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
-  return null;
+  return normalizeShipDate(value);
 }
 
 async function insertItems(
@@ -242,7 +239,10 @@ export async function GET(request: Request) {
       ? ((items ?? []) as ShipmentItemRow[]).filter((row) => row.job_id === jobId)
       : ((items ?? []) as ShipmentItemRow[]);
     const rollup = shipmentRollup(scoped);
-    shipments.push({ ...ship, ...rollup });
+    const shipDate = ship.ship_date
+      ? inferredShipmentShipDate(ship)
+      : await ensureShipmentHasShipDate(ship);
+    shipments.push({ ...ship, ship_date: shipDate, ...rollup });
   }
   return NextResponse.json({ ok: true, shipments });
 }
@@ -429,9 +429,14 @@ export async function POST(request: Request) {
       if (filenameJobId) {
         await absorbJobItemsOntoShipment(filenameJobId, ship.id);
       }
+      const shipDate =
+        parsed.ship_date ||
+        resolveShipDate({ parsed: parsed.ship_date, filename: file.name }) ||
+        new Date().toISOString().slice(0, 10);
       if (inserted.jobShipmentIds.length > 0) {
         await appendPackingListMeta(inserted.jobShipmentIds, {
           notice: parsed.notice,
+          ship_date: shipDate,
           source_filename: file.name,
           storage_path: storagePath,
           public_url: publicUrl,
@@ -469,7 +474,7 @@ export async function POST(request: Request) {
         .from("ic_shipments")
         .update({
           notice: parsed.notice || hint || null,
-          ship_date: toIsoDate(parsed.ship_date),
+          ship_date: shipDate,
           vendor: parsed.vendor || "stow",
           status: "ready",
           total_pages: parsed.total_pages,
@@ -503,6 +508,7 @@ export async function POST(request: Request) {
         .from("ic_shipments")
         .update({
           notice: hint || null,
+          ship_date: resolveShipDate({ filename: file.name }),
           status: "ready",
           parse_error: message,
           parse_quality: { job_id: filenameJobId, client_hint: hint || null },

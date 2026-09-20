@@ -86,11 +86,28 @@ export const icClients = pgTable("ic_clients", {
   email: text("email"),
   address: text("address"),
   notes: text("notes"),
+  /** Person key after stripping job descriptors (FRIEDMAN from FRIEDMAN PRIMARY ADD ON). */
+  identityKey: text("identity_key"),
+  /** Soft-merge: duplicate points at the canonical client. */
+  mergedIntoClientId: uuid("merged_into_client_id"),
   createdBy: uuid("created_by").references(() => icStaff.id),
   updatedBy: uuid("updated_by").references(() => icStaff.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/** Ambiguous same-name clients that need a human Merge / Keep separate. */
+export const icClientMergeCandidates = pgTable("ic_client_merge_candidates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  identityKey: text("identity_key").notNull(),
+  clientIds: uuid("client_ids").array().notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /** Partner (realtor/builder/designer) or customer file. Contact stays on ic_clients. */
@@ -284,6 +301,10 @@ export const icJobs = pgTable("ic_jobs", {
   communityRef: text("community_ref"),
   studioRef: text("studio_ref"),
   workbookRef: text("workbook_ref"),
+  /** Job descriptor from workbook labels (PRIMARY ADD ON) — not the client name. */
+  title: text("title"),
+  /** Soft-dedupe when Sold + Install sheets both seeded the same work. */
+  duplicateOfJobId: uuid("duplicate_of_job_id"),
   receiveDate: date("receive_date"),
   jobCheckOwnerId: uuid("job_check_owner_id").references(() => icStaff.id),
   tentativeInstallNotes: text("tentative_install_notes"),

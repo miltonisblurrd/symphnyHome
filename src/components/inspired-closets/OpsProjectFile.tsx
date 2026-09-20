@@ -41,6 +41,7 @@ export type ProjectJob = {
   receive_date?: string | null;
   visit_window?: string | null;
   job_kind?: string | null;
+  title?: string | null;
   tentative_install_notes?: string | null;
   proposal_url?: string | null;
   proposal_filename?: string | null;
@@ -90,11 +91,56 @@ export type ProjectPayment = {
   paid_at?: string | null;
 };
 
+export type ProjectClientJob = {
+  id: string;
+  title: string | null;
+  job_kind: string | null;
+  stage: string;
+  sold_date: string | null;
+  install_date: string | null;
+  contract_cents: number;
+};
+
+export type ProjectMergeCandidate = {
+  id: string;
+  identity_key: string;
+  reason: string;
+  status: string;
+  client_ids: string[];
+  clients: Array<{
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    jobs: Array<{
+      id: string;
+      title: string | null;
+      stage: string;
+      contract_cents: number;
+      sold_date: string | null;
+      install_date: string | null;
+    }>;
+  }>;
+};
+
+function mergeReasonLabel(reason: string): string {
+  if (reason === "conflicting_contact") {
+    return "Phone, email, or address does not match";
+  }
+  if (reason === "lot_or_hash_suffix") {
+    return "Lot or home number may be a different house";
+  }
+  return "Name matches, but the OS is not sure they are the same person";
+}
+
 export type ProjectFile = {
   job: ProjectJob;
   lead: ProjectLead | null;
   appointments: ProjectAppointment[];
   payments: ProjectPayment[];
+  clientJobs?: ProjectClientJob[];
+  mergeCandidate?: ProjectMergeCandidate | null;
 };
 
 type MaterialLine = {
@@ -162,6 +208,19 @@ function jobKindLabel(id: string | null | undefined): string {
   return JOB_KINDS.find((item) => item.id === id)?.label ?? id;
 }
 
+function stageBadgeTone(
+  stage: string,
+): "early" | "depositDue" | "depositIn" | "shop" | "install" | "delivered" | "closed" | "cancel" {
+  if (stage === "cancelled") return "cancel";
+  if (stage === "closed") return "closed";
+  if (stage === "install_complete" || stage === "final_payment") return "delivered";
+  if (stage === "install_scheduled" || stage === "install_in_progress") return "install";
+  if (stage === "job_check" || stage === "ordered") return "shop";
+  if (stage === "deposit_received") return "depositIn";
+  if (stage === "deposit_pending") return "depositDue";
+  return "early";
+}
+
 export default function OpsProjectFile({
   job,
   file,
@@ -183,6 +242,8 @@ export default function OpsProjectFile({
   onStagePart,
   onDamagePart,
   onMaterialsChanged,
+  onSelectJob,
+  onResolveMerge,
 }: {
   job: ProjectJob;
   file: ProjectFile | null;
@@ -204,16 +265,64 @@ export default function OpsProjectFile({
   onStagePart: (lineId: string) => void;
   onDamagePart: (lineId: string) => void;
   onMaterialsChanged?: () => void;
+  onSelectJob?: (jobId: string) => void;
+  onResolveMerge?: (action: "merge" | "keep_separate", intoClientId?: string) => void;
 }) {
   const lead = file?.lead ?? null;
   const client = file?.job.client ?? job.client;
   const name = client?.name ?? leadName(lead, "Project");
+  const stageLabel = stages.find((stage) => stage.id === job.stage)?.label ?? job.stage;
+  const jobTitle = job.title || file?.job.title || null;
+  const clientJobs = file?.clientJobs ?? [];
+  const mergeCandidate = file?.mergeCandidate ?? null;
+  const currentClientId = client?.id ?? job.client_id;
+  const badgeTone = stageBadgeTone(job.stage);
+  const badgeClass = {
+    early: styles.fileBadgeEarly,
+    depositDue: styles.fileBadgeDepositDue,
+    depositIn: styles.fileBadgeDepositIn,
+    shop: styles.fileBadgeShop,
+    install: styles.fileBadgeInstall,
+    delivered: styles.fileBadgeDelivered,
+    closed: styles.fileBadgeClosed,
+    cancel: styles.fileBadgeCancel,
+  }[badgeTone];
+
+  function historyLabel(row: ProjectClientJob): string {
+    if (row.title) return row.title;
+    if (row.job_kind === "go_back") return "Go-back";
+    if (row.job_kind === "service") return "Service";
+    if (row.sold_date) return `Sold ${row.sold_date}`;
+    if (row.install_date) return `Install ${row.install_date}`;
+    return "Job";
+  }
+
+  function historyBadgeClass(stage: string): string {
+    const tone = stageBadgeTone(stage);
+    return {
+      early: styles.fileBadgeEarly,
+      depositDue: styles.fileBadgeDepositDue,
+      depositIn: styles.fileBadgeDepositIn,
+      shop: styles.fileBadgeShop,
+      install: styles.fileBadgeInstall,
+      delivered: styles.fileBadgeDelivered,
+      closed: styles.fileBadgeClosed,
+      cancel: styles.fileBadgeCancel,
+    }[tone];
+  }
 
   return (
     <div className={styles.projectFile} id="project-file">
       <div className={styles.projectFileHead}>
         <div>
-          <h2 className={styles.leadName}>{name}</h2>
+          <div className={styles.fileTitleRow}>
+            <h2 className={styles.leadName}>{name}</h2>
+            <span className={`${styles.fileBadge} ${badgeClass}`.trim()}>{stageLabel}</span>
+            {jobTitle ? <span className={styles.fileJobTitle}>{jobTitle}</span> : null}
+            {mergeCandidate ? (
+              <span className={styles.mergeBadge}>Confirm and merge with client</span>
+            ) : null}
+          </div>
           <p className={styles.leadContact}>
             {[job.community_ref ? `Community ${job.community_ref}` : null, job.studio_ref ? `Studio ${job.studio_ref}` : null]
               .filter(Boolean)
@@ -227,11 +336,89 @@ export default function OpsProjectFile({
           <a className={styles.buttonGhost} href="/inspired-closets/ops/appointments?tab=installs">
             Open Calendar
           </a>
-          <button type="button" className={styles.buttonGhost} onClick={onClose}>
+          <button type="button" className={`${styles.buttonGhost} ${styles.fileClose}`} onClick={onClose}>
             Close
           </button>
         </div>
       </div>
+
+      {mergeCandidate && mergeCandidate.clients.length > 1 ? (
+        <div className={styles.mergeReview}>
+          <div className={styles.mergeReviewHead}>
+            <span className={styles.mergeBadge}>Confirm and merge with client</span>
+            <p className={styles.mergeReviewWhy}>{mergeReasonLabel(mergeCandidate.reason)}</p>
+          </div>
+          <p className={styles.mergeReviewCopy}>
+            The OS left this as its own job because it is not sure these are the same person.
+            Confirm the merge, or keep them separate.
+          </p>
+          <div className={styles.mergeReviewList}>
+            {mergeCandidate.clients
+              .filter((row) => row.id !== currentClientId)
+              .map((row) => {
+                const jobCount = row.jobs.length;
+                const contact = [row.phone, row.email, row.address].filter(Boolean).join(" · ");
+                return (
+                  <div key={row.id} className={styles.mergeReviewCard}>
+                    <strong>{row.name}</strong>
+                    <span>{contact || "No phone, email, or address on file"}</span>
+                    <span>
+                      {jobCount} {jobCount === 1 ? "job" : "jobs"}
+                      {row.jobs[0]?.title ? ` · ${row.jobs[0].title}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.buttonPrimary}
+                      disabled={busy}
+                      onClick={() => onResolveMerge?.("merge", row.id)}
+                    >
+                      Merge with this client
+                    </button>
+                  </div>
+                );
+              })}
+          </div>
+          <button
+            type="button"
+            className={styles.buttonGhost}
+            disabled={busy}
+            onClick={() => onResolveMerge?.("keep_separate")}
+          >
+            Keep as a separate client
+          </button>
+        </div>
+      ) : null}
+
+      {clientJobs.length > 1 ? (
+        <div className={styles.jobHistory}>
+          <p className={styles.jobHistoryLabel}>Job history</p>
+          <div className={styles.jobHistoryList}>
+            {clientJobs.map((row) => {
+              const rowStage = stages.find((stage) => stage.id === row.stage)?.label ?? row.stage;
+              const active = row.id === job.id;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={`${styles.jobHistoryChip} ${active ? styles.jobHistoryChipActive : ""}`}
+                  onClick={() => {
+                    if (!active) onSelectJob?.(row.id);
+                  }}
+                >
+                  <span className={styles.jobHistoryChipTitle}>{historyLabel(row)}</span>
+                  <span className={`${styles.fileBadge} ${historyBadgeClass(row.stage)}`.trim()}>
+                    {rowStage}
+                  </span>
+                  <span className={styles.jobHistoryChipMeta}>
+                    {cents(row.contract_cents)}
+                    {row.install_date ? ` · ${row.install_date}` : row.sold_date ? ` · ${row.sold_date}` : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {loading && !file ? <p className={styles.empty}>Loading project…</p> : null}
 
@@ -248,7 +435,7 @@ export default function OpsProjectFile({
         </p>
       ) : null}
 
-      <div className={styles.detailSection} style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+      <div className={`${styles.detailSection} ${styles.fileBand}`}>
         <p className={styles.detailSectionTitle}>Project</p>
         <div className={styles.detailGrid}>
           <label className={styles.field}>
@@ -322,7 +509,7 @@ export default function OpsProjectFile({
             <span className={styles.fieldLabel}>Collected</span>
             <input className={styles.input} value={cents(job.collected_cents)} readOnly />
           </label>
-          <label className={styles.field} style={{ gridColumn: "1 / -1" }}>
+          <label className={`${styles.field} ${styles.fileNotes}`} style={{ gridColumn: "1 / -1" }}>
             <span className={styles.fieldLabel}>Notes</span>
             <textarea
               className={styles.input}
@@ -337,8 +524,15 @@ export default function OpsProjectFile({
         </div>
       </div>
 
-      <div className={styles.detailSection}>
-        <p className={styles.detailSectionTitle}>Lead</p>
+      <div className={`${styles.detailSection} ${styles.fileBand} ${styles.fileBandAlt}`}>
+        <div className={styles.fileSectionHead}>
+          <p className={styles.detailSectionTitle}>Lead</p>
+          {lead ? (
+            <a className={styles.buttonGhost} href="/inspired-closets/ops/leads">
+              Open in Leads
+            </a>
+          ) : null}
+        </div>
         {lead ? (
           <div className={styles.detailGrid}>
             <label className={styles.field}>
@@ -375,18 +569,13 @@ export default function OpsProjectFile({
                 <input className={styles.input} value={lead.project_area} readOnly />
               </label>
             ) : null}
-            <div className={styles.formActions} style={{ gridColumn: "1 / -1", margin: 0 }}>
-              <a className={styles.buttonGhost} href="/inspired-closets/ops/leads">
-                Open in Leads
-              </a>
-            </div>
           </div>
         ) : (
           <p className={styles.empty}>No lead linked to this project yet.</p>
         )}
       </div>
 
-      <div className={styles.detailSection}>
+      <div className={`${styles.detailSection} ${styles.fileBand}`}>
         <p className={styles.detailSectionTitle}>Schedule</p>
         <div className={styles.detailGrid} style={{ marginBottom: "0.85rem" }}>
           <label className={styles.field}>
@@ -415,7 +604,7 @@ export default function OpsProjectFile({
         {(file?.appointments ?? []).length === 0 ? (
           <p className={styles.empty}>No calendar events on this project yet.</p>
         ) : (
-          <table className={styles.table} style={{ minWidth: "36rem" }}>
+          <table className={styles.table}>
             <thead>
               <tr>
                 <th>When</th>
@@ -442,14 +631,14 @@ export default function OpsProjectFile({
         )}
       </div>
 
-      <div className={styles.detailSection}>
+      <div className={`${styles.detailSection} ${styles.fileBand} ${styles.fileBandAlt}`}>
         <p className={styles.detailSectionTitle}>Payments</p>
         {(file?.payments ?? []).length === 0 ? (
           <p className={styles.empty}>
             No 50 / 40 / 10 ledger rows yet. Open Payments to record the deposit.
           </p>
         ) : (
-          <table className={styles.table} style={{ minWidth: "32rem" }}>
+          <table className={styles.table}>
             <thead>
               <tr>
                 <th>Milestone</th>
@@ -474,9 +663,9 @@ export default function OpsProjectFile({
         )}
       </div>
 
-      <div className={styles.detailSection}>
+      <div className={`${styles.detailSection} ${styles.fileBand}`}>
         <p className={styles.detailSectionTitle}>Proposal & inventory</p>
-        <p className={styles.fieldLabel}>
+        <p className={`${styles.fieldLabel} ${styles.fileSubhead}`}>
           Signed proposal
           {job.proposal_filename ? ` · ${job.proposal_filename}` : ""}
         </p>
@@ -502,7 +691,7 @@ export default function OpsProjectFile({
         </div>
         <OpsStowSalesOrder jobId={job.id} />
         <OpsProductSummary jobId={job.id} onChanged={onMaterialsChanged} />
-        <p className={styles.fieldLabel}>
+        <p className={`${styles.fieldLabel} ${styles.fileSubhead}`}>
           Materials on this project ·{" "}
           <span className={styles.summaryStrong}>{cents(materialsTotal)}</span>
           <a href="/inspired-closets/ops/inventory" style={{ marginLeft: "0.75rem", fontSize: "0.8rem" }}>
@@ -510,7 +699,7 @@ export default function OpsProjectFile({
           </a>
         </p>
         {jobLines.length > 0 ? (
-          <table className={styles.table} style={{ minWidth: "32rem", marginBottom: "1rem" }}>
+          <table className={styles.table} style={{ marginBottom: "1rem" }}>
             <thead>
               <tr>
                 <th>Part</th>
@@ -561,7 +750,7 @@ export default function OpsProjectFile({
           </p>
         )}
         {jobMaterials.length > 0 ? (
-          <table className={styles.table} style={{ minWidth: "32rem" }}>
+          <table className={styles.table}>
             <thead>
               <tr>
                 <th>When</th>

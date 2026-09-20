@@ -160,6 +160,40 @@ a.buttonGhost {
 .ageWarn { color: #9a5b10; font-weight: 700; }
 .ageAlert { color: var(--ic-red); font-weight: 800; }
 
+.listAnchorSentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.listAnchor {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--ic-bone);
+  padding: 0;
+  box-shadow: 0 10px 14px -12px transparent;
+  transition: box-shadow 0.18s ease-in-out, padding 0.18s ease-in-out;
+}
+
+.listAnchor .listToolbar {
+  margin-bottom: 0.55rem;
+}
+
+.listAnchor .summaryRow {
+  margin-bottom: 0.7rem;
+  transition: margin-bottom 0.18s ease-in-out;
+}
+
+.listAnchorPinned {
+  padding: 0.7rem 0;
+  box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.28);
+}
+
+.listAnchorPinned .summaryRow {
+  margin-bottom: 0;
+}
+
 .listToolbar {
   display: flex;
   align-items: center;
@@ -192,6 +226,72 @@ a.buttonGhost {
 
 .listToolbar .tabs {
   margin-bottom: 0;
+}
+
+.toolbarSearch {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+  max-width: 22rem;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin: 0 0 0.55rem;
+}
+
+.pagerLeft {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.pagerSize {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.pagerSize .input {
+  width: auto;
+  min-width: 3.4rem;
+  padding: 0.22rem 0.4rem;
+  font-size: 0.72rem;
+}
+
+.pagerMeta {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pagerButtons {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.pagerBtn {
+  border-radius: 0.4rem;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--ic-red);
+  background: transparent;
+  color: var(--ic-red);
+  font-family: inherit;
+}
+
+.pagerBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .pulseGrid {
@@ -240,7 +340,7 @@ a.buttonGhost {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  border-radius: 999px;
+  border-radius: 0.45rem;
   padding: 0.45rem 0.95rem;
   min-width: 2.6rem;
   font-size: 0.82rem;
@@ -294,7 +394,7 @@ a.buttonGhost {
 .tab {
   border: 1px solid var(--line);
   background: var(--ic-white);
-  border-radius: 999px;
+  border-radius: 0.45rem;
   padding: 0.35rem 0.85rem;
   font-size: 0.78rem;
   font-weight: 700;
@@ -306,6 +406,10 @@ a.buttonGhost {
   background: var(--ic-black);
   color: var(--ic-white);
   border-color: var(--ic-black);
+}
+
+.tab:hover:not(.tabActive) {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .tabCount {
@@ -522,7 +626,28 @@ a.buttonGhost {
 }
 
 .docsTable {
-  min-width: 52rem;
+  min-width: 68rem;
+}
+
+.docJobCell {
+  white-space: nowrap;
+  min-width: 14rem;
+}
+
+.docAttach {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.docAttach .input {
+  min-width: 9.5rem;
+  width: auto;
+}
+
+.docAttach .buttonGhost {
+  padding: 0.38rem 0.7rem;
 }
 
 .table th {
@@ -549,6 +674,18 @@ a.buttonGhost {
 
 .rowSelected {
   background: #f4eee8;
+}
+
+.table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.table tbody tr:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.table tbody tr.rowSelected:hover {
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .projectFile {
@@ -646,6 +783,7 @@ a.buttonGhost {
 
 .summaryRow {
   display: flex;
+  align-items: center;
   gap: 1.25rem;
   flex-wrap: wrap;
   margin-bottom: 0.9rem;
@@ -653,9 +791,124 @@ a.buttonGhost {
   color: var(--muted);
 }
 
+.summaryRow .toolbarRight {
+  margin-left: auto;
+}
+
 .summaryStrong {
   color: var(--ink);
   font-weight: 800;
+}
+
+.jobCountMark {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.jobTitleMark {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+}
+
+.mergeBadge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.45rem;
+  border-radius: 0.45rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  background: #fff3d6;
+  color: #6b4d00;
+  border: 1px solid rgba(160, 100, 20, 0.28);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.mergeSummaryBtn {
+  appearance: none;
+  border: 1px solid rgba(160, 100, 20, 0.28);
+  background: #fff3d6;
+  color: #6b4d00;
+  border-radius: 0.45rem;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.mergeSummaryBtn .summaryStrong {
+  color: #6b4d00;
+}
+
+.mergeSummaryBtnActive {
+  background: #f8e3b0;
+  border-color: #6b4d00;
+}
+
+.mergeReview {
+  margin: 0 1.15rem 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(160, 100, 20, 0.28);
+  background: #fff8ea;
+  border-radius: 0.55rem;
+}
+
+.mergeReviewHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.mergeReviewHead .mergeBadge {
+  margin-left: 0;
+}
+
+.mergeReviewWhy {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6b4d00;
+}
+
+.mergeReviewCopy {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #7a4b10;
+}
+
+.mergeReviewList {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.mergeReviewCard {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: start;
+  padding: 0.7rem 0.8rem;
+  background: var(--ic-white);
+  border: 1px solid rgba(160, 100, 20, 0.18);
+  border-radius: 0.45rem;
+}
+
+.mergeReviewCard strong {
+  font-size: 0.9rem;
+}
+
+.mergeReviewCard span {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.mergeReviewCard .buttonPrimary {
+  margin-top: 0.45rem;
 }
 
 .deskMeta {
@@ -1114,12 +1367,220 @@ a.buttonGhost {
 .modal.modalWide {
   width: min(64rem, 96vw);
   max-height: 92dvh;
+  padding: 0;
+}
+
+.modal.modalWide > .empty {
+  padding: 1.1rem 1.15rem 1.25rem;
 }
 
 .modalWide .projectFile {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
+}
+
+.modalWide .projectFile .projectFileHead {
+  padding: 1.1rem 1.15rem 0.85rem;
+  margin-bottom: 0;
+}
+
+.modalWide .projectFile > .empty {
+  padding: 0.75rem 1.15rem;
+  margin: 0;
+}
+
+.modalWide .projectFile > .notice {
+  margin: 0 1.15rem 0.85rem;
+}
+
+.modalWide .projectFile .fileBand {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 1.25rem 1.15rem;
+  border-top: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--ic-white);
+}
+
+.modalWide .projectFile .fileBandAlt {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.modalWide .projectFile .fileBand:last-child {
+  border-radius: 0 0 0.75rem 0.75rem;
+  border-bottom: none;
+  padding-bottom: 1.35rem;
+}
+
+.modalWide .projectFile .fileBand .detailSectionTitle {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+.modalWide .projectFile .fileTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.7rem;
+}
+
+.modalWide .projectFile .fileTitleRow .leadName {
+  margin: 0;
+}
+
+.fileJobTitle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.jobHistory {
+  padding: 0 1.15rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.jobHistoryLabel {
+  margin: 0 0 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.jobHistoryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.jobHistoryChip {
+  appearance: none;
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--ic-white);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  min-width: 9rem;
+}
+
+.jobHistoryChip:hover {
+  border-color: rgba(0, 0, 0, 0.28);
+}
+
+.jobHistoryChipActive {
+  border-color: var(--ic-black);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.jobHistoryChipTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.jobHistoryChipMeta {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.fileBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.fileBadgeEarly {
+  background: #e8e6e3;
+  color: #3d3a36;
+}
+
+.fileBadgeDepositDue {
+  background: #f8e3b0;
+  color: #6b4d00;
+}
+
+.fileBadgeDepositIn {
+  background: var(--ic-blush);
+  color: var(--ic-red);
+}
+
+.fileBadgeShop {
+  background: #d9e4f0;
+  color: #1f3f66;
+}
+
+.fileBadgeInstall {
+  background: #c9d4f0;
+  color: #24306b;
+}
+
+.fileBadgeDelivered {
+  background: #d4edda;
+  color: #1c5c2c;
+}
+
+.fileBadgeClosed {
+  background: #dcd9d5;
+  color: #5c5854;
+}
+
+.fileBadgeCancel {
+  background: #f4c9c9;
+  color: #7a1f1f;
+}
+
+.modalWide .projectFile .fileClose {
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.modalWide .projectFile .fileClose:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.modalWide .projectFile .fileSectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.modalWide .projectFile .fileSectionHead .detailSectionTitle {
+  margin: 0;
+}
+
+.modalWide .projectFile .fileNotes {
+  margin-top: 0.35rem;
+}
+
+.modalWide .projectFile .fileSubhead {
+  margin: 0 0 0.45rem;
+}
+
+.modalWide .projectFile .empty {
+  padding: 0.45rem 0;
+  text-align: left;
+}
+
+.modalWide .projectFile .table {
+  min-width: 0;
+}
+
+.modalWide .projectFile .table th {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .statStrip {

@@ -290,6 +290,7 @@ export async function appendPackingListMeta(
   shipmentIds: string[],
   packing: {
     notice: string | null;
+    ship_date?: string | null;
     source_filename: string | null;
     storage_path: string | null;
     public_url: string | null;
@@ -299,7 +300,7 @@ export async function appendPackingListMeta(
   const supabase = getSupabaseAdmin();
   const { data: ships } = await supabase
     .from("ic_shipments")
-    .select("id, vendor, parse_quality")
+    .select("id, vendor, ship_date, parse_quality")
     .in("id", shipmentIds)
     .is("deleted_at", null);
   const now = new Date().toISOString();
@@ -315,14 +316,15 @@ export async function appendPackingListMeta(
     if (!already) lists.push(packing);
     quality.packing_lists = lists;
     const vendor = String(ship.vendor ?? "stow");
-    await supabase
-      .from("ic_shipments")
-      .update({
-        parse_quality: quality,
-        vendor: vendor === "hafele" || vendor === "richelieu" ? "other" : vendor,
-        updated_at: now,
-      })
-      .eq("id", ship.id);
+    const patch: Record<string, unknown> = {
+      parse_quality: quality,
+      vendor: vendor === "hafele" || vendor === "richelieu" ? "other" : vendor,
+      updated_at: now,
+    };
+    if (!ship.ship_date && packing.ship_date) {
+      patch.ship_date = packing.ship_date;
+    }
+    await supabase.from("ic_shipments").update(patch).eq("id", ship.id);
   }
 }
 

@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadDotEnv } from "./content-engine/load-env";
 import type { IcJobKind, IcJobStage } from "../src/lib/inspired-closets-ops-jobs";
+import {
+  clientDisplayName,
+  clientIdentityKey,
+  jobDescriptorFromName,
+} from "../src/lib/inspired-closets-ops-clients";
 
 const ROOT = path.resolve(__dirname, "..");
 const DOCS = path.join(ROOT, "docs");
@@ -719,6 +724,7 @@ function jobBody(
     visit_window: draft.visitWindow,
     tentative_install_notes: draft.tentative,
     workbook_ref: draft.ref,
+    title: jobDescriptorFromName(draft.displayName),
     notes: draft.notes.join("\n") || null,
     deleted_at: null,
   };
@@ -762,7 +768,11 @@ async function main() {
     leadsByLast.set(last, list);
   }
 
-  const clientByName = new Map(clients.map((client) => [normKey(client.name), client.id]));
+  const clientByKey = new Map<string, string>();
+  for (const client of clients) {
+    const key = clientIdentityKey(client.name);
+    if (!clientByKey.has(key)) clientByKey.set(key, client.id);
+  }
   const jobByRef = new Map(
     existingJobs
       .filter((job) => job.workbook_ref)
@@ -770,19 +780,31 @@ async function main() {
   );
 
   let clientsCreated = 0;
-  const missingNames = [
-    ...new Set(jobs.map((job) => job.displayName).filter((name) => !clientByName.has(normKey(name)))),
+  const missingKeys = [
+    ...new Set(
+      jobs
+        .map((job) => clientIdentityKey(job.displayName))
+        .filter((key) => !clientByKey.has(key)),
+    ),
   ];
-  for (let i = 0; i < missingNames.length; i += 50) {
-    const slice = missingNames.slice(i, i + 50);
+  for (let i = 0; i < missingKeys.length; i += 50) {
+    const slice = missingKeys.slice(i, i + 50);
     const created = await rest(url, key, "ic_clients", {
       method: "POST",
-      body: JSON.stringify(slice.map((name) => ({ name }))),
+      body: JSON.stringify(
+        slice.map((identity) => {
+          const sample = jobs.find((job) => clientIdentityKey(job.displayName) === identity);
+          return {
+            name: clientDisplayName(sample?.displayName ?? identity),
+            identity_key: identity,
+          };
+        }),
+      ),
     });
     if (!created.ok) throw new Error(await created.text());
     const rows = (await created.json()) as Array<{ id: string; name: string }>;
     for (const row of rows) {
-      clientByName.set(normKey(row.name), row.id);
+      clientByKey.set(clientIdentityKey(row.name), row.id);
       clientsCreated += 1;
     }
   }
@@ -796,7 +818,7 @@ async function main() {
   const toUpdate: Array<{ id: string; body: Record<string, unknown> }> = [];
 
   for (const draft of jobs) {
-    const clientId = clientByName.get(normKey(draft.displayName));
+    const clientId = clientByKey.get(clientIdentityKey(draft.displayName));
     if (!clientId) {
       errors.push(`${draft.ref}: missing client`);
       continue;

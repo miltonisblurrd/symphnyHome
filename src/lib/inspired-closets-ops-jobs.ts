@@ -4,6 +4,11 @@
  */
 import { getSupabaseAdmin } from "@/db/client";
 import type { IcJobStage } from "@/db/ops-schema";
+import {
+  clientIdentityKey,
+  jobDescriptorFromName,
+  resolveClient,
+} from "@/lib/inspired-closets-ops-clients";
 
 export type { IcJobStage };
 
@@ -77,10 +82,6 @@ type PayrollSeedRow = {
   import_key: string | null;
 };
 
-function normalizeClientName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toUpperCase();
-}
-
 /** Best-effort stage from a payroll row until the team manages stages in-app. */
 export function inferStageFromPayroll(row: {
   contract_cents: number;
@@ -131,45 +132,20 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
 
   const rows = (entries ?? []) as PayrollSeedRow[];
   let skipped = 0;
+  let clientsCreated = 0;
 
+  const clientIdByKey = new Map<string, string>();
   const { data: existingClients, error: clientsError } = await supabase
     .from("ic_clients")
-    .select("id, name")
-    .is("deleted_at", null);
+    .select("id, name, identity_key, merged_into_client_id")
+    .is("deleted_at", null)
+    .is("merged_into_client_id", null);
   if (clientsError) throw clientsError;
 
-  const clientIdByName = new Map<string, string>();
   for (const client of existingClients ?? []) {
-    clientIdByName.set(normalizeClientName(client.name), client.id);
+    const key = client.identity_key || clientIdentityKey(client.name);
+    if (!clientIdByKey.has(key)) clientIdByKey.set(key, client.id);
   }
-
-  // Collect unique new clients
-  const newClientNames: string[] = [];
-  const seenNew = new Set<string>();
-  for (const row of rows) {
-    const name = row.client_name?.trim();
-    if (!name) {
-      skipped += 1;
-      continue;
-    }
-    const key = normalizeClientName(name);
-    if (clientIdByName.has(key) || seenNew.has(key)) continue;
-    seenNew.add(key);
-    newClientNames.push(name.trim());
-  }
-
-  let clientsCreated = 0;
-  await chunked(newClientNames, 100, async (slice) => {
-    const { data, error: insertError } = await supabase
-      .from("ic_clients")
-      .insert(slice.map((name) => ({ name })))
-      .select("id, name");
-    if (insertError) throw insertError;
-    for (const client of data ?? []) {
-      clientIdByName.set(normalizeClientName(client.name), client.id);
-      clientsCreated += 1;
-    }
-  });
 
   const { data: existingJobs, error: jobsError } = await supabase
     .from("ic_jobs")
@@ -193,6 +169,7 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
     sold_date: string | null;
     completed_date: string | null;
     workbook_ref: string;
+    title: string | null;
     notes: string | null;
     risk_flag: boolean;
   };
@@ -202,13 +179,20 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
 
   for (const row of rows) {
     const name = row.client_name?.trim();
-    if (!name) continue;
-
-    const ref = row.import_key || row.id;
-    const clientId = clientIdByName.get(normalizeClientName(name));
-    if (!clientId) {
+    if (!name) {
       skipped += 1;
       continue;
+    }
+
+    const ref = row.import_key || row.id;
+    const key = clientIdentityKey(name);
+    let clientId = clientIdByKey.get(key) ?? null;
+
+    if (!clientId) {
+      const resolved = await resolveClient({ name });
+      clientId = resolved.clientId;
+      clientIdByKey.set(key, clientId);
+      if (resolved.created) clientsCreated += 1;
     }
 
     if (row.job_id) {
@@ -231,6 +215,7 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
       sold_date: row.entry_date,
       completed_date: row.pay_date,
       workbook_ref: ref,
+      title: jobDescriptorFromName(name),
       notes: row.notes,
       risk_flag: false,
     });
@@ -239,10 +224,14 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
 
   let jobsCreated = 0;
   await chunked(jobsToInsert, 100, async (slice) => {
-    const { data, error: insertError } = await supabase
-      .from("ic_jobs")
-      .insert(slice)
-      .select("id, workbook_ref");
+    let { data, error: insertError } = await supabase.from("ic_jobs").insert(slice).select("id, workbook_ref");
+    if (insertError && /title|column|schema cache/i.test(insertError.message)) {
+      const withoutTitle = slice.map(({ title: _title, ...rest }) => rest);
+      ({ data, error: insertError } = await supabase
+        .from("ic_jobs")
+        .insert(withoutTitle)
+        .select("id, workbook_ref"));
+    }
     if (insertError) throw insertError;
     for (const job of data ?? []) {
       if (job.workbook_ref) jobIdByRef.set(job.workbook_ref, job.id);

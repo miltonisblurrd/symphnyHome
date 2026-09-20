@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
+import { resolveClient, jobDescriptorFromName } from "@/lib/inspired-closets-ops-clients";
 import {
   ensurePaymentMilestones,
   isDepositPaid,
@@ -440,21 +441,35 @@ export async function POST(request: Request) {
 
   let resolvedClientId = clientId;
   if (!resolvedClientId) {
-    const { data: createdClient, error: clientError } = await supabase
-      .from("ic_clients")
-      .insert({
+    try {
+      const resolved = await resolveClient({
         name: clientName,
         phone,
         email,
         address,
-        created_by: actorId,
-      })
-      .select("id")
-      .single();
-    if (clientError) {
-      return NextResponse.json({ ok: false, error: clientError.message }, { status: 500 });
+        actorId,
+      });
+      resolvedClientId = resolved.clientId;
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Could not resolve client." },
+        { status: 500 },
+      );
     }
-    resolvedClientId = createdClient.id;
+  } else {
+    try {
+      const resolved = await resolveClient({
+        name: clientName || "Client",
+        clientId: resolvedClientId,
+        phone,
+        email,
+        address,
+        actorId,
+      });
+      resolvedClientId = resolved.clientId;
+    } catch {
+      // Keep the provided client_id if resolve fails.
+    }
   }
 
   const areas = Array.isArray(body.areas_of_home)
@@ -1002,6 +1017,13 @@ export async function PATCH(request: Request) {
       sold_date: soldDate,
       community_ref: communityRef,
       studio_ref: studioRef,
+      title:
+        (typeof body.job_title === "string" && body.job_title.trim()) ||
+        jobDescriptorFromName(
+          [existing.first_name, existing.last_name].filter(Boolean).join(" ") ||
+            (typeof body.client_name === "string" ? body.client_name : "") ||
+            "",
+        ),
       job_check_owner_id: jobCheckOwnerId,
       tentative_install_notes: tentativeInstallNotes,
       site_ready_notes: siteReadyNotes,

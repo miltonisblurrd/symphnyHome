@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { formatMoney, formatShipDate } from "@/lib/inspired-closets-ops-shipment-display";
 import payroll from "./ops-payroll.module.css";
 
 type DocKind = "stow_sales_order" | "packing_slip" | "product_summary";
@@ -12,10 +13,15 @@ type Doc = {
   title: string;
   filename: string | null;
   soNumber: string | null;
+  poNumber: string | null;
   jobId: string | null;
   jobName: string | null;
   status: string;
   itemCount: number | null;
+  shipDate: string | null;
+  orderTotal: number | null;
+  weightLbs: number | null;
+  vendor: string | null;
   createdAt: string;
   publicUrl: string | null;
   href: string;
@@ -41,7 +47,7 @@ function whenLabel(value: string | null | undefined): string {
 }
 
 function kindLabel(kind: DocKind): string {
-  if (kind === "stow_sales_order") return "Stow sales order";
+  if (kind === "stow_sales_order") return "Sales order";
   if (kind === "packing_slip") return "Packaging slip";
   return "Project summary";
 }
@@ -66,8 +72,16 @@ function statusLabel(kind: DocKind, status: string): string {
 }
 
 function sourceLabel(kind: DocKind): string {
-  if (kind === "stow_sales_order") return "Gmail → OS";
-  return "Frank uploaded";
+  if (kind === "stow_sales_order") return "Gmail";
+  return "Upload";
+}
+
+function needsJob(doc: Doc): boolean {
+  return (
+    !doc.jobId &&
+    (doc.kind === "stow_sales_order" || doc.kind === "product_summary") &&
+    doc.status !== "ignored"
+  );
 }
 
 export default function OpsReceivingDocuments({
@@ -138,13 +152,23 @@ export default function OpsReceivingDocuments({
     return documents.filter((doc) => {
       if (kind !== "all" && doc.kind !== kind) return false;
       if (!q) return true;
-      const hay = `${doc.title} ${doc.filename ?? ""} ${doc.soNumber ?? ""} ${doc.jobName ?? ""} ${kindLabel(doc.kind)}`.toLowerCase();
+      const hay = [
+        doc.title,
+        doc.filename,
+        doc.soNumber,
+        doc.poNumber,
+        doc.jobName,
+        doc.vendor,
+        kindLabel(doc.kind),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       return hay.includes(q);
     });
   }, [documents, kind, query]);
 
-  async function attachSalesOrder(orderId: string) {
-    const jobId = attach[orderId];
+  async function attachSalesOrder(orderId: string, jobId = attach[orderId]) {
     if (!jobId) return;
     setBusyId(orderId);
     try {
@@ -176,8 +200,7 @@ export default function OpsReceivingDocuments({
     }
   }
 
-  async function attachSummary(summaryId: string) {
-    const jobId = attach[summaryId];
+  async function attachSummary(summaryId: string, jobId = attach[summaryId]) {
     if (!jobId) return;
     setBusyId(summaryId);
     try {
@@ -209,11 +232,41 @@ export default function OpsReceivingDocuments({
     }
   }
 
+  const tabs = [
+    ["all", "All", counts.all],
+    ["stow_sales_order", "Sales orders", counts.stow_sales_order],
+    ["packing_slip", "Packaging slips", counts.packing_slip],
+    ["product_summary", "Project summaries", counts.product_summary],
+  ] as const;
+
   return (
     <div>
+      <div className={payroll.listToolbar}>
+        <nav className={payroll.tabs} aria-label="Document views">
+          {tabs.map(([id, label, count]) => (
+            <button
+              key={id}
+              type="button"
+              className={`${payroll.tab} ${kind === id ? payroll.tabActive : ""}`}
+              onClick={() => setKind(id)}
+            >
+              {label}
+              {count ? <span className={payroll.tabCount}>{count}</span> : null}
+            </button>
+          ))}
+        </nav>
+        <input
+          className={`${payroll.input} ${payroll.toolbarSearch}`}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find an SO, job, filename…"
+          aria-label="Find a document"
+        />
+      </div>
+
       <div className={payroll.summaryRow}>
         <span>
-          <span className={payroll.summaryStrong}>{counts.stow_sales_order}</span> Stow sales orders
+          <span className={payroll.summaryStrong}>{counts.stow_sales_order}</span> sales orders
         </span>
         <span>
           <span className={payroll.summaryStrong}>{counts.packing_slip}</span> packaging slips
@@ -222,150 +275,109 @@ export default function OpsReceivingDocuments({
           <span className={payroll.summaryStrong}>{counts.product_summary}</span> project summaries
         </span>
       </div>
-      <label className={payroll.field} style={{ marginBottom: "0.65rem", maxWidth: "28rem" }}>
-        <span className={payroll.fieldLabel}>Find a document</span>
-        <input
-          className={payroll.input}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="SO number, job, filename"
-        />
-      </label>
-      <div className={payroll.filterChips}>
-        {(
-          [
-            ["all", `All (${counts.all})`],
-            ["stow_sales_order", `Stow sales orders (${counts.stow_sales_order})`],
-            ["packing_slip", `Packaging slips (${counts.packing_slip})`],
-            ["product_summary", `Project summaries (${counts.product_summary})`],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={`${payroll.chip} ${kind === id ? payroll.chipOn : ""}`}
-            onClick={() => setKind(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+
       {error ? <p className={payroll.notice}>{error}</p> : null}
-      {loading && documents.length === 0 ? (
-        <p className={payroll.empty}>Loading documents…</p>
-      ) : visible.length === 0 ? (
-        <p className={payroll.empty}>
-          {query.trim() || kind !== "all"
-            ? "No documents match that filter."
-            : "Nothing in yet. Sales orders land from Gmail. Frank uploads packaging slips and project summaries with the buttons above."}
-        </p>
-      ) : (
-        <table className={`${payroll.table} ${payroll.docsTable}`}>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Type</th>
-              <th>Document</th>
-              <th>Job</th>
-              <th>Status</th>
-              <th>Lines</th>
-              <th>Open</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((doc) => (
-              <tr key={`${doc.kind}-${doc.id}`}>
-                <td>{whenLabel(doc.createdAt)}</td>
-                <td>
-                  <div>{kindLabel(doc.kind)}</div>
-                  <div className={payroll.empty} style={{ margin: 0 }}>
-                    {sourceLabel(doc.kind)}
-                  </div>
-                </td>
-                <td>
-                  <strong>{doc.title}</strong>
-                  <div className={payroll.empty} style={{ margin: 0 }}>
-                    {[doc.soNumber ? `SO ${doc.soNumber}` : null, doc.filename]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                </td>
-                <td style={{ whiteSpace: "normal", minWidth: "12rem" }}>
-                  {doc.jobId ? (
-                    <Link href={doc.href}>{doc.jobName ?? "Open job"}</Link>
-                  ) : (doc.kind === "stow_sales_order" || doc.kind === "product_summary") &&
-                    (doc.status === "unmatched" || !doc.jobId) ? (
-                    <span style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+
+      <section className={payroll.panel}>
+        {loading && documents.length === 0 ? (
+          <p className={payroll.empty}>Loading documents…</p>
+        ) : visible.length === 0 ? (
+          <p className={payroll.empty}>
+            {query.trim() || kind !== "all"
+              ? "No documents match that search."
+              : "Nothing in yet. Sales orders land from Gmail. Frank uploads packaging slips and project summaries with the buttons above."}
+          </p>
+        ) : (
+          <table className={`${payroll.table} ${payroll.docsTable}`}>
+            <thead>
+              <tr>
+                <th>Document</th>
+                <th>Type</th>
+                <th>SO</th>
+                <th>Ship date</th>
+                <th>Total</th>
+                <th>Lines</th>
+                <th>Status</th>
+                <th>Job</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((doc) => (
+                <tr
+                  key={`${doc.kind}-${doc.id}`}
+                  className={needsJob(doc) ? payroll.rowHeld : undefined}
+                >
+                  <td>
+                    <Link href={doc.href} target={doc.href.startsWith("http") ? "_blank" : undefined}>
+                      {doc.title}
+                    </Link>
+                    {doc.filename ? (
+                      <span className={payroll.jobTitleMark}> · {doc.filename}</span>
+                    ) : null}
+                    {doc.publicUrl ? (
+                      <>
+                        {" "}
+                        <a href={doc.publicUrl} target="_blank" rel="noreferrer">
+                          PDF
+                        </a>
+                      </>
+                    ) : null}
+                  </td>
+                  <td>
+                    {kindLabel(doc.kind)}
+                    <span className={payroll.jobTitleMark}>
+                      {" "}
+                      · {doc.vendor && doc.kind === "packing_slip" ? doc.vendor : sourceLabel(doc.kind)}
+                    </span>
+                  </td>
+                  <td>{doc.soNumber ?? "—"}</td>
+                  <td>{formatShipDate(doc.shipDate) ?? "—"}</td>
+                  <td>
+                    {doc.orderTotal ? formatMoney(doc.orderTotal) : "—"}
+                    {doc.weightLbs ? (
+                      <span className={payroll.jobTitleMark}> · {doc.weightLbs} lbs</span>
+                    ) : null}
+                  </td>
+                  <td>{doc.itemCount ?? "—"}</td>
+                  <td>{statusLabel(doc.kind, doc.status)}</td>
+                  <td className={payroll.docJobCell}>
+                    {doc.jobId ? (
+                      <Link href={doc.href}>{doc.jobName ?? "Open job"}</Link>
+                    ) : needsJob(doc) ? (
                       <select
                         className={payroll.input}
                         value={attach[doc.id] ?? ""}
-                        onChange={(event) =>
-                          setAttach((current) => ({ ...current, [doc.id]: event.target.value }))
-                        }
+                        disabled={busyId === doc.id}
+                        onChange={(event) => {
+                          const jobId = event.target.value;
+                          setAttach((current) => ({ ...current, [doc.id]: jobId }));
+                          if (!jobId) return;
+                          void (doc.kind === "product_summary"
+                            ? attachSummary(doc.id, jobId)
+                            : attachSalesOrder(doc.id, jobId));
+                        }}
                       >
-                        <option value="">Choose job…</option>
+                        <option value="">
+                          {busyId === doc.id ? "Saving…" : "Choose job…"}
+                        </option>
                         {jobs.map((job) => (
                           <option key={job.id} value={job.id}>
                             {job.client?.name ?? "Job"} · {job.stage}
                           </option>
                         ))}
                       </select>
-                      <button
-                        type="button"
-                        className={payroll.buttonGhost}
-                        disabled={!attach[doc.id] || busyId === doc.id}
-                        onClick={() =>
-                          void (doc.kind === "product_summary"
-                            ? attachSummary(doc.id)
-                            : attachSalesOrder(doc.id))
-                        }
-                      >
-                        {busyId === doc.id ? "Saving…" : "Attach"}
-                      </button>
-                    </span>
-                  ) : (
-                    doc.jobName ?? "—"
-                  )}
-                </td>
-                <td>
-                  <span
-                    className={`${payroll.statusBadge} ${
-                      doc.status === "unmatched" || doc.status === "error" || doc.status === "review"
-                        ? payroll.statusHeld
-                        : doc.status === "attached" ||
-                            doc.status === "confirmed" ||
-                            doc.status === "complete"
-                          ? payroll.statusPaid
-                          : payroll.statusOpen
-                    }`}
-                  >
-                    {statusLabel(doc.kind, doc.status)}
-                  </span>
-                </td>
-                <td>{doc.itemCount ?? "—"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  <Link href={doc.href} target={doc.href.startsWith("http") ? "_blank" : undefined}>
-                    {doc.href.includes("/receiving/")
-                      ? "Receiving"
-                      : doc.kind === "product_summary"
-                        ? "PDF"
-                        : "Job"}
-                  </Link>
-                  {doc.publicUrl ? (
-                    <>
-                      {" · "}
-                      <a href={doc.publicUrl} target="_blank" rel="noreferrer">
-                        PDF
-                      </a>
-                    </>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                    ) : (
+                      doc.jobName ?? "—"
+                    )}
+                  </td>
+                  <td>{whenLabel(doc.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   );
 }
-

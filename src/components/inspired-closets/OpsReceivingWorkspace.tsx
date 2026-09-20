@@ -26,6 +26,22 @@ function isStudioList(notice: string | null): boolean {
   return Boolean(notice?.startsWith("STUDIO-") || notice?.startsWith("DROP-"));
 }
 
+/** Slip labels that look like a person/job — not a PDF disclaimer paragraph. */
+function isPlausibleJobLabel(name: string | null | undefined): boolean {
+  const value = (name ?? "").replace(/\s+/g, " ").trim();
+  if (!value || value === "Unassigned") return false;
+  if (value.length > 40) return false;
+  if (value.split(/\s+/).length > 6) return false;
+  if (
+    /\b(due to|tariff|prices may|purchase order|trade polic|supply chain|quote or)\b/i.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function shipmentKind(ship: Shipment): string {
   if (isStudioList(ship.notice)) {
     return ship.vendor === "other" ? "Studio order · Stow + 3rd party" : "Studio order";
@@ -37,11 +53,25 @@ function shipmentKind(ship: Shipment): string {
   return "Packaging slip";
 }
 
+function shipmentJobs(ship: Shipment): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const job of ship.by_job ?? []) {
+    const name = (job.job_name ?? "").replace(/\s+/g, " ").trim();
+    if (!isPlausibleJobLabel(name)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
 function shipmentTitle(ship: Shipment): string {
-  const jobs = (ship.by_job ?? [])
-    .map((job) => job.job_name)
-    .filter((name) => name && name !== "Unassigned");
-  if (jobs.length > 0) return jobs.join(", ");
+  const jobs = shipmentJobs(ship);
+  if (jobs.length === 1) return jobs[0]!;
+  if (jobs.length === 2) return jobs.join(", ");
+  if (jobs.length > 2) return `${jobs.slice(0, 2).join(", ")} +${jobs.length - 2}`;
   if (isStudioList(ship.notice)) {
     return (ship.notice ?? "").replace(/^(STUDIO|DROP)-/, "");
   }
@@ -53,8 +83,15 @@ function shipmentTitle(ship: Shipment): string {
 function shipmentMeta(ship: Shipment): string {
   const bits = [shipmentKind(ship)];
   const title = shipmentTitle(ship);
-  if (ship.notice && !isStudioList(ship.notice) && ship.notice !== title && !/slatwall/i.test(ship.notice)) {
-    bits.push(ship.notice);
+  const notice = (ship.notice ?? "").trim();
+  if (
+    notice &&
+    !isStudioList(notice) &&
+    notice !== title &&
+    isPlausibleJobLabel(notice) &&
+    !/slatwall/i.test(notice)
+  ) {
+    bits.push(notice);
   }
   const so = (ship.so_numbers ?? []).filter((value) => value && !bits.includes(`SO ${value}`));
   if (so[0]) bits.push(`SO ${so[0]}`);
@@ -231,7 +268,7 @@ export default function OpsReceivingWorkspace() {
         ) : null}
         {hint ? <p className={payroll.notice}>{hint}</p> : null}
 
-        <section className={payroll.panel} style={{ marginBottom: "1rem" }}>
+        <section className={`${payroll.panel} ${styles.shipPanel}`} style={{ marginBottom: "1rem" }}>
           {loading ? (
             <p className={payroll.empty}>Loading shipments…</p>
           ) : shipments.length === 0 ? (
@@ -239,7 +276,7 @@ export default function OpsReceivingWorkspace() {
               No trucks yet. Upload a packaging slip for Bryant to scan.
             </p>
           ) : (
-            <table className={payroll.table}>
+            <table className={`${payroll.table} ${styles.shipTable}`}>
               <thead>
                 <tr>
                   <th>Order</th>
@@ -254,8 +291,10 @@ export default function OpsReceivingWorkspace() {
                   const pct = ship.pct ?? 0;
                   return (
                     <tr key={ship.id}>
-                      <td>
-                        <strong>{shipmentTitle(ship)}</strong>
+                      <td className={styles.orderCell}>
+                        <strong className={styles.orderTitle} title={shipmentJobs(ship).join(", ") || undefined}>
+                          {shipmentTitle(ship)}
+                        </strong>
                         <div className={styles.vendor}>{shipmentMeta(ship)}</div>
                       </td>
                       <td>{ship.ship_date ?? "—"}</td>
@@ -301,11 +340,7 @@ export default function OpsReceivingWorkspace() {
           )}
         </section>
 
-        {showDocs ? (
-          <section className={payroll.panel}>
-            <OpsReceivingDocuments refreshToken={docsTick} onCount={setDocCount} />
-          </section>
-        ) : null}
+        {showDocs ? <OpsReceivingDocuments refreshToken={docsTick} onCount={setDocCount} /> : null}
       </div>
     </OpsShell>
   );

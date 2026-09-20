@@ -5,6 +5,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { getSupabaseAdmin } from "@/db/client";
+import { clientIdentityKey, pickPrimaryJob } from "@/lib/inspired-closets-ops-clients";
 import { applyStockMovement } from "@/lib/inspired-closets-ops-inventory";
 import { extractPdfText } from "@/lib/inspired-closets-ops-pdf-text";
 import {
@@ -14,6 +15,33 @@ import {
 } from "@/lib/inspired-closets-ops-product-summary-text";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 import { codeKeys, codesMatch } from "@/lib/inspired-closets-ops-scan-codes";
+import {
+  inferredShipmentShipDate,
+  normalizeShipDate,
+  resolveShipDate,
+  shipDateFromFilename,
+  shipDateFromSlipText,
+} from "@/lib/inspired-closets-ops-ship-date";
+import {
+  isClientJobLabel,
+  isShippingChargeLine,
+  isUsableNotice,
+} from "@/lib/inspired-closets-ops-shipment-display";
+
+export {
+  isClientJobLabel,
+  isPlausibleJobLabel,
+  isShippingChargeLine,
+  isUsableNotice,
+} from "@/lib/inspired-closets-ops-shipment-display";
+
+export {
+  inferredShipmentShipDate,
+  normalizeShipDate,
+  resolveShipDate,
+  shipDateFromFilename,
+  shipDateFromSlipText,
+} from "@/lib/inspired-closets-ops-ship-date";
 
 export { codeKeys, codesMatch, normalizeCode } from "@/lib/inspired-closets-ops-scan-codes";
 
@@ -163,13 +191,14 @@ export function lineStatus(received: number, qty: number, damaged = 0, forced?: 
 }
 
 export function shipmentRollup(items: ShipmentItemRow[]) {
-  const totalQty = items.reduce((sum, row) => sum + (row.qty ?? 0), 0);
-  const receivedQty = items.reduce((sum, row) => sum + (row.received_qty ?? 0), 0);
-  const receivedLines = items.filter((row) => row.status === "received").length;
-  const damagedLines = items.filter((row) => row.status === "damaged").length;
-  const missingLines = items.filter((row) => row.status === "missing").length;
-  const pendingLines = items.filter((row) => row.status === "expected").length;
-  const creditLines = items.filter((row) => Boolean(row.needs_credit)).length;
+  const countable = items.filter((row) => !isShippingChargeLine(row));
+  const totalQty = countable.reduce((sum, row) => sum + (row.qty ?? 0), 0);
+  const receivedQty = countable.reduce((sum, row) => sum + (row.received_qty ?? 0), 0);
+  const receivedLines = countable.filter((row) => row.status === "received").length;
+  const damagedLines = countable.filter((row) => row.status === "damaged").length;
+  const missingLines = countable.filter((row) => row.status === "missing").length;
+  const pendingLines = countable.filter((row) => row.status === "expected").length;
+  const creditLines = countable.filter((row) => Boolean(row.needs_credit)).length;
   const pct = totalQty > 0 ? Math.round((receivedQty / totalQty) * 100) : 0;
 
   const byJob = new Map<
@@ -199,45 +228,54 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
     }
   >();
 
-  for (const row of items) {
-    const jobKey = row.cust_ref || row.job_name || "Unassigned";
-    const job = byJob.get(jobKey) ?? {
-      job_name: row.job_name || jobNameFromCustRef(row.cust_ref) || "Unassigned",
-      cust_ref: row.cust_ref || jobKey,
-      job_id: row.job_id,
-      items: 0,
-      total_qty: 0,
-      total_received_qty: 0,
-      received: 0,
-      damaged: 0,
-      missing: 0,
-    };
-    job.items += 1;
-    job.total_qty += row.qty ?? 0;
-    job.total_received_qty += row.received_qty ?? 0;
-    if (row.status === "received") job.received += 1;
-    if (row.status === "damaged") job.damaged += 1;
-    if (row.status === "missing") job.missing += 1;
-    if (row.job_id) job.job_id = row.job_id;
-    byJob.set(jobKey, job);
+  for (const row of countable) {
+    const jobName =
+      (isClientJobLabel(row.job_name) ? row.job_name : null) ||
+      (isClientJobLabel(jobNameFromCustRef(row.cust_ref))
+        ? jobNameFromCustRef(row.cust_ref)
+        : null);
+    if (jobName) {
+      const jobKey = jobName.toLowerCase();
+      const job = byJob.get(jobKey) ?? {
+        job_name: jobName,
+        cust_ref: row.cust_ref || jobName,
+        job_id: row.job_id,
+        items: 0,
+        total_qty: 0,
+        total_received_qty: 0,
+        received: 0,
+        damaged: 0,
+        missing: 0,
+      };
+      job.items += 1;
+      job.total_qty += row.qty ?? 0;
+      job.total_received_qty += row.received_qty ?? 0;
+      if (row.status === "received") job.received += 1;
+      if (row.status === "damaged") job.damaged += 1;
+      if (row.status === "missing") job.missing += 1;
+      if (row.job_id) job.job_id = row.job_id;
+      byJob.set(jobKey, job);
+    }
 
-    const palletKey = row.container_id || "no-pallet";
-    const pallet = byContainer.get(palletKey) ?? {
-      container_id: row.container_id || "no-pallet",
-      items: 0,
-      total_qty: 0,
-      total_received_qty: 0,
-      received: 0,
-      damaged: 0,
-      missing: 0,
-    };
-    pallet.items += 1;
-    pallet.total_qty += row.qty ?? 0;
-    pallet.total_received_qty += row.received_qty ?? 0;
-    if (row.status === "received") pallet.received += 1;
-    if (row.status === "damaged") pallet.damaged += 1;
-    if (row.status === "missing") pallet.missing += 1;
-    byContainer.set(palletKey, pallet);
+    const palletId = (row.container_id ?? "").trim();
+    if (palletId && palletId !== "no-pallet") {
+      const pallet = byContainer.get(palletId) ?? {
+        container_id: palletId,
+        items: 0,
+        total_qty: 0,
+        total_received_qty: 0,
+        received: 0,
+        damaged: 0,
+        missing: 0,
+      };
+      pallet.items += 1;
+      pallet.total_qty += row.qty ?? 0;
+      pallet.total_received_qty += row.received_qty ?? 0;
+      if (row.status === "received") pallet.received += 1;
+      if (row.status === "damaged") pallet.damaged += 1;
+      if (row.status === "missing") pallet.missing += 1;
+      byContainer.set(palletId, pallet);
+    }
   }
 
   const pallets = [...byContainer.values()];
@@ -268,7 +306,7 @@ export function shipmentRollup(items: ShipmentItemRow[]) {
     by_container: pallets,
     pallets_total: palletsTotal,
     pallets_scanned: palletsScanned,
-    waiting_for_pallets: palletPct < PALLET_MISSING_THRESHOLD,
+    waiting_for_pallets: palletsTotal > 0 && palletPct < PALLET_MISSING_THRESHOLD,
   };
 }
 
@@ -357,34 +395,63 @@ export async function findJobId(item: ParsedSlipItem): Promise<string | null> {
   const hint = clientHintFromSlip(item.cust_ref, item.job_name);
   if (!hint) return null;
   const supabase = getSupabaseAdmin();
-  const { data: clients } = await supabase
+  const identityKey = clientIdentityKey(hint);
+
+  // Prefer identity_key match (canonical clients after merge).
+  let clientIds: string[] = [];
+  const { data: byKey } = await supabase
     .from("ic_clients")
-    .select("id, name")
+    .select("id, name, identity_key, merged_into_client_id")
     .is("deleted_at", null)
-    .ilike("name", `%${hint}%`)
+    .eq("identity_key", identityKey)
     .limit(40);
-  const needle = hint.toLowerCase();
-  const client = (clients ?? []).find((row) => {
-    const tokens = String(row.name ?? "")
-      .toLowerCase()
-      .split(/[\s,/]+/)
-      .filter(Boolean);
-    return tokens.includes(needle) || String(row.name ?? "").toLowerCase() === needle;
-  });
-  if (!client?.id) return null;
+
+  if (byKey && byKey.length > 0) {
+    clientIds = byKey.map((row) => row.merged_into_client_id || row.id);
+  } else {
+    const { data: clients } = await supabase
+      .from("ic_clients")
+      .select("id, name, merged_into_client_id")
+      .is("deleted_at", null)
+      .ilike("name", `%${hint}%`)
+      .limit(40);
+    const needle = hint.toLowerCase();
+    clientIds = (clients ?? [])
+      .filter((row) => {
+        const tokens = String(row.name ?? "")
+          .toLowerCase()
+          .split(/[\s,/]+/)
+          .filter(Boolean);
+        return (
+          tokens.includes(needle) ||
+          String(row.name ?? "").toLowerCase() === needle ||
+          clientIdentityKey(String(row.name ?? "")) === identityKey
+        );
+      })
+      .map((row) => row.merged_into_client_id || row.id);
+  }
+
+  clientIds = [...new Set(clientIds)];
+  if (clientIds.length === 0) return null;
 
   const { data: jobs } = await supabase
     .from("ic_jobs")
-    .select("id, stage, install_date")
-    .eq("client_id", client.id)
+    .select("id, stage, install_date, sold_date, created_at, duplicate_of_job_id")
+    .in("client_id", clientIds)
     .is("deleted_at", null)
+    .is("duplicate_of_job_id", null)
     .order("install_date", { ascending: false, nullsFirst: false })
-    .limit(12);
-  const open = (jobs ?? []).filter((job) => !["closed", "cancelled"].includes(String(job.stage)));
-  const preferred = open.find((job) =>
-    ["ordered", "job_check", "deposit_received", "install_scheduled"].includes(String(job.stage)),
+    .limit(40);
+
+  const list = jobs ?? [];
+  const preferred = list.find((job) =>
+    ["ordered", "job_check", "deposit_received", "install_scheduled", "install_in_progress"].includes(
+      String(job.stage),
+    ),
   );
-  return preferred?.id ?? open[0]?.id ?? null;
+  if (preferred?.id) return preferred.id;
+  const primary = pickPrimaryJob(list);
+  return primary?.id ?? null;
 }
 
 export async function linkItemToOs(
@@ -609,10 +676,178 @@ export async function classifyReceivingPdf(input: {
   return "unknown";
 }
 
-const PARSE_SYSTEM = `You extract line items from Inspired Closets / Stow packing slips.
-Return ONLY JSON: {"notice": string|null, "ship_date": "MM/DD/YYYY"|null, "vendor": "stow"|"richelieu"|"hafele"|"other", "total_pages": number, "items": [...]}.
-Each item: item_number (SKU / barcode digits), so_number, cust_ref (client name as printed, often NAME_MMDDYY), job_name (client last name), project_number, description, qty (integer), container_id (pallet), source_page, vendor_sku.
+const PARSE_SYSTEM = `You extract line items from Inspired Closets packing slips and vendor order receipts (Stow, Richelieu, Häfele, Hardware Resources).
+Return ONLY JSON: {"notice": string|null, "ship_date": "YYYY-MM-DD", "vendor": "stow"|"richelieu"|"hafele"|"other", "total_pages": number, "order_number": string|null, "po_number": string|null, "order_total": number|null, "weight_lbs": number|null, "items": [...]}.
+notice is a SHORT identity only: shipment notice number, order number, or PO (e.g. 80133562, D804518, BLACKHAWK / POHLMAN). Never a sentence, disclaimer, tariff paragraph, or filename.
+ship_date is REQUIRED. Read the printed ship / delivery / requested ship / Lieferdatum / Date d'expédition / invoice date. Accept any format (MM/DD/YY, DD.MM.YYYY, 18 Sep 2026, YYYY-MM-DD) and return YYYY-MM-DD. Never leave ship_date empty if any date is visible.
+order_total is dollars if printed. weight_lbs if printed. vendor "other" for Hardware Resources and unknown 3rd party.
+Each item: item_number (SKU / barcode), so_number, cust_ref (client name as printed, often NAME_MMDDYY), job_name (client last name — not STOCK, not the vendor), project_number, description, qty (integer), container_id (pallet ID only when printed), source_page, vendor_sku (manufacturer # if different from item_number).
+Skip shipping / handling charge rows (item SH, Estimated Shipping Charges, freight fees).
 Do not invent SKUs. Qty defaults to 1 if missing. cust_ref is the client label Frank wrote on the order.`;
+
+function requiredShipDate(input: {
+  parsed?: string | null;
+  text?: string | null;
+  filename?: string | null;
+  uploadedAt?: string | null;
+}): string {
+  return (
+    resolveShipDate(input) ||
+    new Date().toISOString().slice(0, 10)
+  );
+}
+
+async function readShipDateFromModel(
+  bytes: Buffer,
+  filename: string,
+  mimeType: string,
+): Promise<string | null> {
+  const apiKey =
+    process.env.INSPIRED_CLOSETS_ANTHROPIC_API_KEY?.trim() ||
+    process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return null;
+  try {
+    const client = new Anthropic({ apiKey });
+    const model =
+      process.env.INSPIRED_CLOSETS_ANTHROPIC_MODEL?.trim() ||
+      process.env.ANTHROPIC_MODEL?.trim() ||
+      "claude-sonnet-5";
+    const isPdf = mimeType.includes("pdf") || /\.pdf$/i.test(filename);
+    const message = await client.messages.create({
+      model,
+      max_tokens: 200,
+      system:
+        "Read the packing slip and return ONLY JSON {\"ship_date\":\"YYYY-MM-DD\"}. Use ship, delivery, requested ship, Lieferdatum, Date d'expédition, or invoice date. Any printed format is fine. Never invent a date that is not on the document.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            isPdf
+              ? {
+                  type: "document",
+                  source: {
+                    type: "base64",
+                    media_type: "application/pdf",
+                    data: bytes.toString("base64"),
+                  },
+                }
+              : {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: (mimeType.startsWith("image/")
+                      ? mimeType
+                      : "image/jpeg") as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                    data: bytes.toString("base64"),
+                  },
+                },
+            { type: "text", text: `What is the ship date on ${filename}? JSON only.` },
+          ],
+        },
+      ],
+    });
+    const text = message.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "");
+    const parsed = JSON.parse(text) as { ship_date?: string | null };
+    return normalizeShipDate(parsed.ship_date);
+  } catch {
+    return null;
+  }
+}
+
+async function downloadShipmentPdf(ship: {
+  storage_path?: string | null;
+  public_url?: string | null;
+}): Promise<Buffer | null> {
+  const supabase = getSupabaseAdmin();
+  if (ship.storage_path) {
+    const { data, error } = await supabase.storage.from("ic-field-media").download(ship.storage_path);
+    if (!error && data) return Buffer.from(await data.arrayBuffer());
+  }
+  if (ship.public_url) {
+    try {
+      const response = await fetch(ship.public_url);
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Fill a blank ship_date from the stored PDF, filename, or upload day. Always returns a date. */
+export async function ensureShipmentHasShipDate(ship: {
+  id: string;
+  ship_date?: string | null;
+  source_filename?: string | null;
+  storage_path?: string | null;
+  public_url?: string | null;
+  created_at?: string | null;
+  parse_quality?: unknown;
+}): Promise<string> {
+  const already = inferredShipmentShipDate(ship);
+  if (ship.ship_date && already) return already;
+
+  let fromPdf: string | null = null;
+  const bytes = await downloadShipmentPdf(ship);
+  if (bytes) {
+    try {
+      const extracted = await extractPdfText(bytes);
+      fromPdf = resolveShipDate({
+        text: extracted.text,
+        filename: ship.source_filename,
+      });
+    } catch {
+      fromPdf = null;
+    }
+    if (!fromPdf) {
+      fromPdf = await readShipDateFromModel(
+        bytes,
+        ship.source_filename || "slip.pdf",
+        "application/pdf",
+      );
+    }
+  }
+
+  const iso =
+    fromPdf ||
+    already ||
+    (ship.created_at ? ship.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10));
+
+  if (iso !== ship.ship_date) {
+    const supabase = getSupabaseAdmin();
+    await supabase
+      .from("ic_shipments")
+      .update({ ship_date: iso, updated_at: new Date().toISOString() })
+      .eq("id", ship.id);
+  }
+  return iso;
+}
+
+function weightLbsFromText(text: string): number | null {
+  const match = text.match(/app(?:roximate|oximate)?\s+weight\s*([\d,.]+)/i);
+  if (!match) return null;
+  const n = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function sanitizeParsedNotice(
+  raw: string | null | undefined,
+  input: { filename: string; so?: string | null; po?: string | null; fileHint?: string | null },
+): string | null {
+  const notice = raw ? String(raw).replace(/\s+/g, " ").trim() : "";
+  if (isUsableNotice(notice) && !/^(stock|wurth|hafele|häfele|richelieu|stow)$/i.test(notice)) {
+    return notice;
+  }
+  if (input.so) return String(input.so).trim();
+  if (input.po && isUsableNotice(input.po)) return input.po.trim();
+  if (input.fileHint && isClientJobLabel(input.fileHint)) return input.fileHint;
+  return null;
+}
 
 function stampSlipItems(
   items: ParsedSlipItem[],
@@ -620,12 +855,17 @@ function stampSlipItems(
   jobId: string | null,
 ): ParsedSlipItem[] {
   const hint = clientHintFromFilename(filename);
+  const usableHint = isClientJobLabel(hint) ? hint : null;
   return items.map((item) => {
-    const hasOwnJob = Boolean(item.cust_ref || item.job_name);
+    const jobName = isClientJobLabel(item.job_name) ? item.job_name : usableHint;
+    const custRef = isClientJobLabel(item.cust_ref) || isClientJobLabel(jobNameFromCustRef(item.cust_ref))
+      ? item.cust_ref
+      : usableHint;
+    const hasOwnJob = Boolean(custRef || jobName);
     return {
       ...item,
-      cust_ref: item.cust_ref || hint || null,
-      job_name: item.job_name || hint || null,
+      cust_ref: custRef || null,
+      job_name: jobName || null,
       job_id: item.job_id || (hasOwnJob ? null : jobId) || null,
     };
   });
@@ -649,7 +889,11 @@ function slipFromStudioSummary(
   const hint = clientHintFromFilename(filename) || jobNameFromCustRef(summary.order_name);
   return {
     notice: summary.order_name || summary.so_number,
-    ship_date: summary.ship_date,
+    ship_date: requiredShipDate({
+      parsed: summary.ship_date,
+      text,
+      filename,
+    }),
     vendor: "stow",
     total_pages: pages,
     items: summary.lines.map((line) => ({
@@ -665,6 +909,11 @@ function slipFromStudioSummary(
       source: "studio-order-table",
       total_items: summary.lines.length,
       filename,
+      so_number: summary.so_number,
+      order_name: summary.order_name,
+      order_number: summary.so_number,
+      order_total: summary.total_cents ? summary.total_cents / 100 : null,
+      weight_lbs: weightLbsFromText(text),
     },
   };
 }
@@ -703,7 +952,7 @@ export async function parsePackingSlip(input: {
 
   const empty = {
     notice: fileHint || null,
-    ship_date: null as string | null,
+    ship_date: requiredShipDate({ text: extractedText, filename: input.filename }),
     vendor: "stow",
     total_pages: pages,
     items: [] as ParsedSlipItem[],
@@ -772,6 +1021,10 @@ export async function parsePackingSlip(input: {
       ship_date?: string | null;
       vendor?: string;
       total_pages?: number;
+      order_number?: string | null;
+      po_number?: string | null;
+      order_total?: number | null;
+      weight_lbs?: number | null;
       items?: ParsedSlipItem[];
     };
     const items = stampSlipItems(
@@ -788,13 +1041,30 @@ export async function parsePackingSlip(input: {
           source_page: row.source_page ? Number(row.source_page) : null,
           vendor_sku: row.vendor_sku ? String(row.vendor_sku) : null,
         }))
-        .filter((row) => row.item_number),
+        .filter((row) => row.item_number && !isShippingChargeLine(row)),
       input.filename,
       input.jobId ?? null,
     );
+    let shipDate = resolveShipDate({
+      parsed: parsed.ship_date,
+      text: extractedText,
+      filename: input.filename,
+    });
+    if (!shipDate) {
+      shipDate = await readShipDateFromModel(input.bytes, input.filename, input.mimeType);
+    }
+    const soNumbers = [
+      ...new Set(items.map((item) => (item.so_number ?? "").trim()).filter(Boolean)),
+    ];
+    const notice = sanitizeParsedNotice(parsed.notice, {
+      filename: input.filename,
+      so: parsed.order_number || soNumbers[0] || null,
+      po: parsed.po_number || null,
+      fileHint,
+    });
     return {
-      notice: parsed.notice ? String(parsed.notice) : fileHint || null,
-      ship_date: parsed.ship_date ? String(parsed.ship_date) : null,
+      notice,
+      ship_date: shipDate || requiredShipDate({ filename: input.filename }),
       vendor: parsed.vendor || "stow",
       total_pages: Number(parsed.total_pages) || pages,
       items,
@@ -803,6 +1073,23 @@ export async function parsePackingSlip(input: {
         missing_cust_ref: items.filter((item) => !item.cust_ref).length,
         missing_description: items.filter((item) => !item.description).length,
         client_hint: fileHint || null,
+        order_number: parsed.order_number ? String(parsed.order_number) : soNumbers[0] || null,
+        po_number: parsed.po_number ? String(parsed.po_number) : null,
+        order_total:
+          typeof parsed.order_total === "number" && Number.isFinite(parsed.order_total)
+            ? parsed.order_total
+            : null,
+        weight_lbs:
+          typeof parsed.weight_lbs === "number" && Number.isFinite(parsed.weight_lbs)
+            ? parsed.weight_lbs
+            : null,
+        ship_date_source: parsed.ship_date
+          ? "slip"
+          : shipDateFromSlipText(extractedText)
+            ? "slip-text"
+            : shipDateFromFilename(input.filename)
+              ? "filename"
+              : "upload",
       },
     };
   } catch (error) {

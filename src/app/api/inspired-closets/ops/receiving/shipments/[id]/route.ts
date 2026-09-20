@@ -9,6 +9,7 @@ import {
   shipmentRollup,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
+import { ensureShipmentHeaderFacts } from "@/lib/inspired-closets-ops-slip-header";
 
 export const runtime = "nodejs";
 
@@ -63,9 +64,10 @@ export async function GET(_request: Request, ctx: Ctx) {
     .limit(100);
 
   const unknown = (scans ?? []).filter((s) => s.result === "unknown");
+  const parseQuality = await ensureShipmentHeaderFacts(ship);
   return NextResponse.json({
     ok: true,
-    shipment: ship,
+    shipment: { ...ship, parse_quality: parseQuality },
     items,
     stats: shipmentRollup(items),
     unknown_scans: unknown,

@@ -23,6 +23,7 @@ type Client = {
   phone?: string | null;
   email?: string | null;
   address?: string | null;
+  canonical_id?: string | null;
 };
 
 type Job = {
@@ -45,8 +46,15 @@ type Job = {
   receive_date?: string | null;
   visit_window?: string | null;
   job_kind?: string | null;
+  title?: string | null;
   proposal_url?: string | null;
   proposal_filename?: string | null;
+  client_job_count?: number;
+  merge_review?: {
+    candidate_id: string;
+    reason: string;
+    suggested_name: string | null;
+  } | null;
   client: Client | null;
   designer: Staff | null;
   installer?: Staff | null;
@@ -74,16 +82,13 @@ function centsToDisplay(cents: number): string {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-function dollarsInputToCents(value: string): number {
-  const num = Number(value.replace(/[$,\s]/g, ""));
-  return Number.isFinite(num) ? Math.round(num * 100) : 0;
-}
-
 const STATUS_TABS = [
   { id: "all", label: "All" },
   { id: "not_complete", label: "Not Complete" },
   { id: "completed", label: "Completed" },
 ] as const;
+
+const PAGE_SIZES = [50, 100, 200] as const;
 
 type StatusFilter = (typeof STATUS_TABS)[number]["id"];
 
@@ -91,15 +96,63 @@ function isCompletedStage(stage: string): boolean {
   return stage === "closed";
 }
 
-const EMPTY_FORM = {
-  client_name: "",
-  designer_id: "",
-  stage: "quoted",
-  contract: "",
-  deposit: "",
-  sold_date: "",
-  notes: "",
+const STAGE_RANK: Record<string, number> = {
+  install_in_progress: 100,
+  install_scheduled: 90,
+  ordered: 80,
+  job_check: 70,
+  deposit_received: 60,
+  deposit_pending: 50,
+  final_payment: 45,
+  install_complete: 40,
+  quoted: 30,
+  consultation: 20,
+  lead: 10,
+  closed: 0,
+  cancelled: -1,
 };
+
+function clientKey(job: Job): string {
+  return job.client?.canonical_id || job.client_id || job.id;
+}
+
+/** One row per client: most recent open job, else most recent closed. */
+function pickPrimaryJob(jobs: Job[]): Job {
+  const open = jobs.filter((job) => !["closed", "cancelled"].includes(job.stage));
+  const pool = open.length > 0 ? open : jobs;
+  return [...pool].sort((a, b) => {
+    const rankDiff = (STAGE_RANK[b.stage] ?? 0) - (STAGE_RANK[a.stage] ?? 0);
+    if (rankDiff !== 0) return rankDiff;
+    const dateA = a.sold_date || a.install_date || "";
+    const dateB = b.sold_date || b.install_date || "";
+    return dateB.localeCompare(dateA);
+  })[0]!;
+}
+
+function jobSearchHaystack(job: Job, stageLabel: string): string {
+  return [
+    job.client?.name,
+    job.title,
+    job.client?.phone,
+    job.client?.email,
+    job.client?.address,
+    job.designer?.name,
+    job.installer?.name,
+    job.studio_ref,
+    job.community_ref,
+    job.notes,
+    job.visit_window,
+    job.job_kind,
+    job.stage,
+    stageLabel,
+    job.sold_date,
+    job.install_date,
+    job.completed_date,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
 
 export default function OpsJobsWorkspace() {
   const searchParams = useSearchParams();
@@ -109,15 +162,20 @@ export default function OpsJobsWorkspace() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [stageFilter, setStageFilter] = useState("");
+  const [query, setQuery] = useState("");
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(50);
+  const [page, setPage] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [anchorPinned, setAnchorPinned] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
+  const anchorSentinelRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [selectedJobId, setSelectedJobId] = useState<string | null>(presetId);
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [projectFile, setProjectFile] = useState<ProjectFile | null>(null);
   const [jobMaterials, setJobMaterials] = useState<
     Array<{
@@ -151,11 +209,6 @@ export default function OpsJobsWorkspace() {
       setJobs(payload.jobs ?? []);
       setStaff(payload.staff ?? []);
       setListUpdatedAt(new Date());
-      setForm((current) =>
-        current.designer_id || !payload.staff?.[0]?.id
-          ? current
-          : { ...current, designer_id: payload.staff[0].id },
-      );
     } catch (error) {
       if (!opts?.silent) {
         setNotice({
@@ -270,6 +323,8 @@ export default function OpsJobsWorkspace() {
         lead?: ProjectFile["lead"];
         appointments?: ProjectFile["appointments"];
         payments?: ProjectFile["payments"];
+        clientJobs?: ProjectFile["clientJobs"];
+        mergeCandidate?: ProjectFile["mergeCandidate"];
       };
       if (!payload.ok || !payload.job) {
         throw new Error(payload.error ?? "Failed to load project.");
@@ -280,6 +335,8 @@ export default function OpsJobsWorkspace() {
         lead: payload.lead ?? null,
         appointments: payload.appointments ?? [],
         payments: payload.payments ?? [],
+        clientJobs: payload.clientJobs ?? [],
+        mergeCandidate: payload.mergeCandidate ?? null,
       });
       setJobs((current) =>
         current.map((item) =>
@@ -290,6 +347,7 @@ export default function OpsJobsWorkspace() {
                 client: fileJob.client ?? item.client,
                 designer: fileJob.designer ?? item.designer,
                 installer: fileJob.installer ?? item.installer,
+                merge_review: item.merge_review,
               }
             : item,
         ),
@@ -323,6 +381,17 @@ export default function OpsJobsWorkspace() {
   }, [selectedJobId]);
 
   useEffect(() => {
+    function updatePinned() {
+      const sentinel = anchorSentinelRef.current;
+      if (!sentinel) return;
+      setAnchorPinned(sentinel.getBoundingClientRect().bottom <= 0);
+    }
+    updatePinned();
+    window.addEventListener("scroll", updatePinned, { passive: true });
+    return () => window.removeEventListener("scroll", updatePinned);
+  }, []);
+
+  useEffect(() => {
     if (!filterOpen) return;
     function onDoc(event: MouseEvent) {
       if (!filterRef.current?.contains(event.target as Node)) setFilterOpen(false);
@@ -332,54 +401,82 @@ export default function OpsJobsWorkspace() {
   }, [filterOpen]);
 
   const visibleJobs = useMemo(() => {
-    return jobs.filter((job) => {
+    const q = query.trim().toLowerCase();
+    const matching = jobs.filter((job) => {
+      if (reviewOnly && !job.merge_review) return false;
       if (statusFilter === "completed" && !isCompletedStage(job.stage)) return false;
       if (statusFilter === "not_complete" && isCompletedStage(job.stage)) return false;
       if (stageFilter && job.stage !== stageFilter) return false;
-      return true;
+      if (!q) return true;
+      const stageLabel = stages.find((stage) => stage.id === job.stage)?.label ?? job.stage;
+      return jobSearchHaystack(job, stageLabel).includes(q);
     });
-  }, [jobs, statusFilter, stageFilter]);
+
+    // One row per client. Search can match any sibling; still show the primary.
+    const matchedKeys = new Set(matching.map(clientKey));
+    const byClient = new Map<string, Job[]>();
+    for (const job of jobs) {
+      const key = clientKey(job);
+      if ((q || reviewOnly) && !matchedKeys.has(key)) continue;
+      const list = byClient.get(key) ?? [];
+      list.push(job);
+      byClient.set(key, list);
+    }
+
+    const primaries: Job[] = [];
+    for (const [, siblings] of byClient) {
+      let pool = siblings;
+      if (statusFilter === "completed") {
+        pool = siblings.filter((job) => isCompletedStage(job.stage));
+      } else if (statusFilter === "not_complete") {
+        pool = siblings.filter((job) => !isCompletedStage(job.stage));
+      }
+      if (stageFilter) {
+        pool = pool.filter((job) => job.stage === stageFilter);
+      }
+      if (pool.length === 0) continue;
+      const primary = pickPrimaryJob(pool);
+      primaries.push({
+        ...primary,
+        client_job_count: siblings.length,
+      });
+    }
+
+    return primaries;
+  }, [jobs, statusFilter, stageFilter, query, stages, reviewOnly]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, statusFilter, stageFilter, pageSize, reviewOnly]);
+
+  const pageCount = Math.max(1, Math.ceil(visibleJobs.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedJobs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return visibleJobs.slice(start, start + pageSize);
+  }, [visibleJobs, currentPage, pageSize]);
+  const rangeStart = visibleJobs.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, visibleJobs.length);
 
   const summary = useMemo(() => {
-    const open = jobs.filter((job) => !["closed", "cancelled"].includes(job.stage)).length;
-    const contract = visibleJobs.reduce((sum, job) => sum + job.contract_cents, 0);
-    return { total: jobs.length, open, contract, showing: visibleJobs.length };
+    const openJobs = jobs.filter((job) => !["closed", "cancelled"].includes(job.stage));
+    const closed = jobs.filter((job) => isCompletedStage(job.stage)).length;
+    const activeJobs = jobs.filter((job) => job.stage !== "cancelled");
+    const contractTotal = activeJobs.reduce((sum, job) => sum + job.contract_cents, 0);
+    const contractOpen = openJobs.reduce((sum, job) => sum + job.contract_cents, 0);
+    const clientIds = new Set(jobs.map(clientKey));
+    const reviewJobs = jobs.filter((job) => Boolean(job.merge_review));
+    return {
+      clients: clientIds.size,
+      total: jobs.length,
+      open: openJobs.length,
+      closed,
+      contractTotal,
+      contractOpen,
+      matching: visibleJobs.length,
+      review: new Set(reviewJobs.map(clientKey)).size,
+    };
   }, [jobs, visibleJobs]);
-
-  async function addJob(event: React.FormEvent) {
-    event.preventDefault();
-    if (!form.client_name.trim()) return;
-    setSaving(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/ops/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_name: form.client_name.trim(),
-          designer_id: form.designer_id || null,
-          stage: form.stage,
-          contract_cents: dollarsInputToCents(form.contract),
-          deposit_cents: dollarsInputToCents(form.deposit),
-          collected_cents: dollarsInputToCents(form.deposit),
-          sold_date: form.sold_date || null,
-          notes: form.notes.trim() || null,
-        }),
-      });
-      const payload = (await response.json()) as ApiResponse;
-      if (!payload.ok) throw new Error(payload.error ?? "Failed to create project.");
-      setForm({ ...EMPTY_FORM, designer_id: form.designer_id, stage: form.stage });
-      setNotice({ kind: "info", text: `Created project for ${form.client_name.trim()}.` });
-      await load();
-    } catch (error) {
-      setNotice({
-        kind: "error",
-        text: error instanceof Error ? error.message : "Failed to create project.",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function updateStage(job: Job, stage: string) {
     try {
@@ -481,6 +578,42 @@ export default function OpsJobsWorkspace() {
 
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
 
+  async function resolveMerge(action: "merge" | "keep_separate", intoClientId?: string) {
+    const candidateId =
+      projectFile?.mergeCandidate?.id ?? selectedJob?.merge_review?.candidate_id ?? null;
+    if (!candidateId) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/clients/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidate_id: candidateId,
+          action,
+          into_client_id: intoClientId ?? null,
+        }),
+      });
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not resolve merge.");
+      setNotice({
+        kind: "info",
+        text:
+          action === "merge"
+            ? "Clients merged. This job now sits on the confirmed client file."
+            : "Kept as a separate client. The review badge is cleared.",
+      });
+      await load();
+      if (selectedJobId) await loadProjectFile(selectedJobId);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Could not resolve merge.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function uploadProposal(file: File) {
     if (!selectedJobId) return;
     setSaving(true);
@@ -518,6 +651,8 @@ export default function OpsJobsWorkspace() {
         </p>
       ) : null}
 
+      <div ref={anchorSentinelRef} className={styles.listAnchorSentinel} aria-hidden="true" />
+      <div className={`${styles.listAnchor} ${anchorPinned ? styles.listAnchorPinned : ""}`}>
       <div className={styles.listToolbar}>
         <nav className={styles.tabs} aria-label="Project views">
           {STATUS_TABS.map((tab) => (
@@ -531,6 +666,46 @@ export default function OpsJobsWorkspace() {
             </button>
           ))}
         </nav>
+        <input
+          className={`${styles.input} ${styles.toolbarSearch}`}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find a client, designer, community, order…"
+          aria-label="Find a project"
+        />
+      </div>
+
+      <div className={styles.summaryRow}>
+        <span>
+          <span className={styles.summaryStrong}>{summary.clients}</span> clients
+        </span>
+        <span>
+          <span className={styles.summaryStrong}>{summary.total}</span> jobs
+        </span>
+        <span>
+          <span className={styles.summaryStrong}>{summary.open}</span> open
+        </span>
+        <span>
+          <span className={styles.summaryStrong}>{summary.closed}</span> closed
+        </span>
+        <span>
+          Contract total{" "}
+          <span className={styles.summaryStrong}>{centsToDisplay(summary.contractTotal)}</span>
+        </span>
+        <span>
+          Contracts open{" "}
+          <span className={styles.summaryStrong}>{centsToDisplay(summary.contractOpen)}</span>
+        </span>
+        {summary.review > 0 ? (
+          <button
+            type="button"
+            className={`${styles.mergeSummaryBtn} ${reviewOnly ? styles.mergeSummaryBtnActive : ""}`}
+            onClick={() => setReviewOnly((current) => !current)}
+          >
+            <span className={styles.summaryStrong}>{summary.review}</span>{" "}
+            {summary.review === 1 ? "needs merge review" : "need merge review"}
+          </button>
+        ) : null}
         <div className={styles.toolbarRight}>
           <p className={styles.updatedStamp}>
             {listUpdatedAt
@@ -592,30 +767,61 @@ export default function OpsJobsWorkspace() {
           </div>
         </div>
       </div>
+      </div>
 
       <section className={styles.panel}>
-        <div className={styles.summaryRow}>
-          <span>
-            <span className={styles.summaryStrong}>{summary.total}</span> projects total
-          </span>
-          <span>
-            <span className={styles.summaryStrong}>{summary.open}</span> open
-          </span>
-          <span>
-            Showing <span className={styles.summaryStrong}>{summary.showing}</span>
-          </span>
-          <span>
-            Contract{" "}
-            <span className={styles.summaryStrong}>{centsToDisplay(summary.contract)}</span>
-          </span>
-        </div>
         {loading ? (
           <p className={styles.empty}>Loading projects…</p>
         ) : visibleJobs.length === 0 ? (
           <p className={styles.empty}>
-            No projects in this view. Sold intake on a lead creates the project file.
+            {query.trim()
+              ? "No projects match that search."
+              : "No projects in this view. Sold intake on a lead creates the project file."}
           </p>
         ) : (
+          <>
+          <div className={styles.pager}>
+            <div className={styles.pagerLeft}>
+              <label className={styles.pagerSize}>
+                <span>Show</span>
+                <select
+                  className={styles.input}
+                  value={pageSize}
+                  onChange={(event) =>
+                    setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number])
+                  }
+                  aria-label="Rows per page"
+                >
+                  {PAGE_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className={styles.pagerMeta}>
+                {rangeStart}–{rangeEnd} of {summary.matching} · page {currentPage} of {pageCount}
+              </p>
+            </div>
+            <div className={styles.pagerButtons}>
+              <button
+                type="button"
+                className={styles.pagerBtn}
+                disabled={currentPage <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                className={styles.pagerBtn}
+                disabled={currentPage >= pageCount}
+                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+              >
+                Next
+              </button>
+            </div>
+          </div>
           <table className={styles.table}>
             <thead>
               <tr>
@@ -632,14 +838,30 @@ export default function OpsJobsWorkspace() {
               </tr>
             </thead>
             <tbody>
-              {visibleJobs.map((job) => (
+              {pagedJobs.map((job) => (
                 <tr
                   key={job.id}
                   className={`${job.risk_flag ? styles.rowHeld : ""} ${selectedJobId === job.id ? styles.rowSelected : ""}`.trim() || undefined}
                   onClick={() => setSelectedJobId(job.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>{job.client?.name ?? "—"}</td>
+                  <td>
+                    {job.client?.name ?? "—"}
+                    {job.merge_review ? (
+                      <span className={styles.mergeBadge} title={job.merge_review.suggested_name ? `May belong with ${job.merge_review.suggested_name}` : undefined}>
+                        Confirm and merge with client
+                      </span>
+                    ) : null}
+                    {(job.client_job_count ?? 1) > 1 ? (
+                      <span className={styles.jobCountMark} title={`${job.client_job_count} jobs`}>
+                        {" "}
+                        · {job.client_job_count} jobs
+                      </span>
+                    ) : null}
+                    {job.title ? (
+                      <span className={styles.jobTitleMark}> · {job.title}</span>
+                    ) : null}
+                  </td>
                   <td>{job.designer?.name ?? "—"}</td>
                   <td>
                     <select
@@ -694,6 +916,7 @@ export default function OpsJobsWorkspace() {
               ))}
             </tbody>
           </table>
+          </>
         )}
 
         {selectedJobId && (selectedJob || projectFile?.job) ? (
@@ -720,6 +943,10 @@ export default function OpsJobsWorkspace() {
                 materialsTotal={materialsTotal}
                 busy={saving}
                 onClose={() => setSelectedJobId(null)}
+                onSelectJob={(jobId) => setSelectedJobId(jobId)}
+                onResolveMerge={(action, intoClientId) => {
+                  void resolveMerge(action, intoClientId);
+                }}
                 onStage={(stage) => {
                   if (selectedJob) void updateStage(selectedJob, stage);
                 }}
@@ -779,90 +1006,6 @@ export default function OpsJobsWorkspace() {
             </div>
           </div>
         ) : null}
-
-        <form className={styles.formGrid} onSubmit={addJob}>
-
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Client</span>
-            <input
-              className={styles.input}
-              value={form.client_name}
-              onChange={(event) => setForm({ ...form, client_name: event.target.value })}
-              placeholder="LAST NAME"
-              required
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Designer</span>
-            <select
-              className={styles.input}
-              value={form.designer_id}
-              onChange={(event) => setForm({ ...form, designer_id: event.target.value })}
-            >
-              <option value="">Unassigned</option>
-              {designers.map((designer) => (
-                <option key={designer.id} value={designer.id}>
-                  {designer.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Stage</span>
-            <select
-              className={styles.input}
-              value={form.stage}
-              onChange={(event) => setForm({ ...form, stage: event.target.value })}
-            >
-              {stages.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Sold date</span>
-            <input
-              className={styles.input}
-              type="date"
-              value={form.sold_date}
-              onChange={(event) => setForm({ ...form, sold_date: event.target.value })}
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Contract</span>
-            <input
-              className={styles.input}
-              value={form.contract}
-              onChange={(event) => setForm({ ...form, contract: event.target.value })}
-              placeholder="$0"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Deposit</span>
-            <input
-              className={styles.input}
-              value={form.deposit}
-              onChange={(event) => setForm({ ...form, deposit: event.target.value })}
-              placeholder="$0"
-            />
-          </label>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Notes</span>
-            <input
-              className={styles.input}
-              value={form.notes}
-              onChange={(event) => setForm({ ...form, notes: event.target.value })}
-              placeholder="Optional"
-            />
-          </label>
-          <div className={styles.formActions}>
-            <button type="submit" className={styles.buttonPrimary} disabled={saving}>
-              {saving ? "Creating…" : "Add project"}
-            </button>
-          </div>
-        </form>
       </section>
     </OpsShell>
   );

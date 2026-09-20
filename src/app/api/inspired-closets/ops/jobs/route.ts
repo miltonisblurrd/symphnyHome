@@ -6,6 +6,11 @@ import {
   markInstallFortyDue,
 } from "@/lib/inspired-closets-ops-billing";
 import { installBlockedByReceiving, receivingRollupByJobIds } from "@/lib/inspired-closets-ops-receiving";
+import {
+  jobDescriptorFromName,
+  listPendingMergeCandidates,
+  resolveClient,
+} from "@/lib/inspired-closets-ops-clients";
 
 export const runtime = "nodejs";
 
@@ -64,7 +69,7 @@ export async function GET(request: Request) {
     jobsQuery = jobsQuery.eq("designer_id", designerId);
   }
 
-  const [jobsResult, staffResult, clientsResult] = await Promise.all([
+  const [jobsResult, staffResult, clientsWithMerge] = await Promise.all([
     jobsQuery,
     supabase
       .from("ic_staff")
@@ -73,7 +78,7 @@ export async function GET(request: Request) {
       .order("name"),
     supabase
       .from("ic_clients")
-      .select("id, name, phone, email, address")
+      .select("id, name, phone, email, address, merged_into_client_id, identity_key")
       .is("deleted_at", null)
       .order("name")
       .limit(3000),
@@ -85,19 +90,104 @@ export async function GET(request: Request) {
   if (staffResult.error) {
     return NextResponse.json({ ok: false, error: staffResult.error.message }, { status: 500 });
   }
+
+  let clientsResult = clientsWithMerge;
+  if (clientsResult.error && /merged_into_client_id|identity_key|schema cache|column/i.test(clientsResult.error.message)) {
+    clientsResult = await supabase
+      .from("ic_clients")
+      .select("id, name, phone, email, address")
+      .is("deleted_at", null)
+      .order("name")
+      .limit(3000);
+  }
   if (clientsResult.error) {
     return NextResponse.json({ ok: false, error: clientsResult.error.message }, { status: 500 });
   }
 
   const staffById = new Map((staffResult.data ?? []).map((member) => [member.id, member]));
-  const clientsById = new Map((clientsResult.data ?? []).map((client) => [client.id, client]));
-  const visible = (jobsResult.data ?? []).filter((job) => job.community_ref !== "FIELD-TEST");
-  const receivingByJob = await receivingRollupByJobIds(visible.map((job) => job.id));
+  const clientsById = new Map(
+    (clientsResult.data ?? []).map((client) => {
+      const mergedInto =
+        "merged_into_client_id" in client
+          ? (client as { merged_into_client_id?: string | null }).merged_into_client_id
+          : null;
+      return [client.id, { ...client, canonical_id: mergedInto || client.id }];
+    }),
+  );
+  // Resolve merged clients to their canonical row for display.
+  for (const client of clientsResult.data ?? []) {
+    const mergedInto =
+      "merged_into_client_id" in client
+        ? (client as { merged_into_client_id?: string | null }).merged_into_client_id
+        : null;
+    if (mergedInto && clientsById.has(mergedInto)) {
+      clientsById.set(client.id, {
+        ...clientsById.get(mergedInto)!,
+        canonical_id: mergedInto,
+      });
+    }
+  }
+
+  const visible = (jobsResult.data ?? []).filter(
+    (job) =>
+      job.community_ref !== "FIELD-TEST" &&
+      !(job as { duplicate_of_job_id?: string | null }).duplicate_of_job_id,
+  );
+  const [receivingByJob, mergeCandidates] = await Promise.all([
+    receivingRollupByJobIds(visible.map((job) => job.id)),
+    listPendingMergeCandidates().catch(() => []),
+  ]);
+  const mergeByClientId = new Map<
+    string,
+    { id: string; reason: string; suggested_name: string | null }
+  >();
+  for (const candidate of mergeCandidates) {
+    const live = candidate.clients.filter((client) => client.id);
+    for (const client of live) {
+      const suggested = live.find((other) => other.id !== client.id);
+      mergeByClientId.set(client.id, {
+        id: candidate.id,
+        reason: candidate.reason,
+        suggested_name: suggested?.name ?? null,
+      });
+    }
+  }
+
+  // Count sibling jobs per canonical client for the list marker.
+  const siblingCount = new Map<string, number>();
+  for (const job of visible) {
+    const client = job.client_id ? clientsById.get(job.client_id) : null;
+    const key = client?.canonical_id ?? job.client_id ?? job.id;
+    siblingCount.set(key, (siblingCount.get(key) ?? 0) + 1);
+  }
+
   const jobs = visible.map((job) => {
     const receiving = receivingByJob.get(job.id);
+    const client = job.client_id ? clientsById.get(job.client_id) ?? null : null;
+    const canonicalId = client?.canonical_id ?? job.client_id ?? null;
+    const mergeReview = job.client_id
+      ? mergeByClientId.get(job.client_id) ?? (canonicalId ? mergeByClientId.get(canonicalId) : null)
+      : null;
     return {
       ...job,
-      client: job.client_id ? clientsById.get(job.client_id) ?? null : null,
+      client: client
+        ? {
+            id: client.id,
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+            address: client.address,
+            canonical_id: canonicalId,
+          }
+        : null,
+      client_job_count: canonicalId ? siblingCount.get(canonicalId) ?? 1 : 1,
+      merge_review: mergeReview
+        ? {
+            candidate_id: mergeReview.id,
+            reason: mergeReview.reason,
+            suggested_name: mergeReview.suggested_name,
+          }
+        : null,
       designer: job.designer_id ? staffById.get(job.designer_id) ?? null : null,
       installer: job.installer_id ? staffById.get(job.installer_id) ?? null : null,
       receiving_open_qty: receiving?.open_qty ?? 0,
@@ -133,6 +223,8 @@ export async function POST(request: Request) {
 
   const supabase = getSupabaseAdmin();
   let resolvedClientId = clientId;
+  let jobTitle: string | null =
+    typeof body.title === "string" && body.title.trim() ? body.title.trim() : null;
 
   if (!resolvedClientId) {
     if (!clientName) {
@@ -141,15 +233,18 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { data: createdClient, error: clientError } = await supabase
-      .from("ic_clients")
-      .insert({ name: clientName })
-      .select("id")
-      .single();
-    if (clientError) {
-      return NextResponse.json({ ok: false, error: clientError.message }, { status: 500 });
+    try {
+      const resolved = await resolveClient({ name: clientName });
+      resolvedClientId = resolved.clientId;
+      if (!jobTitle) jobTitle = resolved.title;
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Could not resolve client." },
+        { status: 500 },
+      );
     }
-    resolvedClientId = createdClient.id;
+  } else if (clientName && !jobTitle) {
+    jobTitle = jobDescriptorFromName(clientName);
   }
 
   const insert: Record<string, unknown> = {
@@ -164,6 +259,7 @@ export async function POST(request: Request) {
     sold_date: typeof body.sold_date === "string" ? body.sold_date : null,
     install_date: typeof body.install_date === "string" ? body.install_date : null,
     notes: typeof body.notes === "string" ? body.notes : null,
+    title: jobTitle,
   };
 
   const actorId = typeof body.actor_id === "string" ? body.actor_id : null;

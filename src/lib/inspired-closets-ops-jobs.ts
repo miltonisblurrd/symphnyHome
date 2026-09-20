@@ -226,7 +226,11 @@ export async function syncJobsFromPayroll(): Promise<JobsSyncResult> {
   await chunked(jobsToInsert, 100, async (slice) => {
     let { data, error: insertError } = await supabase.from("ic_jobs").insert(slice).select("id, workbook_ref");
     if (insertError && /title|column|schema cache/i.test(insertError.message)) {
-      const withoutTitle = slice.map(({ title: _title, ...rest }) => rest);
+      const withoutTitle = slice.map((row) => {
+        const { title, ...rest } = row;
+        void title;
+        return rest;
+      });
       ({ data, error: insertError } = await supabase
         .from("ic_jobs")
         .insert(withoutTitle)

@@ -53,7 +53,7 @@ export default function OpsSlipPdf({ src, title, mode = "thumb" }: Props) {
     host.replaceChildren();
     setError(null);
 
-    async function draw() {
+    async function draw(canvasHost: HTMLDivElement) {
       try {
         const pdfjs = await loadPdfjs();
         const bytes = await fetch(src).then((response) => {
@@ -67,7 +67,7 @@ export default function OpsSlipPdf({ src, title, mode = "thumb" }: Props) {
           const page = await pdf.getPage(n);
           if (cancelled) return;
           const base = page.getViewport({ scale: 1 });
-          const width = mode === "thumb" ? 280 : Math.min(860, host.clientWidth || 860);
+          const width = mode === "thumb" ? 280 : Math.min(860, canvasHost.clientWidth || 860);
           const viewport = page.getViewport({ scale: width / base.width });
           const canvas = document.createElement("canvas");
           canvas.width = Math.ceil(viewport.width);
@@ -83,7 +83,7 @@ export default function OpsSlipPdf({ src, title, mode = "thumb" }: Props) {
           context.fillRect(0, 0, canvas.width, canvas.height);
           await page.render({ canvasContext: context, viewport }).promise;
           if (cancelled) return;
-          host.appendChild(canvas);
+          canvasHost.appendChild(canvas);
         }
       } catch (err) {
         if (!cancelled) {
@@ -92,7 +92,7 @@ export default function OpsSlipPdf({ src, title, mode = "thumb" }: Props) {
       }
     }
 
-    void draw();
+    void draw(host);
     return () => {
       cancelled = true;
     };

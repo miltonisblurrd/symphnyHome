@@ -91,35 +91,45 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: staffResult.error.message }, { status: 500 });
   }
 
-  let clientsResult = clientsWithMerge;
-  if (clientsResult.error && /merged_into_client_id|identity_key|schema cache|column/i.test(clientsResult.error.message)) {
-    clientsResult = await supabase
+  type ClientListRow = {
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    merged_into_client_id?: string | null;
+    identity_key?: string | null;
+  };
+
+  let clientRows: ClientListRow[] = (clientsWithMerge.data ?? []) as ClientListRow[];
+  if (
+    clientsWithMerge.error &&
+    /merged_into_client_id|identity_key|schema cache|column/i.test(clientsWithMerge.error.message)
+  ) {
+    const fallback = await supabase
       .from("ic_clients")
       .select("id, name, phone, email, address")
       .is("deleted_at", null)
       .order("name")
       .limit(3000);
-  }
-  if (clientsResult.error) {
-    return NextResponse.json({ ok: false, error: clientsResult.error.message }, { status: 500 });
+    if (fallback.error) {
+      return NextResponse.json({ ok: false, error: fallback.error.message }, { status: 500 });
+    }
+    clientRows = (fallback.data ?? []) as ClientListRow[];
+  } else if (clientsWithMerge.error) {
+    return NextResponse.json({ ok: false, error: clientsWithMerge.error.message }, { status: 500 });
   }
 
   const staffById = new Map((staffResult.data ?? []).map((member) => [member.id, member]));
   const clientsById = new Map(
-    (clientsResult.data ?? []).map((client) => {
-      const mergedInto =
-        "merged_into_client_id" in client
-          ? (client as { merged_into_client_id?: string | null }).merged_into_client_id
-          : null;
+    clientRows.map((client) => {
+      const mergedInto = client.merged_into_client_id ?? null;
       return [client.id, { ...client, canonical_id: mergedInto || client.id }];
     }),
   );
   // Resolve merged clients to their canonical row for display.
-  for (const client of clientsResult.data ?? []) {
-    const mergedInto =
-      "merged_into_client_id" in client
-        ? (client as { merged_into_client_id?: string | null }).merged_into_client_id
-        : null;
+  for (const client of clientRows) {
+    const mergedInto = client.merged_into_client_id ?? null;
     if (mergedInto && clientsById.has(mergedInto)) {
       clientsById.set(client.id, {
         ...clientsById.get(mergedInto)!,
@@ -201,7 +211,7 @@ export async function GET(request: Request) {
     stages: JOB_STAGES,
     jobs,
     staff: staffResult.data ?? [],
-    clients: clientsResult.data ?? [],
+    clients: clientRows,
   });
 }
 

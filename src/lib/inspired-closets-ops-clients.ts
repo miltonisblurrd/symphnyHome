@@ -96,6 +96,11 @@ export type MergeCandidate = {
   clients: MergeCandidateClient[];
 };
 
+function asIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
 function collapseSpaces(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -567,14 +572,14 @@ export async function listPendingMergeCandidates(): Promise<MergeCandidate[]> {
     return [];
   }
 
-  const clientIds = [...new Set(data.flatMap((row) => row.client_ids ?? []))];
+  const clientIds = [...new Set(data.flatMap((row) => asIdList(row.client_ids)))];
   if (clientIds.length === 0) {
     return data.map((row) => ({
       id: row.id,
       identity_key: row.identity_key,
       reason: row.reason,
       status: row.status,
-      client_ids: row.client_ids ?? [],
+      client_ids: asIdList(row.client_ids),
       clients: [],
     }));
   }
@@ -616,10 +621,13 @@ export async function listPendingMergeCandidates(): Promise<MergeCandidate[]> {
       identity_key: row.identity_key,
       reason: row.reason,
       status: row.status,
-      client_ids: row.client_ids ?? [],
-      clients: (row.client_ids ?? [])
+      client_ids: asIdList(row.client_ids),
+      clients: asIdList(row.client_ids)
         .map((id) => clientsById.get(id))
-        .filter((row): row is NonNullable<typeof row> => Boolean(row) && !row.merged_into_client_id)
+        .filter(
+          (row): row is NonNullable<typeof row> =>
+            Boolean(row) && !row?.merged_into_client_id,
+        )
         .map((client) => ({
           id: client.id,
           name: client.name,
@@ -758,10 +766,11 @@ export async function resolveMergeCandidate(input: {
     return { action: "keep_separate" };
   }
 
-  const intoClientId = input.intoClientId || candidate.client_ids?.[0];
+  const candidateIds = asIdList(candidate.client_ids);
+  const intoClientId = input.intoClientId || candidateIds[0];
   if (!intoClientId) throw new Error("into_client_id is required to merge.");
 
-  const fromClientIds = (candidate.client_ids ?? []).filter((id) => id !== intoClientId);
+  const fromClientIds = candidateIds.filter((id) => id !== intoClientId);
   const merged = await mergeClients({
     intoClientId,
     fromClientIds,

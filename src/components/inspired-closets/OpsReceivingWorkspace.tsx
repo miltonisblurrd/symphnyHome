@@ -186,7 +186,6 @@ export default function OpsReceivingWorkspace() {
       });
       await load();
       setDocsTick((n) => n + 1);
-      setShowDocs(true);
     } catch (error) {
       setNotice({
         kind: "error",

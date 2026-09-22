@@ -67,3 +67,93 @@ export function pickScanCode(
   }
   return null;
 }
+
+export type MatchableLine = {
+  item_number: string;
+  vendor_sku?: string | null;
+  container_id?: string | null;
+  qty: number;
+  received_qty: number;
+};
+
+const MIN_CODE_LEN = 6;
+
+export function shipmentHasVendorSkus(
+  items: Array<{ vendor_sku?: string | null }>,
+): boolean {
+  return items.some((item) => String(item.vendor_sku ?? "").trim().length > 0);
+}
+
+/** Modulus extractAndMatch: tokens, neighbor joins, and windows of codes already on the slip. */
+export function extractAndMatch(raw: string, items: MatchableLine[]): string | null {
+  const tokens = (String(raw ?? "").toUpperCase().match(/[0-9A-Z]+/g) ?? [])
+    .map((token) => normalizeCode(token))
+    .filter(Boolean);
+  if (tokens.length === 0 || items.length === 0) return null;
+
+  const lengths = new Set<number>();
+  for (const item of items) {
+    for (const value of [item.item_number, item.vendor_sku]) {
+      for (const key of codeKeys(value)) {
+        if (key.length >= MIN_CODE_LEN) lengths.add(key.length);
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  const add = (value: string) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    candidates.push(value);
+  };
+  for (const token of tokens) add(token);
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    add(tokens[i] + tokens[i + 1]);
+    if (i + 2 < tokens.length) add(tokens[i] + tokens[i + 1] + tokens[i + 2]);
+  }
+  const windows = [...lengths].sort((a, b) => b - a);
+  for (const token of tokens) {
+    for (const length of windows) {
+      if (token.length <= length) continue;
+      for (let i = 0; i <= token.length - length; i += 1) add(token.slice(i, i + length));
+    }
+  }
+  candidates.sort((a, b) => b.length - a.length);
+
+  const open = items.filter((item) => (item.received_qty ?? 0) < (item.qty ?? 1));
+  const pools = open.length > 0 ? [open, items] : [items];
+  for (const pool of pools) {
+    for (const code of candidates) {
+      const hit = pool.find((item) =>
+        [item.item_number, item.vendor_sku].some((value) => codesMatch(code, value)),
+      );
+      if (!hit) continue;
+      if (pool === open && (hit.received_qty ?? 0) >= (hit.qty ?? 1)) continue;
+      return code;
+    }
+  }
+  return null;
+}
+
+export function isStowItemCode(value: string): boolean {
+  return /^300\d{6}$/.test(value.replace(/\D/g, ""));
+}
+
+/** Wraps, bottoms, and scribe stay on Browse. They do not join the missing board. */
+export function isBrowseOnlyLine(item: { item_number?: string | null; description?: string | null }): boolean {
+  const digits = String(item.item_number ?? "").replace(/\D/g, "");
+  if (/^(10000|20000)\d+/.test(digits)) return true;
+  const text = `${item.description ?? ""} ${item.item_number ?? ""}`.toLowerCase();
+  return /\b(wraps?|bottoms?|scribe)\b/.test(text);
+}
+
+export function isDropshipCatalogCode(code: string | null | undefined): boolean {
+  const digits = String(code ?? "").replace(/\s+/g, "");
+  return /^40000\d+$/.test(digits) && digits.length >= 8;
+}
+
+export function hafeleArticle(value: string | null | undefined): string | null {
+  const match = String(value ?? "").match(/\d{3}\.\d{2}\.\d{3}/);
+  return match?.[0] ?? null;
+}

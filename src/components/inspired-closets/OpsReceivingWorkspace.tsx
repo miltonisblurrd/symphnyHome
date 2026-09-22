@@ -122,6 +122,8 @@ export default function OpsReceivingWorkspace() {
   const [showDocs, setShowDocs] = useState(true);
   const [docCount, setDocCount] = useState(0);
   const [docsTick, setDocsTick] = useState(0);
+  const [lastTruck, setLastTruck] = useState("");
+  const [pendingClaims, setPendingClaims] = useState(0);
   const slipRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
 
@@ -149,6 +151,14 @@ export default function OpsReceivingWorkspace() {
   }, []);
 
   useEffect(() => {
+    setLastTruck(localStorage.getItem("ic-receiving-last") ?? "");
+    void fetch("/api/inspired-closets/ops/receiving/claims")
+      .then((response) => response.json())
+      .then((payload: unknown) => {
+        const pending = payload && typeof payload === "object" && "pending" in payload ? Number(payload.pending) : 0;
+        setPendingClaims(Number.isFinite(pending) ? pending : 0);
+      })
+      .catch(() => setPendingClaims(0));
     void load();
     const timer = window.setInterval(() => {
       void load({ silent: true });
@@ -250,6 +260,15 @@ export default function OpsReceivingWorkspace() {
           >
             {uploading === "summary" ? "Reading summary…" : "Upload project summary"}
           </button>
+          <Link href="/inspired-closets/ops/inventory/receiving/lookup" className={payroll.buttonGhost}>
+            Lookup
+          </Link>
+          <Link href="/inspired-closets/ops/inventory/receiving/claims" className={payroll.buttonGhost}>
+            Claims{pendingClaims ? ` (${pendingClaims})` : ""}
+          </Link>
+          <Link href="/inspired-closets/ops/inventory/receiving/production" className={payroll.buttonGhost}>
+            Production
+          </Link>
           <button
             type="button"
             className={showDocs ? payroll.buttonPrimary : payroll.buttonGhost}
@@ -268,6 +287,13 @@ export default function OpsReceivingWorkspace() {
         ) : null}
         {hint ? <p className={payroll.notice}>{hint}</p> : null}
 
+        {lastTruck ? (
+          <p style={{ marginBottom: "0.75rem" }}>
+            <Link href={`/inspired-closets/ops/inventory/receiving/${lastTruck}/scan`} className={payroll.buttonPrimary}>
+              Resume last truck
+            </Link>
+          </p>
+        ) : null}
         <section className={`${payroll.panel} ${styles.shipPanel}`} style={{ marginBottom: "1rem" }}>
           {loading ? (
             <p className={payroll.empty}>Loading shipments…</p>

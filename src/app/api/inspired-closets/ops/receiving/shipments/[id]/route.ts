@@ -6,6 +6,7 @@ import {
   loadShipmentItemRows,
   missingReceivingTable,
   relinkShipmentItems,
+  reparseShipment,
   shipmentRollup,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
@@ -85,6 +86,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
+  }
+  if (body.action === "reparse") {
+    try {
+      const result = await reparseShipment(id);
+      return NextResponse.json({ ok: true, reparsed: result });
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Could not re-read the PDF." },
+        { status: 400 },
+      );
+    }
   }
   if (body.action === "relink") {
     try {

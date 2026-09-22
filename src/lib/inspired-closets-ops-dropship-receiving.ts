@@ -1,6 +1,6 @@
 /**
- * Studio project summaries: stored, read, and attached to the job. They never
- * become Receiving shipments; only packing slips are on Bryant's scan list.
+ * Studio orders stay on the job. The unnumbered 40000 block is copied onto
+ * Receiving so Bryant can scan it. A packing-list line for the same SKU wins.
  */
 import { getSupabaseAdmin } from "@/db/client";
 import {
@@ -8,6 +8,11 @@ import {
   findJobFromFilename,
   findJobId,
 } from "@/lib/inspired-closets-ops-receiving";
+import {
+  hafeleArticle,
+  isBrowseOnlyLine,
+  isDropshipCatalogCode,
+} from "@/lib/inspired-closets-ops-scan-codes";
 import {
   persistJobProductSummary,
   parseProductSummary,
@@ -440,10 +445,16 @@ export async function ingestStudioOrderFromReceiving(input: {
     parsed,
     actorId: input.actorId,
   });
+  const copied = await publishDropshipLines({
+    jobId,
+    orderName: parsed.order_name,
+    soNumber: parsed.so_number,
+    lines: parsed.lines,
+  });
   const lineCount = saved.lines.length;
   const orderLabel = parsed.order_name ?? parsed.so_number ?? input.filename;
   const matchNote = jobId
-    ? `Attached to the job from ${input.filename}.`
+    ? `Attached to the job from ${input.filename}. ${copied} vendor lines are on Receiving.`
     : `No job matched ${input.filename} yet. It is on the Project summaries tab.`;
 
   return {
@@ -455,4 +466,92 @@ export async function ingestStudioOrderFromReceiving(input: {
     imported: lineCount,
     message: `Project summary ${orderLabel}: ${lineCount} lines read. ${matchNote}`,
   };
+}
+
+export async function publishDropshipLines(input: {
+  jobId: string | null;
+  orderName: string | null;
+  soNumber: string | null;
+  lines: Array<{
+    item_code: string;
+    description: string;
+    product_type: string;
+    finish: string | null;
+    qty: number;
+  }>;
+}): Promise<number> {
+  if (!input.jobId) return 0;
+  const wanted = input.lines.filter((line) => {
+    if (!isDropshipCatalogCode(line.item_code)) return false;
+    return !isBrowseOnlyLine({
+      item_number: line.item_code,
+      description: `${line.description} ${line.product_type} ${line.finish ?? ""}`,
+    });
+  });
+  if (wanted.length === 0) return 0;
+
+  const supabase = getSupabaseAdmin();
+  const { data: existing } = await supabase
+    .from("ic_shipment_items")
+    .select("item_number, vendor_sku")
+    .eq("job_id", input.jobId);
+
+  const ships = await listJobScanShipments({
+    jobId: input.jobId,
+    orderName: input.orderName,
+  });
+  let shipmentId = ships[0]?.id ?? null;
+  if (!shipmentId) {
+    const slug = (input.orderName ?? "order").trim().replace(/\s+/g, "-").slice(0, 40) || "order";
+    const { data: created, error } = await supabase
+      .from("ic_shipments")
+      .insert({
+        notice: `3P-${slug}`,
+        vendor: "other",
+        status: "ready",
+        source_filename: "studio-dropship",
+        total_pages: 0,
+        parse_quality: { source: "dropship", job_id: input.jobId },
+      })
+      .select("id")
+      .single();
+    if (error || !created) return 0;
+    shipmentId = String(created.id);
+  }
+
+  const rows = [];
+  for (const line of wanted) {
+    const article = hafeleArticle(`${line.description} ${line.finish ?? ""} ${line.product_type}`);
+    const catalog = line.item_code.replace(/\s+/g, "");
+    const itemNumber = article ?? catalog;
+    const vendorSku = article ? catalog : null;
+    const already = (existing ?? []).some(
+      (row) =>
+        codesMatch(itemNumber, row.item_number as string) ||
+        codesMatch(itemNumber, row.vendor_sku as string | null) ||
+        (vendorSku &&
+          (codesMatch(vendorSku, row.item_number as string) ||
+            codesMatch(vendorSku, row.vendor_sku as string | null))),
+    );
+    if (already) continue;
+    rows.push({
+      shipment_id: shipmentId,
+      item_number: itemNumber,
+      vendor_sku: vendorSku,
+      so_number: input.soNumber,
+      cust_ref: input.orderName,
+      job_name: input.orderName,
+      description: line.description || line.product_type || null,
+      qty: Math.max(1, Number(line.qty) || 1),
+      received_qty: 0,
+      damaged_qty: 0,
+      status: "expected",
+      job_id: input.jobId,
+      note: "Studio 40000",
+    });
+  }
+  if (rows.length === 0) return 0;
+  const { error } = await supabase.from("ic_shipment_items").insert(rows);
+  if (error) throw error;
+  return rows.length;
 }

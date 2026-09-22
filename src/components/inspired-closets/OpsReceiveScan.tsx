@@ -3,10 +3,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./receiving.module.css";
+import {
+  extractAndMatch,
+  isStowItemCode,
+  shipmentHasVendorSkus,
+  type MatchableLine,
+} from "@/lib/inspired-closets-ops-scan-codes";
+import {
+  binarize,
+  cropScanBand,
+  invertCanvas,
+  readBarcodes,
+  rotateCanvas,
+} from "@/lib/inspired-closets-ops-scan-camera";
 
 type Item = {
   id: string;
   item_number: string;
+  vendor_sku?: string | null;
   cust_ref: string | null;
   job_name: string | null;
   description: string | null;
@@ -38,6 +52,8 @@ type ScanLogRow = {
 };
 
 const OFFLINE_KEY = "ic-receiving-offline";
+const LAST_TRUCK_KEY = "ic-receiving-last";
+const SESSION_KEY = "ic-receiving-session";
 
 function readOffline(): Array<{ shipmentId: string; item_number: string; qty: number; pallet: string | null }> {
   if (typeof window === "undefined") return [];
@@ -101,7 +117,15 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   const [syncing, setSyncing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [ocrReady, setOcrReady] = useState(false);
+  const [sessionPieces, setSessionPieces] = useState(0);
+  const [sessionStarted, setSessionStarted] = useState<number | null>(null);
+  const [browseOpenOnly, setBrowseOpenOnly] = useState(false);
+  const [browseBy, setBrowseBy] = useState<"job" | "pallet">("job");
+  const [searchQty, setSearchQty] = useState(1);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const itemsRef = useRef<Item[]>([]);
+  const missStreakRef = useRef<{ code: string; n: number }>({ code: "", n: 0 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const workerRef = useRef<import("tesseract.js").Worker | null>(null);
   const holdRef = useRef(false);
@@ -122,9 +146,26 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       setNotice(payload.error ?? "Could not load shipment.");
       return;
     }
-    setItems(payload.items ?? []);
+    const next = payload.items ?? [];
+    itemsRef.current = next;
+    setItems(next);
     setStats(payload.stats ?? null);
     if (payload.shipment?.notice) setNotice(payload.shipment.notice);
+  }, [shipmentId]);
+
+  useEffect(() => {
+    localStorage.setItem(LAST_TRUCK_KEY, shipmentId);
+    const raw = localStorage.getItem(SESSION_KEY);
+    const parsed = raw ? (JSON.parse(raw) as { id?: string; started?: number; pieces?: number }) : null;
+    if (parsed?.id === shipmentId && parsed.started) {
+      setSessionStarted(parsed.started);
+      setSessionPieces(parsed.pieces ?? 0);
+    } else {
+      const started = Date.now();
+      setSessionStarted(started);
+      setSessionPieces(0);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ id: shipmentId, started, pieces: 0 }));
+    }
   }, [shipmentId]);
 
   useEffect(() => {
@@ -148,14 +189,19 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     })();
   }, [load, shipmentId]);
 
+  const letterMode = shipmentHasVendorSkus(items);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const tesseract = await import("tesseract.js");
-        const worker = await tesseract.createWorker("eng", 1);
+        const worker = await tesseract.createWorker("eng", 1, { logger: () => undefined });
         await worker.setParameters({
-          tessedit_char_whitelist: "0123456789 ",
+          tessedit_char_whitelist: letterMode
+            ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ "
+            : "0123456789 ",
+          tessedit_pageseg_mode: "6" as unknown as import("tesseract.js").PSM,
         });
         if (cancelled) {
           await worker.terminate();
@@ -170,8 +216,9 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     return () => {
       cancelled = true;
       void workerRef.current?.terminate();
+      workerRef.current = null;
     };
-  }, []);
+  }, [letterMode]);
 
   useEffect(() => {
     if (tab !== "scan") return;
@@ -245,6 +292,15 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
           detail: jobLabel(last.item),
         });
         if (last.item) {
+          setSessionPieces((count) => {
+            const next = count + qty;
+            const started = sessionStarted ?? Date.now();
+            localStorage.setItem(
+              SESSION_KEY,
+              JSON.stringify({ id: shipmentId, started, pieces: next }),
+            );
+            return next;
+          });
           setScanLog((rows) =>
             [
               {
@@ -270,38 +326,82 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
         warn: true,
       });
     }
-  }, [load, pallet, shipmentId]);
+  }, [load, pallet, sessionStarted, shipmentId]);
+
+  const considerRead = useCallback(
+    async (text: string) => {
+      const lines = itemsRef.current as MatchableLine[];
+      const matched = extractAndMatch(text, lines);
+      const now = Date.now();
+      if (matched) {
+        missStreakRef.current = { code: "", n: 0 };
+        if (matched !== lastCodeRef.current.code || now - lastCodeRef.current.at > 1200) {
+          lastCodeRef.current = { code: matched, at: now };
+          await postScan(matched);
+        }
+        return;
+      }
+      const nines = text.toUpperCase().match(/\d{9}/g) ?? [];
+      const stow = nines.find((code) => isStowItemCode(code));
+      if (!stow) {
+        missStreakRef.current = { code: "", n: 0 };
+        return;
+      }
+      const streak =
+        missStreakRef.current.code === stow ? missStreakRef.current.n + 1 : 1;
+      missStreakRef.current = { code: stow, n: streak };
+      if (streak < 3) return;
+      missStreakRef.current = { code: "", n: 0 };
+      if (stow !== lastCodeRef.current.code || now - lastCodeRef.current.at > 1200) {
+        lastCodeRef.current = { code: stow, at: now };
+        await postScan(stow);
+      }
+    },
+    [postScan],
+  );
 
   const loop = useCallback(async () => {
-    if (!holdRef.current || !workerRef.current || !videoRef.current || !canvasRef.current) {
-      return;
-    }
+    if (!holdRef.current || !workerRef.current || !videoRef.current) return;
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (video.readyState < 2) {
+    const host = stageRef.current ?? video.parentElement;
+    if (video.readyState < 2 || !host) {
       rafRef.current = requestAnimationFrame(() => void loop());
       return;
     }
-    const bandY = Math.floor(video.videoHeight * 0.36);
-    const bandH = Math.floor(video.videoHeight * 0.28);
-    canvas.width = video.videoWidth;
-    canvas.height = bandH;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, bandY, video.videoWidth, bandH, 0, 0, canvas.width, canvas.height);
+    const cropped = cropScanBand(video, host);
+    if (!cropped) {
+      rafRef.current = requestAnimationFrame(() => void loop());
+      return;
+    }
+    const canvas = cropped.canvas;
+    if (canvasRef.current) {
+      canvasRef.current.width = canvas.width;
+      canvasRef.current.height = canvas.height;
+      canvasRef.current.getContext("2d")?.drawImage(canvas, 0, 0);
+    }
     try {
-      const { data } = await workerRef.current.recognize(canvas);
-      const code = (data.text || "").replace(/\D/g, "");
-      const now = Date.now();
-      if (code.length >= 6 && (code !== lastCodeRef.current.code || now - lastCodeRef.current.at > 1200)) {
-        lastCodeRef.current = { code, at: now };
-        await postScan(code);
+      const barcodes = await readBarcodes(canvas);
+      for (const code of barcodes) await considerRead(code);
+      binarize(canvas);
+      const worker = workerRef.current;
+      const reads = [canvas];
+      const first = await worker.recognize(canvas);
+      const firstText = first.data.text || "";
+      const hasNine = /\d{9}/.test(firstText.replace(/\D/g, ""));
+      if (!hasNine && !letterMode) {
+        reads.push(invertCanvas(canvas), rotateCanvas(canvas, 1), rotateCanvas(canvas, -1));
       }
+      const texts = [firstText];
+      for (const frame of reads.slice(1)) {
+        const next = await worker.recognize(frame);
+        texts.push(next.data.text || "");
+      }
+      await considerRead(texts.join(" "));
     } catch {
       /* keep looping */
     }
     if (holdRef.current) rafRef.current = requestAnimationFrame(() => void loop());
-  }, [postScan]);
+  }, [considerRead, letterMode]);
 
   function startHold() {
     if (!ocrReady) {
@@ -409,23 +509,27 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
       if (pallet && item.container_id !== pallet) return false;
+      if (tab === "browse" && browseOpenOnly && item.received_qty >= item.qty) return false;
       if (!q) return true;
-      return `${item.item_number} ${item.cust_ref} ${item.job_name} ${item.description}`
+      return `${item.item_number} ${item.vendor_sku ?? ""} ${item.cust_ref} ${item.job_name} ${item.description}`
         .toLowerCase()
         .includes(q);
     });
-  }, [items, pallet, query]);
+  }, [browseOpenOnly, items, pallet, query, tab]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, Item[]>();
     for (const item of visible) {
-      const key = item.cust_ref || item.job_name || "Unassigned";
+      const key =
+        browseBy === "pallet"
+          ? item.container_id || "No pallet"
+          : item.cust_ref || item.job_name || "Unassigned";
       const list = map.get(key) ?? [];
       list.push(item);
       map.set(key, list);
     }
     return [...map.entries()];
-  }, [visible]);
+  }, [browseBy, visible]);
 
   const creditQueue = useMemo(
     () =>
@@ -456,41 +560,62 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
           <button type="button" className={styles.scanSync} onClick={() => void syncNow()}>
             {stats?.total_received_qty ?? 0}/{stats?.total_qty ?? 0} total / {syncing ? "syncing…" : "tap to sync"}
           </button>
+          <p className={styles.scanBrand}>
+            {sessionPieces} this session
+            {sessionStarted
+              ? ` · ${Math.max(1, Math.round((Date.now() - sessionStarted) / 60000))} min`
+              : ""}
+          </p>
           <p className={styles.scanBrand}>Inspired Closets{notice ? ` · ${notice}` : ""}</p>
         </div>
-        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}`} className={styles.scanNav}>
+        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/summary`} className={styles.scanNav}>
           Summary
         </Link>
       </header>
 
-      <div className={styles.palletContext}>
-        {pallet && activePallet ? (
-          <span>
-            Pallet {shortPallet(pallet)} {activePallet.total_received_qty}/{activePallet.total_qty} tap to change
-          </span>
-        ) : (
-          <span>Entire truck · tap a pallet</span>
-        )}
-      </div>
-      <div className={styles.palletBar}>
-        <button
-          type="button"
-          className={`${styles.palletChip} ${!pallet ? styles.palletOn : ""}`}
-          onClick={() => setPallet("")}
-        >
-          Entire truck
-        </button>
-        {(stats?.by_container ?? []).map((row) => (
-          <button
-            key={row.container_id}
-            type="button"
-            className={`${styles.palletChip} ${pallet === row.container_id ? styles.palletOn : ""}`}
-            onClick={() => setPallet(row.container_id)}
-          >
-            {shortPallet(row.container_id)} {row.total_received_qty}/{row.total_qty}
-          </button>
-        ))}
-      </div>
+      {items.some((item) => item.container_id) ? null : (
+        <div className={styles.palletContext}>
+          <span>Vendor labels · one scan is one piece</span>
+        </div>
+      )}
+      {items.some((item) => item.container_id) ? (
+        <>
+          <div className={styles.palletContext}>
+            {pallet && activePallet ? (
+              <span>
+                Pallet {shortPallet(pallet)} {activePallet.total_received_qty}/{activePallet.total_qty} · accurate
+              </span>
+            ) : (
+              <span>Entire truck · less accurate · pick a pallet first</span>
+            )}
+          </div>
+          <div className={styles.palletBar}>
+            <button
+              type="button"
+              className={`${styles.palletChip} ${!pallet ? styles.palletOn : ""}`}
+              onClick={() => setPallet("")}
+            >
+              Entire truck
+            </button>
+            {(stats?.by_container ?? []).map((row) => {
+              const lines = items.filter((item) => item.container_id === row.container_id);
+              const settled = lines.length > 0 && lines.every((item) => item.received_qty >= item.qty || item.status === "missing" || item.status === "damaged");
+              const short = settled && lines.some((item) => item.received_qty < item.qty);
+              return (
+                <button
+                  key={row.container_id}
+                  type="button"
+                  className={`${styles.palletChip} ${pallet === row.container_id ? styles.palletOn : ""}`}
+                  onClick={() => setPallet(row.container_id)}
+                >
+                  {shortPallet(row.container_id)} {row.total_received_qty}/{row.total_qty}
+                  {settled ? (short ? " · shorts" : " · done") : ""}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
 
       {lastItem && banner && !banner.warn ? (
         <div className={styles.successBanner}>
@@ -505,6 +630,27 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
           <button type="button" className={styles.undoBtn} onClick={() => void undoLast()}>
             Undo
           </button>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              data.set("shipment_id", shipmentId);
+              data.set("item_id", lastItem.id);
+              data.set("description", `${jobLabel(lastItem)} ${lastItem.item_number}`);
+              void fetch("/api/inspired-closets/ops/receiving/claims", { method: "POST", body: data }).then(() => {
+                setBanner({ title: "Claim saved", detail: "It stays on the job until someone submits it." });
+              });
+            }}
+          >
+            <select name="claim_type" defaultValue="DAMAGED">
+              <option value="DAMAGED">Damaged</option>
+              <option value="MISSING">Missing</option>
+              <option value="DEFECTIVE">Defective</option>
+              <option value="WRONG">Wrong item</option>
+            </select>
+            <input name="photos" type="file" accept="image/*" multiple />
+            <button type="submit">Flag</button>
+          </form>
         </div>
       ) : banner ? (
         <div className={`${styles.banner} ${styles.bannerWarn}`}>
@@ -534,7 +680,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
 
       {tab === "scan" ? (
         <>
-          <div className={styles.cameraWrap}>
+          <div className={styles.cameraWrap} ref={stageRef}>
             <video ref={videoRef} playsInline muted autoPlay />
             <div className={styles.scanBand} />
             {hit && lastItem ? (
@@ -560,13 +706,40 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
       ) : null}
 
       {tab === "search" ? (
-        <input
-          className={styles.searchBox}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Item #, client, description"
-          autoFocus
-        />
+        <div style={{ display: "flex", gap: "0.5rem", padding: "0 1rem" }}>
+          <input
+            className={styles.searchBox}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Item #, vendor #, client, description"
+            autoFocus
+            style={{ flex: 1 }}
+          />
+          <input
+            className={styles.searchBox}
+            type="number"
+            min={1}
+            value={searchQty}
+            onChange={(e) => setSearchQty(Math.max(1, Number(e.target.value) || 1))}
+            aria-label="Quantity"
+            style={{ width: "4.5rem" }}
+          />
+        </div>
+      ) : null}
+
+      {tab === "browse" ? (
+        <div style={{ display: "flex", gap: "0.5rem", padding: "0 1rem 0.5rem" }}>
+          <button type="button" className={styles.palletChip} onClick={() => setBrowseOpenOnly((open) => !open)}>
+            {browseOpenOnly ? "Still open" : "All lines"}
+          </button>
+          <button
+            type="button"
+            className={styles.palletChip}
+            onClick={() => setBrowseBy((mode) => (mode === "job" ? "pallet" : "job"))}
+          >
+            {browseBy === "job" ? "By customer" : "By pallet"}
+          </button>
+        </div>
       ) : null}
 
       {(tab === "search" || tab === "browse") &&
@@ -588,7 +761,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
                   <button type="button" onClick={() => void bump(item, -1)}>
                     −
                   </button>
-                  <button type="button" onClick={() => void bump(item, 1)}>
+                  <button type="button" onClick={() => void bump(item, tab === "search" ? searchQty : 1)}>
                     +
                   </button>
                   {item.qty - item.received_qty > 1 ? (

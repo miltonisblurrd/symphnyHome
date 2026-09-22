@@ -286,6 +286,12 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
               Print labels
             </button>
           ) : null}
+          <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/check`} className={payroll.buttonGhost}>
+            Check the read
+          </Link>
+          <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/summary`} className={payroll.buttonGhost}>
+            Summary
+          </Link>
           <Link href="/inspired-closets/ops/inventory/receiving" className={payroll.buttonGhost}>
             All trucks
           </Link>

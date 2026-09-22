@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { publishDropshipLines } from "@/lib/inspired-closets-ops-dropship-receiving";
 import {
   attachJobProductSummary,
   missingSummaryTable,
@@ -166,6 +167,15 @@ export async function POST(request: Request) {
       );
     }
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+
+  if (jobId) {
+    await publishDropshipLines({
+      jobId,
+      orderName: parsed.order_name,
+      soNumber: parsed.so_number,
+      lines: parsed.lines,
+    });
   }
 
   const summary = saved.summary;

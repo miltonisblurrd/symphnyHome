@@ -9,6 +9,7 @@ import {
   shipmentRollup,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
+import { isBrowseOnlyLine } from "@/lib/inspired-closets-ops-scan-codes";
 
 export const runtime = "nodejs";
 
@@ -74,11 +75,24 @@ export async function GET(request: Request) {
     });
   }
 
+  const { data: allRows } = shipIds.length
+    ? await supabase.from("ic_shipment_items").select(SHIPMENT_ITEM_SELECT).in("shipment_id", shipIds)
+    : { data: [] };
+  const allByShip = new Map<string, ShipmentItemRow[]>();
+  for (const row of (allRows ?? []) as ShipmentItemRow[]) {
+    const list = allByShip.get(row.shipment_id) ?? [];
+    list.push(row);
+    allByShip.set(row.shipment_id, list);
+  }
+
   const byShip: Record<string, { shipment: ShipRow; items: ShipmentItemRow[] }> = {};
   for (const item of items) {
     if (item.received_qty >= item.qty && item.status !== "missing") continue;
+    if (isBrowseOnlyLine(item)) continue;
     const ship = shipById.get(item.shipment_id);
     if (!ship) continue;
+    const rollup = shipmentRollup(allByShip.get(item.shipment_id) ?? []);
+    if (rollup.waiting_for_pallets) continue;
     if (!byShip[item.shipment_id]) byShip[item.shipment_id] = { shipment: ship, items: [] };
     byShip[item.shipment_id].items.push(item);
   }

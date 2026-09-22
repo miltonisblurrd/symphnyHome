@@ -918,6 +918,79 @@ function slipFromStudioSummary(
   };
 }
 
+export async function reparseShipment(id: string): Promise<{ added: number; kept: number }> {
+  const supabase = getSupabaseAdmin();
+  const { data: ship, error } = await supabase
+    .from("ic_shipments")
+    .select("source_filename, storage_path, public_url")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !ship) throw new Error(error?.message ?? "Shipment not found.");
+  let bytes: Buffer | null = null;
+  if (ship.storage_path) {
+    const downloaded = await supabase.storage.from("ic-field-media").download(ship.storage_path);
+    if (!downloaded.error && downloaded.data) bytes = Buffer.from(await downloaded.data.arrayBuffer());
+  }
+  if (!bytes && ship.public_url) {
+    const response = await fetch(ship.public_url);
+    if (response.ok) bytes = Buffer.from(await response.arrayBuffer());
+  }
+  if (!bytes) throw new Error("No PDF on this shipment.");
+  const parsed = await parsePackingSlip({
+    filename: ship.source_filename || "slip.pdf",
+    mimeType: "application/pdf",
+    bytes,
+  });
+  const existing = await loadShipmentItemRows(id);
+  let added = 0;
+  let kept = 0;
+  const now = new Date().toISOString();
+  for (const item of parsed.items) {
+    const match = existing.find(
+      (row) =>
+        codesMatch(row.item_number, item.item_number) &&
+        (row.container_id ?? "") === (item.container_id ?? ""),
+    );
+    if (!match) {
+      const { error: insertError } = await supabase.from("ic_shipment_items").insert({
+        shipment_id: id,
+        item_number: item.item_number,
+        so_number: item.so_number ?? null,
+        cust_ref: item.cust_ref ?? null,
+        job_name: item.job_name ?? null,
+        description: item.description ?? null,
+        qty: item.qty,
+        received_qty: 0,
+        damaged_qty: 0,
+        container_id: item.container_id ?? null,
+        source_page: item.source_page ?? null,
+        status: "expected",
+        vendor_sku: item.vendor_sku ?? null,
+        job_id: item.job_id ?? null,
+      });
+      if (!insertError) added += 1;
+      continue;
+    }
+    kept += 1;
+    if ((match.received_qty ?? 0) > 0) continue;
+    await supabase
+      .from("ic_shipment_items")
+      .update({
+        qty: item.qty,
+        vendor_sku: item.vendor_sku ?? match.vendor_sku,
+        description: item.description ?? match.description,
+        container_id: item.container_id ?? match.container_id,
+        so_number: item.so_number ?? match.so_number,
+        cust_ref: item.cust_ref ?? match.cust_ref,
+        job_name: item.job_name ?? match.job_name,
+        source_page: item.source_page ?? match.source_page,
+        updated_at: now,
+      })
+      .eq("id", match.id);
+  }
+  return { added, kept };
+}
+
 export async function parsePackingSlip(input: {
   filename: string;
   mimeType: string;

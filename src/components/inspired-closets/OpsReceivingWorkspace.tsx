@@ -119,8 +119,6 @@ export default function OpsReceivingWorkspace() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [uploading, setUploading] = useState<"slip" | "summary" | false>(false);
-  const [showDocs, setShowDocs] = useState(true);
-  const [docCount, setDocCount] = useState(0);
   const [docsTick, setDocsTick] = useState(0);
   const [lastTruck, setLastTruck] = useState("");
   const slipRef = useRef<HTMLInputElement>(null);
@@ -252,13 +250,6 @@ export default function OpsReceivingWorkspace() {
           >
             {uploading === "summary" ? "Reading summary…" : "Upload project summary"}
           </button>
-          <button
-            type="button"
-            className={showDocs ? payroll.buttonPrimary : payroll.buttonGhost}
-            onClick={() => setShowDocs((open) => !open)}
-          >
-            {docCount > 0 ? `Documents (${docCount})` : "Documents"}
-          </button>
         </>
       }
     >
@@ -349,7 +340,7 @@ export default function OpsReceivingWorkspace() {
           )}
         </section>
 
-        {showDocs ? <OpsReceivingDocuments refreshToken={docsTick} onCount={setDocCount} /> : null}
+        <OpsReceivingDocuments refreshToken={docsTick} />
       </div>
     </OpsShell>
   );

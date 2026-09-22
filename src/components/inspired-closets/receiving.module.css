@@ -68,11 +68,12 @@
 }
 
 .shipPanel {
-  overflow-x: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .shipPanel .shipTable {
-  min-width: 0;
+  min-width: 48rem;
   width: 100%;
   table-layout: fixed;
 }

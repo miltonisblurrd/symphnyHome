@@ -6,6 +6,13 @@ import OpsShell from "@/components/inspired-closets/OpsShell";
 import OpsProjectFile, {
   type ProjectFile,
 } from "@/components/inspired-closets/OpsProjectFile";
+import {
+  isFiftyPercentPaid,
+  isJobListView,
+  isTenPercentPaid,
+  JOB_LIST_VIEWS,
+  jobMatchesListView,
+} from "@/lib/inspired-closets-ops-jobs";
 import styles from "./ops-payroll.module.css";
 
 type Stage = { id: string; label: string };
@@ -61,6 +68,9 @@ type Job = {
   receiving_open_qty?: number;
   receiving_received_qty?: number;
   receiving_total_qty?: number;
+  deposit_intake_status?: string | null;
+  deposit_paid?: boolean;
+  completion_paid?: boolean;
 };
 
 type ApiResponse = {
@@ -86,6 +96,8 @@ const STATUS_TABS = [
   { id: "all", label: "All" },
   { id: "not_complete", label: "Not Complete" },
   { id: "completed", label: "Completed" },
+  { id: "paid_10", label: "10% paid" },
+  { id: "paid_50", label: "50% paid" },
 ] as const;
 
 const PAGE_SIZES = [50, 100, 200] as const;
@@ -94,6 +106,20 @@ type StatusFilter = (typeof STATUS_TABS)[number]["id"];
 
 function isCompletedStage(stage: string): boolean {
   return stage === "closed";
+}
+
+function jobPassesStatus(job: Job, status: StatusFilter): boolean {
+  if (status === "completed") return isCompletedStage(job.stage);
+  if (status === "not_complete") return !isCompletedStage(job.stage);
+  if (status === "paid_50") return isFiftyPercentPaid(job);
+  if (status === "paid_10") return isTenPercentPaid(job);
+  return true;
+}
+
+function jobPassesFilter(job: Job, filter: string): boolean {
+  if (!filter) return true;
+  if (isJobListView(filter)) return jobMatchesListView(job, filter);
+  return job.stage === filter;
 }
 
 const STAGE_RANK: Record<string, number> = {
@@ -325,6 +351,7 @@ export default function OpsJobsWorkspace() {
         payments?: ProjectFile["payments"];
         clientJobs?: ProjectFile["clientJobs"];
         mergeCandidate?: ProjectFile["mergeCandidate"];
+        photos?: ProjectFile["photos"];
       };
       if (!payload.ok || !payload.job) {
         throw new Error(payload.error ?? "Failed to load project.");
@@ -337,6 +364,7 @@ export default function OpsJobsWorkspace() {
         payments: payload.payments ?? [],
         clientJobs: payload.clientJobs ?? [],
         mergeCandidate: payload.mergeCandidate ?? null,
+        photos: payload.photos ?? [],
       });
       setJobs((current) =>
         current.map((item) =>
@@ -404,9 +432,8 @@ export default function OpsJobsWorkspace() {
     const q = query.trim().toLowerCase();
     const matching = jobs.filter((job) => {
       if (reviewOnly && !job.merge_review) return false;
-      if (statusFilter === "completed" && !isCompletedStage(job.stage)) return false;
-      if (statusFilter === "not_complete" && isCompletedStage(job.stage)) return false;
-      if (stageFilter && job.stage !== stageFilter) return false;
+      if (!jobPassesStatus(job, statusFilter)) return false;
+      if (!jobPassesFilter(job, stageFilter)) return false;
       if (!q) return true;
       const stageLabel = stages.find((stage) => stage.id === job.stage)?.label ?? job.stage;
       return jobSearchHaystack(job, stageLabel).includes(q);
@@ -426,13 +453,11 @@ export default function OpsJobsWorkspace() {
     const primaries: Job[] = [];
     for (const [, siblings] of byClient) {
       let pool = siblings;
-      if (statusFilter === "completed") {
-        pool = siblings.filter((job) => isCompletedStage(job.stage));
-      } else if (statusFilter === "not_complete") {
-        pool = siblings.filter((job) => !isCompletedStage(job.stage));
+      if (statusFilter !== "all") {
+        pool = siblings.filter((job) => jobPassesStatus(job, statusFilter));
       }
       if (stageFilter) {
-        pool = pool.filter((job) => job.stage === stageFilter);
+        pool = pool.filter((job) => jobPassesFilter(job, stageFilter));
       }
       if (pool.length === 0) continue;
       const primary = pickPrimaryJob(pool);
@@ -760,6 +785,19 @@ export default function OpsJobsWorkspace() {
                     }}
                   >
                     {stage.label}
+                  </button>
+                ))}
+                {JOB_LIST_VIEWS.map((view) => (
+                  <button
+                    key={view.id}
+                    type="button"
+                    className={`${styles.filterOption} ${stageFilter === view.id ? styles.filterOptionActive : ""}`}
+                    onClick={() => {
+                      setStageFilter(view.id);
+                      setFilterOpen(false);
+                    }}
+                  >
+                    {view.label}
                   </button>
                 ))}
               </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { listPendingMergeCandidates } from "@/lib/inspired-closets-ops-clients";
+import { listJobPhotos } from "@/lib/inspired-closets-ops-media";
 
 export const runtime = "nodejs";
 
@@ -186,7 +187,10 @@ export async function GET(
     installer: row.installer_id ? staffById.get(row.installer_id) ?? null : null,
   }));
 
-  const mergeCandidates = await listPendingMergeCandidates().catch(() => []);
+  const [mergeCandidates, photos] = await Promise.all([
+    listPendingMergeCandidates().catch(() => []),
+    listJobPhotos(id).catch(() => []),
+  ]);
   const mergeCandidate =
     mergeCandidates.find((candidate) =>
       candidate.client_ids.includes(canonicalClientId ?? "") ||
@@ -217,5 +221,6 @@ export async function GET(
     payments: paymentsResult.data ?? [],
     clientJobs,
     mergeCandidate,
+    photos,
   });
 }

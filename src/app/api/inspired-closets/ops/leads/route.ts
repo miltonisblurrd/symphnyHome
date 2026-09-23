@@ -344,6 +344,60 @@ export async function GET(request: Request) {
   });
 }
 
+const EARLY_LEAD_STAGES = new Set([
+  "new",
+  "schedule",
+  "follow_up",
+  "attempt_1",
+  "attempt_2",
+  "attempt_3",
+  "attempt_4",
+  "attempt_5",
+  "prospect",
+  "rescheduled",
+]);
+
+async function bookConsultationOnLead(input: {
+  leadId: string;
+  clientId: string | null;
+  jobId: string | null;
+  designerId: string | null;
+  scheduledAt: string;
+  notes: string | null;
+  subject: string;
+  actorId: string | null;
+}): Promise<{ id: string } | null> {
+  const supabase = getSupabaseAdmin();
+  const appointmentInsert: Record<string, unknown> = {
+    lead_id: input.leadId,
+    client_id: input.clientId,
+    job_id: input.jobId,
+    designer_id: input.designerId,
+    kind: "consultation",
+    subject: input.subject,
+    scheduled_at: input.scheduledAt,
+    location_type: "on_site",
+    status: "scheduled",
+    notes: input.notes,
+    created_by: input.actorId,
+    updated_by: input.actorId,
+  };
+  let { data, error } = await supabase.from("ic_appointments").insert(appointmentInsert).select("id").single();
+  if (error && /subject|column|schema cache/i.test(error.message)) {
+    delete appointmentInsert.subject;
+    const retry = await supabase.from("ic_appointments").insert(appointmentInsert).select("id").single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error || !data) return null;
+  try {
+    await pushAppointmentById(data.id);
+  } catch {
+    /* calendar push is optional */
+  }
+  return data;
+}
+
 export async function POST(request: Request) {
   if (!isDbConfigured()) {
     return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
@@ -420,6 +474,7 @@ export async function POST(request: Request) {
     typeof body.source === "string" && VALID_SOURCES.has(body.source)
       ? (body.source as IcLeadSourceId)
       : "instagram";
+  const calledIn = body.called_in === true;
   const stage =
     typeof body.stage === "string" && VALID_STAGES.has(body.stage)
       ? (body.stage as IcLeadStageId)
@@ -479,12 +534,110 @@ export async function POST(request: Request) {
   const resolvedFirst = firstName || splitPersonName(clientName).first || null;
   const resolvedLast = lastName || splitPersonName(clientName).last || null;
 
+  const noteText = typeof body.notes === "string" ? body.notes.trim() : "";
+  const scheduledAt =
+    typeof body.scheduled_at === "string" && body.scheduled_at.trim() ? body.scheduled_at.trim() : null;
+  const designerId = typeof body.designer_id === "string" && body.designer_id ? body.designer_id : null;
+
+  if (resolvedClientId) {
+    const { data: existingRows } = await supabase
+      .from("ic_leads")
+      .select("*")
+      .eq("client_id", resolvedClientId)
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(8);
+    const existingLead = (existingRows ?? []).find((row) => row.stage !== "junk") ?? null;
+    if (existingLead) {
+      const updates: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+        updated_by: actorId,
+        source,
+        called_in: calledIn || existingLead.called_in === true,
+      };
+      if (designerId) updates.designer_id = designerId;
+      if (noteText) {
+        const prior = typeof existingLead.notes === "string" ? existingLead.notes.trim() : "";
+        updates.notes = prior ? `${prior}\n${noteText}` : noteText;
+      }
+      let appointment: { id: string } | null = null;
+      if (scheduledAt) {
+        const when = new Date(scheduledAt);
+        if (!Number.isNaN(when.getTime())) {
+          appointment = await bookConsultationOnLead({
+            leadId: existingLead.id,
+            clientId: existingLead.client_id,
+            jobId: existingLead.converted_job_id ?? null,
+            designerId: designerId ?? existingLead.designer_id ?? null,
+            scheduledAt: when.toISOString(),
+            notes: noteText || null,
+            subject: defaultEventSubject("consultation", resolvedLast ?? ""),
+            actorId,
+          });
+          if (appointment && EARLY_LEAD_STAGES.has(String(existingLead.stage))) {
+            updates.stage = "appointment_set";
+          }
+        }
+      }
+      let { data: saved, error: saveError } = await supabase
+        .from("ic_leads")
+        .update(updates)
+        .eq("id", existingLead.id)
+        .select("*")
+        .single();
+      if (saveError && /called_in|column|schema cache/i.test(saveError.message)) {
+        delete updates.called_in;
+        const retry = await supabase
+          .from("ic_leads")
+          .update(updates)
+          .eq("id", existingLead.id)
+          .select("*")
+          .single();
+        saved = retry.data;
+        saveError = retry.error;
+      }
+      if (saveError || !saved) {
+        return NextResponse.json(
+          { ok: false, error: saveError?.message ?? "Could not update the existing lead." },
+          { status: 500 },
+        );
+      }
+      if (noteText) {
+        await supabase.from("ic_lead_chatter").insert({
+          lead_id: existingLead.id,
+          author_id: actorId,
+          author_name: actorName,
+          body: noteText,
+        });
+      }
+      await supabase.from("ic_activity_log").insert({
+        entity_type: "lead",
+        entity_id: existingLead.id,
+        action: "duplicate_attached",
+        actor_id: actorId,
+        actor_label: actorName,
+        changes: {
+          source,
+          called_in: calledIn,
+          appointment_id: appointment?.id ?? null,
+        },
+      });
+      return NextResponse.json({
+        ok: true,
+        duplicate: true,
+        appointment: Boolean(appointment),
+        lead: saved,
+      });
+    }
+  }
+
   const leadInsert: Record<string, unknown> = {
     client_id: resolvedClientId,
     source,
+    called_in: calledIn,
     stage,
     owner_id: typeof body.owner_id === "string" ? body.owner_id : actorId,
-    designer_id: typeof body.designer_id === "string" ? body.designer_id : null,
+    designer_id: designerId,
     notes: typeof body.notes === "string" ? body.notes : null,
     project_area: areas[0] ?? (typeof body.project_area === "string" ? body.project_area : null),
     areas_of_home: areas,
@@ -520,11 +673,12 @@ export async function POST(request: Request) {
   };
 
   let { data: lead, error } = await supabase.from("ic_leads").insert(leadInsert).select("*").single();
-  if (error && /first_name|last_name|referral_name|account_id|column|schema cache/i.test(error.message)) {
+  if (error && /first_name|last_name|referral_name|account_id|called_in|column|schema cache/i.test(error.message)) {
     delete leadInsert.first_name;
     delete leadInsert.last_name;
     delete leadInsert.referral_name;
     delete leadInsert.account_id;
+    delete leadInsert.called_in;
     const retry = await supabase.from("ic_leads").insert(leadInsert).select("*").single();
     lead = retry.data;
     error = retry.error;
@@ -532,6 +686,31 @@ export async function POST(request: Request) {
 
   if (error || !lead) {
     return NextResponse.json({ ok: false, error: error?.message ?? "Could not save lead." }, { status: 500 });
+  }
+
+  let booked = false;
+  if (scheduledAt) {
+    const when = new Date(scheduledAt);
+    if (!Number.isNaN(when.getTime())) {
+      const appointment = await bookConsultationOnLead({
+        leadId: lead.id,
+        clientId: lead.client_id,
+        jobId: null,
+        designerId: lead.designer_id,
+        scheduledAt: when.toISOString(),
+        notes: noteText || null,
+        subject: defaultEventSubject("consultation", resolvedLast ?? ""),
+        actorId,
+      });
+      booked = Boolean(appointment);
+      if (appointment && EARLY_LEAD_STAGES.has(lead.stage)) {
+        await supabase
+          .from("ic_leads")
+          .update({ stage: "appointment_set", updated_at: new Date().toISOString(), updated_by: actorId })
+          .eq("id", lead.id);
+        lead.stage = "appointment_set";
+      }
+    }
   }
 
   await supabase.from("ic_activity_log").insert({
@@ -543,7 +722,7 @@ export async function POST(request: Request) {
     changes: { source, stage, Lead_Status: { from: null, to: stage } },
   });
 
-  return NextResponse.json({ ok: true, lead });
+  return NextResponse.json({ ok: true, lead, appointment: booked });
 }
 
 export async function PATCH(request: Request) {
@@ -1168,6 +1347,9 @@ export async function PATCH(request: Request) {
   if (typeof body.source === "string" && VALID_SOURCES.has(body.source)) {
     updates.source = body.source;
   }
+  if (typeof body.called_in === "boolean") {
+    updates.called_in = body.called_in;
+  }
   if (typeof body.referral_name === "string" || body.referral_name === null) {
     updates.referral_name = typeof body.referral_name === "string" ? body.referral_name.trim() || null : null;
   }
@@ -1295,6 +1477,7 @@ export async function PATCH(request: Request) {
     delete fallback.last_name;
     delete fallback.referral_name;
     delete fallback.account_id;
+    delete fallback.called_in;
     const retry = await supabase.from("ic_leads").update(fallback).eq("id", leadId).select("*").single();
     data = retry.data;
     error = retry.error;

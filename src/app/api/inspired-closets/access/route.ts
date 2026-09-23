@@ -13,6 +13,7 @@ import {
   IC_STAFF_ROLE_COOKIE,
 } from "@/lib/inspired-closets-ops-field";
 import { roleHomePath, staffMatchesLoginId } from "@/lib/inspired-closets-ops-roles";
+import { applyDesignerSession } from "@/lib/inspired-closets-designer-auth";
 
 export const runtime = "nodejs";
 
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
       });
       await applyAccessCookie(response);
       setStaffCookies(response, match);
+      if (match.role === "designer") applyDesignerSession(response, match);
       return response;
     }
     // Fall through: maybe password is the shared access code

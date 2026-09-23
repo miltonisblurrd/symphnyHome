@@ -75,6 +75,32 @@ export async function notifyDepositCleared(input: {
   }
 }
 
+export async function notifyDesignReady(input: {
+  clientName: string;
+  designerName: string;
+  jobId: string;
+  choice: "job_check" | "skip";
+}): Promise<void> {
+  const designer = input.designerName.trim() || "Designer";
+  const skip = input.choice === "skip";
+  try {
+    await postInspiredClosetsSlackNotification({
+      assignee: "Frank",
+      title: skip
+        ? `Design done — skip job check — ${input.clientName}`
+        : `Design done — job check — ${input.clientName}`,
+      severity: "info",
+      todoLabel: skip ? `${designer} marked this a simple closet` : `${designer} finished the design`,
+      notifyMessage: skip
+        ? "No job check. The job is ready to order."
+        : "Design is done. This one needs a job check before you order.",
+      requestedBy: designer,
+    });
+  } catch {
+    /* Slack optional */
+  }
+}
+
 export async function notifyConsultComplete(input: {
   clientName: string;
   designerName: string | null;

@@ -8,6 +8,7 @@ import Link from "next/link";
 import { PAYMENT_MILESTONES } from "@/lib/inspired-closets-ops-billing";
 import { JOB_KINDS } from "@/lib/inspired-closets-ops-jobs";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
+import type { JobPhoto } from "@/lib/inspired-closets-ops-media";
 import OpsProductSummary from "@/components/inspired-closets/OpsProductSummary";
 import OpsStowSalesOrder from "@/components/inspired-closets/OpsStowSalesOrder";
 import styles from "./ops-payroll.module.css";
@@ -45,6 +46,10 @@ export type ProjectJob = {
   tentative_install_notes?: string | null;
   proposal_url?: string | null;
   proposal_filename?: string | null;
+  install_grade?: number | null;
+  install_grade_note?: string | null;
+  install_graded_at?: string | null;
+  skip_job_check?: boolean | null;
   client: Client | null;
   designer: Staff | null;
   installer?: Staff | null;
@@ -141,6 +146,7 @@ export type ProjectFile = {
   payments: ProjectPayment[];
   clientJobs?: ProjectClientJob[];
   mergeCandidate?: ProjectMergeCandidate | null;
+  photos?: JobPhoto[];
 };
 
 type MaterialLine = {
@@ -661,6 +667,49 @@ export default function OpsProjectFile({
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className={`${styles.detailSection} ${styles.fileBand}`}>
+        <p className={styles.detailSectionTitle}>Install photos</p>
+        {(file?.photos ?? []).length === 0 ? (
+          <p className={styles.empty}>No photos on this job yet. They show up here after an installer posts them.</p>
+        ) : (
+          <div className={styles.photoGrid}>
+            {(file?.photos ?? []).map((photo) => (
+              <figure key={photo.id} className={styles.photoCard}>
+                {photo.public_url ? (
+                  <a href={photo.public_url} target="_blank" rel="noreferrer">
+                    <img src={photo.public_url} alt={photo.caption || photo.kind_label} />
+                  </a>
+                ) : (
+                  <div className={styles.photoMissing}>Photo unavailable</div>
+                )}
+                <figcaption className={styles.photoMeta}>
+                  {photo.kind_label}
+                  {photo.installer_name ? ` · ${photo.installer_name}` : ""}
+                  {photo.created_at ? ` · ${stamp(photo.created_at)}` : ""}
+                  {photo.caption ? ` — ${photo.caption}` : ""}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`${styles.detailSection} ${styles.fileBand}`}>
+        <p className={styles.detailSectionTitle}>Install grade</p>
+        {job.install_grade ? (
+          <p className={styles.photoMeta}>
+            {job.install_grade} / 5
+            {job.install_grade_note ? ` — ${job.install_grade_note}` : ""}
+            {job.install_graded_at ? ` · ${stamp(job.install_graded_at)}` : ""}
+          </p>
+        ) : (
+          <p className={styles.empty}>No install grade yet. The designer records this from her portal.</p>
+        )}
+        {job.skip_job_check ? (
+          <p className={styles.photoMeta}>Simple closet — job check skipped. Ready to order.</p>
+        ) : null}
       </div>
 
       <div className={`${styles.detailSection} ${styles.fileBand}`}>

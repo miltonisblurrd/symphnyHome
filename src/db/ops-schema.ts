@@ -213,6 +213,8 @@ export const icLeads = pgTable("ic_leads", {
   clientId: uuid("client_id").references(() => icClients.id),
   accountId: uuid("account_id").references(() => icAccounts.id),
   source: icLeadSourceEnum("source").notNull().default("instagram"),
+  /** How they reached the office. Independent of source, so Google and called-in can both be true. */
+  calledIn: boolean("called_in").notNull().default(false),
   stage: icLeadStageEnum("stage").notNull().default("new"),
   ownerId: uuid("owner_id").references(() => icStaff.id),
   designerId: uuid("designer_id").references(() => icStaff.id),
@@ -326,6 +328,13 @@ export const icJobs = pgTable("ic_jobs", {
   fieldNotes: text("field_notes"),
   /** Craig RTO — Frank's order queue. */
   readyToOrder: boolean("ready_to_order").notNull().default(false),
+  /** Designer grade of the install, 1–5. */
+  installGrade: integer("install_grade"),
+  installGradeNote: text("install_grade_note"),
+  installGradedBy: uuid("install_graded_by").references(() => icStaff.id),
+  installGradedAt: timestamp("install_graded_at", { withTimezone: true }),
+  /** Designer marked a simple closet: skip the job-check visit and move toward order. */
+  skipJobCheck: boolean("skip_job_check").notNull().default(false),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),

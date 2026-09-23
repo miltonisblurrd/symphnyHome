@@ -34,6 +34,7 @@ export function isInventoryRole(role: string | null | undefined): boolean {
 
 export function roleHomePath(role: string | null | undefined): string {
   if (isInventoryRole(role)) return IC_INVENTORY_HOME;
+  if (role === "designer") return "/inspired-closets/designers";
   return "/inspired-closets/gavin";
 }
 

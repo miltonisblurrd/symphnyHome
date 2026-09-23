@@ -143,6 +143,22 @@ export async function GET(request: Request) {
       job.community_ref !== "FIELD-TEST" &&
       !(job as { duplicate_of_job_id?: string | null }).duplicate_of_job_id,
   );
+  const paymentFlags = new Map<string, { deposit_paid: boolean; completion_paid: boolean }>();
+  const visibleIds = visible.map((job) => job.id as string);
+  for (let index = 0; index < visibleIds.length; index += 150) {
+    const slice = visibleIds.slice(index, index + 150);
+    if (slice.length === 0) continue;
+    const { data: payments } = await supabase
+      .from("ic_payments")
+      .select("job_id, milestone, status")
+      .in("job_id", slice);
+    for (const row of payments ?? []) {
+      const current = paymentFlags.get(row.job_id) ?? { deposit_paid: false, completion_paid: false };
+      if (row.milestone === "deposit_50" && row.status === "paid") current.deposit_paid = true;
+      if (row.milestone === "completion_10" && row.status === "paid") current.completion_paid = true;
+      paymentFlags.set(row.job_id, current);
+    }
+  }
   const [receivingByJob, mergeCandidates] = await Promise.all([
     receivingRollupByJobIds(visible.map((job) => job.id)),
     listPendingMergeCandidates().catch(() => []),
@@ -173,6 +189,7 @@ export async function GET(request: Request) {
 
   const jobs = visible.map((job) => {
     const receiving = receivingByJob.get(job.id);
+    const paid = paymentFlags.get(job.id);
     const client = job.client_id ? clientsById.get(job.client_id) ?? null : null;
     const canonicalId = client?.canonical_id ?? job.client_id ?? null;
     const mergeReview = job.client_id
@@ -203,6 +220,8 @@ export async function GET(request: Request) {
       receiving_open_qty: receiving?.open_qty ?? 0,
       receiving_received_qty: receiving?.received_qty ?? 0,
       receiving_total_qty: receiving?.total_qty ?? 0,
+      deposit_paid: paid?.deposit_paid ?? false,
+      completion_paid: paid?.completion_paid ?? false,
     };
   });
 

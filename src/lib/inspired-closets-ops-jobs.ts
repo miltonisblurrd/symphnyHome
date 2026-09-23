@@ -32,6 +32,93 @@ export function stageLabel(stage: string): string {
   return JOB_STAGES.find((item) => item.id === stage)?.label ?? stage;
 }
 
+/** Extra project-list filters. These are not pipeline stages. */
+export const JOB_LIST_VIEWS = [
+  { id: "completed_unpaid", label: "Completed but unpaid" },
+  { id: "shop_not_ready", label: "In the shop, not ready" },
+  { id: "shop_ready", label: "In the shop, ready" },
+  { id: "addons", label: "Add-ons" },
+  { id: "go_backs", label: "Go-backs" },
+] as const;
+
+export type JobListViewId = (typeof JOB_LIST_VIEWS)[number]["id"];
+
+export function isJobListView(value: string): value is JobListViewId {
+  return JOB_LIST_VIEWS.some((view) => view.id === value);
+}
+
+const COMPLETED_UNPAID_STAGES = new Set(["closed", "install_complete", "final_payment"]);
+
+export function isAddonJob(job: { title?: string | null; notes?: string | null }): boolean {
+  const text = `${job.title ?? ""} ${job.notes ?? ""}`;
+  return /\bADD[\s-]?ONS?\b|\bA\/O\b/i.test(text);
+}
+
+export function isGoBackJob(job: {
+  job_kind?: string | null;
+  title?: string | null;
+  notes?: string | null;
+}): boolean {
+  if (job.job_kind === "go_back") return true;
+  return /\bGO[\s-]?BACKS?\b|\bG\/B\b/i.test(`${job.title ?? ""} ${job.notes ?? ""}`);
+}
+
+export function isFiftyPercentPaid(job: {
+  deposit_paid?: boolean | null;
+  deposit_intake_status?: string | null;
+  contract_cents?: number | null;
+  collected_cents?: number | null;
+}): boolean {
+  if (job.deposit_paid) return true;
+  if (job.deposit_intake_status === "paid") return true;
+  const contract = job.contract_cents ?? 0;
+  const collected = job.collected_cents ?? 0;
+  return contract > 0 && collected >= Math.round(contract * 0.5);
+}
+
+export function isTenPercentPaid(job: {
+  completion_paid?: boolean | null;
+  contract_cents?: number | null;
+  collected_cents?: number | null;
+}): boolean {
+  if (job.completion_paid) return true;
+  const contract = job.contract_cents ?? 0;
+  const collected = job.collected_cents ?? 0;
+  return contract > 0 && collected >= contract;
+}
+
+export function jobMatchesListView(
+  job: {
+    stage: string;
+    contract_cents?: number | null;
+    collected_cents?: number | null;
+    title?: string | null;
+    notes?: string | null;
+    job_kind?: string | null;
+    receiving_open_qty?: number | null;
+    receiving_total_qty?: number | null;
+  },
+  view: JobListViewId,
+): boolean {
+  if (view === "completed_unpaid") {
+    const contract = job.contract_cents ?? 0;
+    const collected = job.collected_cents ?? 0;
+    return COMPLETED_UNPAID_STAGES.has(job.stage) && contract > 0 && collected < contract;
+  }
+  if (view === "shop_not_ready") {
+    const total = job.receiving_total_qty ?? 0;
+    const open = job.receiving_open_qty ?? 0;
+    return total > 0 && open > 0;
+  }
+  if (view === "shop_ready") {
+    const total = job.receiving_total_qty ?? 0;
+    const open = job.receiving_open_qty ?? 0;
+    return total > 0 && open === 0;
+  }
+  if (view === "addons") return isAddonJob(job);
+  return isGoBackJob(job);
+}
+
 /** Frank's whiteboard colors: green new / blue go-back / red service. */
 export const JOB_KINDS = [
   { id: "new_install", label: "New job", tag: null as "SVC" | "G/B" | null },

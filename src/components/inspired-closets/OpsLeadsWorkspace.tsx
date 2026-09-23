@@ -43,6 +43,7 @@ type Lead = {
   client_id: string | null;
   account_id: string | null;
   source: string;
+  called_in?: boolean;
   stage: string;
   owner_id: string | null;
   designer_id: string | null;
@@ -103,6 +104,8 @@ type ChatterPost = {
 type ApiResponse = {
   ok: boolean;
   error?: string;
+  duplicate?: boolean;
+  appointment?: boolean;
   leads?: Lead[];
   lead?: Lead;
   staff?: Staff[];
@@ -128,6 +131,7 @@ const EMPTY_FORM = {
   state: "NV",
   zip: "",
   source: "call",
+  called_in: false,
   referral_name: "",
   designer_id: "",
   lead_type: "consumer",
@@ -138,6 +142,7 @@ const EMPTY_FORM = {
   notes: "",
   areas_of_home: [] as string[],
   account_id: "",
+  scheduled_at: "",
 };
 
 function formatStamp(value: string | null | undefined): string {
@@ -395,13 +400,22 @@ export default function OpsLeadsWorkspace() {
           influencer_type: payload.lead_type === "influencer" ? payload.influencer_type || null : null,
           form_type: payload.form_type || null,
           account_id: payload.account_id || null,
+          called_in: payload.called_in === true,
+          scheduled_at: payload.scheduled_at ? new Date(payload.scheduled_at).toISOString() : null,
         }),
       });
       const data = (await response.json()) as ApiResponse;
-      if (!data.ok) throw new Error(data.error ?? "Failed to create lead.");
+      if (!data.ok || !data.lead?.id) throw new Error(data.error ?? "Failed to create lead.");
       setForm({ ...EMPTY_FORM });
       setNewLeadOpen(false);
-      setNotice({ kind: "info", text: "Lead created." });
+      const attached = data.duplicate
+        ? data.appointment
+          ? "This lead already exists. The note and appointment were added to it."
+          : "This lead already exists. The note was added to it."
+        : data.appointment
+          ? "Lead created and the appointment was saved."
+          : "Lead created.";
+      setNotice({ kind: "info", text: attached });
       await loadList({ silent: true });
       if (data.lead?.id) setSelectedId(data.lead.id);
     } catch (error) {
@@ -444,6 +458,7 @@ export default function OpsLeadsWorkspace() {
       id: selectedId,
       stage: draft.stage,
       source: draft.source,
+      called_in: draft.called_in === true,
       designer_id: draft.designer_id,
       lead_type: draft.lead_type,
       influencer_type: draft.influencer_type,
@@ -939,6 +954,14 @@ export default function OpsLeadsWorkspace() {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Called in</span>
+                    <input
+                      type="checkbox"
+                      checked={draft.called_in === true}
+                      onChange={(e) => setDraft({ ...draft, called_in: e.target.checked })}
+                    />
                   </label>
                   {sourceNeedsReferralName(draft.source ?? "") ? (
                     <label className={styles.field}>
@@ -2070,6 +2093,23 @@ export default function OpsLeadsWorkspace() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Called in</span>
+                <input
+                  type="checkbox"
+                  checked={form.called_in}
+                  onChange={(e) => setForm((f) => ({ ...f, called_in: e.target.checked }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Appointment</span>
+                <input
+                  className={styles.input}
+                  type="datetime-local"
+                  value={form.scheduled_at}
+                  onChange={(e) => setForm((f) => ({ ...f, scheduled_at: e.target.value }))}
+                />
               </label>
               {sourceNeedsReferralName(form.source) ? (
                 <label className={styles.field}>

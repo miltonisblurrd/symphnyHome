@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import OpsSlipPdf from "@/components/inspired-closets/OpsSlipPdf";
 import {
@@ -13,6 +14,8 @@ import {
   shipmentIdentity,
   shipmentPdfs,
   shipmentVendorLabel,
+  existingRowFlags,
+  type ExistingRowFlag,
 } from "@/lib/inspired-closets-ops-shipment-display";
 import payroll from "./ops-payroll.module.css";
 import styles from "./receiving.module.css";
@@ -82,7 +85,9 @@ type Ship = {
 };
 
 export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [overlapBusy, setOverlapBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [ship, setShip] = useState<Ship | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -191,6 +196,43 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
 
   function printLabels() {
     window.print();
+  }
+
+  async function overlapAction(flag: ExistingRowFlag, action: "merge_overlap" | "dismiss_overlap") {
+    const key = `${flag.job_id}:${flag.shipment_id}`;
+    setOverlapBusy(key);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/inspired-closets/ops/receiving/shipments/${shipmentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          job_id: flag.job_id,
+          shipment_id: flag.shipment_id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        merged?: { pruned?: boolean };
+      };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not update this slip.");
+      if (payload.merged?.pruned) {
+        router.push("/inspired-closets/ops/inventory/receiving");
+        return;
+      }
+      await load();
+      setNotice(
+        action === "merge_overlap"
+          ? `${flag.job_name} is now on ${flag.label}.`
+          : `${flag.job_name} stays on this slip.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not update this slip.");
+    } finally {
+      setOverlapBusy(null);
+    }
   }
 
   async function relink() {
@@ -305,6 +347,41 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
           </p>
         ) : null}
         {ship.parse_error ? <p className={`${payroll.notice} ${payroll.noticeError}`}>{ship.parse_error}</p> : null}
+        {existingRowFlags(ship.parse_quality).length > 0 ? (
+          <section className={`${payroll.notice} ${payroll.noticeWarn}`}>
+            <p style={{ margin: "0 0 0.65rem" }}>
+              These clients already have a receiving row. Merge moves this slip&apos;s products onto that row.
+              Keep separate leaves them here for Bryant to scan.
+            </p>
+            {existingRowFlags(ship.parse_quality).map((flag) => {
+              const key = `${flag.job_id}:${flag.shipment_id}`;
+              const busy = overlapBusy === key;
+              return (
+                <div key={key} style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.45rem" }}>
+                  <span>
+                    <strong>{flag.job_name}</strong> is already on {flag.label}
+                  </span>
+                  <button
+                    type="button"
+                    className={payroll.buttonPrimary}
+                    disabled={Boolean(overlapBusy)}
+                    onClick={() => void overlapAction(flag, "merge_overlap")}
+                  >
+                    {busy ? "Merging…" : "Merge"}
+                  </button>
+                  <button
+                    type="button"
+                    className={payroll.buttonGhost}
+                    disabled={Boolean(overlapBusy)}
+                    onClick={() => void overlapAction(flag, "dismiss_overlap")}
+                  >
+                    Keep separate
+                  </button>
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
 
         <div className={styles.detailTop}>
           <section className={payroll.panel}>

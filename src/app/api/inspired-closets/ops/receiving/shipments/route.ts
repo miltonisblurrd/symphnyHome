@@ -3,13 +3,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
-  absorbJobItemsOntoShipment,
-  appendPackingListMeta,
+  findExistingReceivingRows,
   findJobScanShipment,
   ingestStudioOrderFromReceiving,
   isStudioReceivingShipment,
-  pruneEmptyShipment,
-  receivingLinesMatch,
 } from "@/lib/inspired-closets-ops-dropship-receiving";
 import {
   fixtureItemsToParsed,
@@ -22,13 +19,17 @@ import {
   missingReceivingTable,
   normalizeShipDate,
   notifyReceiving,
+  packingSlipClientNames,
+  packingSlipUploadMessage,
   parsePackingSlip,
   relinkShipmentItems,
+  sameSlipLine,
   resolveShipDate,
   shipmentRollup,
   type ParsedSlipItem,
   type ShipmentItemRow,
 } from "@/lib/inspired-closets-ops-receiving";
+import { isClientJobLabel } from "@/lib/inspired-closets-ops-shipment-display";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -57,7 +58,15 @@ async function insertItems(
   const destCache = new Map<string, string | null>();
   const existingByDest = new Map<
     string,
-    Array<{ id: string; item_number: string; vendor_sku: string | null; received_qty: number; container_id: string | null }>
+    Array<{
+      id: string;
+      item_number: string;
+      vendor_sku: string | null;
+      description: string | null;
+      received_qty: number;
+      container_id: string | null;
+      source_page: number | null;
+    }>
   >();
 
   async function existingLines(destId: string) {
@@ -65,14 +74,16 @@ async function insertItems(
     if (cached) return cached;
     const { data } = await supabase
       .from("ic_shipment_items")
-      .select("id, item_number, vendor_sku, received_qty, container_id")
+      .select("id, item_number, vendor_sku, description, received_qty, container_id, source_page")
       .eq("shipment_id", destId);
     const rows = (data ?? []).map((row) => ({
       id: String(row.id),
       item_number: String(row.item_number),
       vendor_sku: (row.vendor_sku as string | null) ?? null,
+      description: (row.description as string | null) ?? null,
       received_qty: Number(row.received_qty) || 0,
       container_id: (row.container_id as string | null) ?? null,
+      source_page: row.source_page == null ? null : Number(row.source_page),
     }));
     existingByDest.set(destId, rows);
     return rows;
@@ -100,8 +111,14 @@ async function insertItems(
     else fallbackCount += 1;
 
     const existing = (await existingLines(destId)).find((row) =>
-      receivingLinesMatch(
-        { item_number: item.item_number, vendor_sku: item.vendor_sku ?? null },
+      sameSlipLine(
+        {
+          item_number: item.item_number,
+          vendor_sku: item.vendor_sku ?? null,
+          description: item.description ?? null,
+          container_id: item.container_id ?? null,
+          source_page: item.source_page ?? null,
+        },
         row,
       ),
     );
@@ -144,8 +161,10 @@ async function insertItems(
       id: `pending-${rows.length}`,
       item_number: item.item_number,
       vendor_sku: item.vendor_sku ?? null,
+      description: item.description ?? null,
       received_qty: 0,
       container_id: item.container_id ?? null,
+      source_page: item.source_page ?? null,
     });
   }
 
@@ -419,69 +438,34 @@ export async function POST(request: Request) {
         jobId: filenameJobId,
       });
       const inserted = await insertItems(ship.id, parsed.items, {
-        routeByJob: true,
         fallbackJobId: filenameJobId,
       });
       await warnUnassigned(parsed.notice, inserted.unassigned);
-      for (const route of inserted.jobRoutes) {
-        await absorbJobItemsOntoShipment(route.jobId, route.shipmentId);
-      }
-      if (filenameJobId) {
-        await absorbJobItemsOntoShipment(filenameJobId, ship.id);
-      }
+      const existingRows = await findExistingReceivingRows(ship.id);
+      const clientNames = packingSlipClientNames(parsed.items);
+      const hint = clientHintFromFilename(file.name);
       const shipDate =
         parsed.ship_date ||
         resolveShipDate({ parsed: parsed.ship_date, filename: file.name }) ||
         new Date().toISOString().slice(0, 10);
-      if (inserted.jobShipmentIds.length > 0) {
-        await appendPackingListMeta(inserted.jobShipmentIds, {
-          notice: parsed.notice,
-          ship_date: shipDate,
-          source_filename: file.name,
-          storage_path: storagePath,
-          public_url: publicUrl,
-        });
-      }
-
-      const hint = clientHintFromFilename(file.name);
-      const matchNote = filenameJobId
-        ? `Attached to the job from ${file.name}.`
-        : hint
-          ? `Saved ${file.name}. No open job matched ${hint} yet.`
-          : `Saved ${file.name}.`;
-
-      if (inserted.fallbackCount === 0 && inserted.imported + inserted.jobShipmentIds.length > 0) {
-        await pruneEmptyShipment(ship.id);
-        const primaryId = inserted.jobShipmentIds[0] ?? ship.id;
-        const { data: primary } = await supabase
-          .from("ic_shipments")
-          .select("*")
-          .eq("id", primaryId)
-          .maybeSingle();
-        return NextResponse.json({
-          ok: true,
-          kind: "packing_list",
-          job_id: filenameJobId,
-          shipment: primary ?? ship,
-          imported: inserted.imported,
-          unassigned: inserted.unassigned,
-          merged_into: inserted.jobShipmentIds,
-          message: `Read ${inserted.imported} packing-list lines. ${matchNote}`,
-        });
-      }
+      const linkedJobId =
+        clientNames.length <= 1 ? filenameJobId : null;
+      const notice =
+        parsed.notice || (isClientJobLabel(hint) ? hint : null);
 
       const { data: updated } = await supabase
         .from("ic_shipments")
         .update({
-          notice: parsed.notice || hint || null,
+          notice,
           ship_date: shipDate,
           vendor: parsed.vendor || "stow",
           status: "ready",
           total_pages: parsed.total_pages,
           parse_quality: {
             ...parsed.parse_quality,
-            job_id: filenameJobId,
+            job_id: linkedJobId,
             client_hint: hint || null,
+            existing_rows: existingRows,
           },
           parse_error: parsed.items.length === 0 ? "No line items found in this PDF." : null,
           updated_at: new Date().toISOString(),
@@ -492,12 +476,17 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         kind: "packing_list",
-        job_id: filenameJobId,
+        job_id: linkedJobId,
         shipment: updated ?? ship,
         imported: inserted.imported,
         unassigned: inserted.unassigned,
-        merged_into: inserted.jobShipmentIds,
-        message: `Read ${inserted.imported} packing-list lines. ${matchNote}`,
+        existing_rows: existingRows,
+        message: packingSlipUploadMessage({
+          imported: inserted.imported,
+          clientNames,
+          overlapNames: existingRows.map((row) => row.job_name),
+          unassigned: inserted.unassigned,
+        }),
       });
     } catch (parseError) {
       const message =

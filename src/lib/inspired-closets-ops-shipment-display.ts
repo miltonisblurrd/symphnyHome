@@ -42,7 +42,8 @@ export function isShippingChargeLine(item: {
 }): boolean {
   const sku = (item.item_number ?? "").trim().toUpperCase();
   const desc = (item.description ?? "").toLowerCase();
-  if (sku === "SH" || sku === "SHIPPING" || sku === "FREIGHT") return true;
+  if (sku === "SHIPPING" || sku === "FREIGHT") return true;
+  if (sku === "SH" && (desc.length === 0 || /shipping|freight|handling/.test(desc))) return true;
   return /estimated shipping|shipping charges|shipping & handling|shipping and handling/.test(
     desc,
   );
@@ -206,6 +207,44 @@ export function shipmentFactRows(input: {
   if (input.facts.ship_from) rows.push({ label: "Ship from", value: input.facts.ship_from });
   if (input.isStock) rows.push({ label: "Type", value: "Stock" });
   return rows;
+}
+
+export type ExistingRowFlag = {
+  job_id: string;
+  job_name: string;
+  shipment_id: string;
+  label: string;
+};
+
+export function existingRowFlags(quality: unknown): ExistingRowFlag[] {
+  const record =
+    quality && typeof quality === "object" && !Array.isArray(quality)
+      ? (quality as Record<string, unknown>)
+      : {};
+  const rows = Array.isArray(record.existing_rows) ? record.existing_rows : [];
+  const flags: ExistingRowFlag[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const flag = row as Record<string, unknown>;
+    const jobId = typeof flag.job_id === "string" ? flag.job_id : "";
+    const shipmentId = typeof flag.shipment_id === "string" ? flag.shipment_id : "";
+    if (!jobId || !shipmentId) continue;
+    flags.push({
+      job_id: jobId,
+      job_name: typeof flag.job_name === "string" && flag.job_name.trim() ? flag.job_name.trim() : "Client",
+      shipment_id: shipmentId,
+      label: typeof flag.label === "string" && flag.label.trim() ? flag.label.trim() : "Existing row",
+    });
+  }
+  return flags;
+}
+
+export function overlapSummary(flags: ExistingRowFlag[]): string {
+  const names = [...new Set(flags.map((flag) => flag.job_name))];
+  if (names.length === 0) return "";
+  if (names.length === 1) return `${names[0]} already has a row`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} already have a row`;
+  return `${names[0]}, ${names[1]}, and ${names.length - 2} more already have a row`;
 }
 
 export function shipmentHeaderFacts(quality: Record<string, unknown> | null | undefined): {

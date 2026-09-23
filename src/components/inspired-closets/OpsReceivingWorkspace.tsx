@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import OpsReceivingDocuments from "@/components/inspired-closets/OpsReceivingDocuments";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import { existingRowFlags, overlapSummary } from "@/lib/inspired-closets-ops-shipment-display";
 import payroll from "./ops-payroll.module.css";
 import styles from "./receiving.module.css";
 
@@ -20,6 +21,7 @@ type Shipment = {
   pct?: number;
   so_numbers?: string[];
   by_job?: Array<{ job_name: string; total_qty: number; total_received_qty: number }>;
+  parse_quality?: Record<string, unknown> | null;
 };
 
 function isStudioList(notice: string | null): boolean {
@@ -288,6 +290,7 @@ export default function OpsReceivingWorkspace() {
               <tbody>
                 {orderedShipments.map((ship) => {
                   const pct = ship.pct ?? 0;
+                  const overlap = overlapSummary(existingRowFlags(ship.parse_quality));
                   return (
                     <tr key={ship.id}>
                       <td className={styles.orderCell}>
@@ -295,6 +298,7 @@ export default function OpsReceivingWorkspace() {
                           {shipmentTitle(ship)}
                         </strong>
                         <div className={styles.vendor}>{shipmentMeta(ship)}</div>
+                        {overlap ? <div className={styles.overlap}>{overlap}</div> : null}
                       </td>
                       <td>{ship.ship_date ?? "—"}</td>
                       <td style={{ minWidth: "10rem" }}>

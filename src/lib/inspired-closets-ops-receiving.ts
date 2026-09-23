@@ -98,6 +98,39 @@ export function missingNeedsCreditColumn(message: string): boolean {
   return /needs_credit/i.test(message);
 }
 
+/** Same scan code on a different cut, page, or pallet is a separate piece. */
+export function sameSlipLine(
+  a: {
+    item_number: string;
+    vendor_sku?: string | null;
+    description?: string | null;
+    container_id?: string | null;
+    source_page?: number | null;
+  },
+  b: {
+    item_number: string;
+    vendor_sku?: string | null;
+    description?: string | null;
+    container_id?: string | null;
+    source_page?: number | null;
+  },
+): boolean {
+  if (
+    !codesMatch(a.item_number, b.item_number) &&
+    !(a.vendor_sku && codesMatch(a.vendor_sku, b.item_number)) &&
+    !(b.vendor_sku && codesMatch(a.item_number, b.vendor_sku)) &&
+    !(a.vendor_sku && b.vendor_sku && codesMatch(a.vendor_sku, b.vendor_sku))
+  ) {
+    return false;
+  }
+  if ((a.container_id ?? "") !== (b.container_id ?? "")) return false;
+  if ((a.source_page ?? null) !== (b.source_page ?? null)) return false;
+  const left = (a.description ?? "").trim().toLowerCase();
+  const right = (b.description ?? "").trim().toLowerCase();
+  if (left && right && left !== right) return false;
+  return true;
+}
+
 export async function loadShipmentItemRows(
   shipmentId: string,
   options?: { order?: boolean },
@@ -170,6 +203,60 @@ export function clientHintFromFilename(filename: string | null | undefined): str
   const hint = clientHintFromSlip(stripped, stripped.split(/[-_\s]/)[0] ?? stripped);
   if (hint && hint.length >= 2 && !/^\d+$/.test(hint)) return hint;
   return clientHintFromSlip(withoutStamp, withoutStamp.split(/[-_\s]/)[0] ?? withoutStamp);
+}
+
+export function packingSlipClientNames(
+  items: Array<{ job_name?: string | null; cust_ref?: string | null }>,
+): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const item of items) {
+    const fromJob = isClientJobLabel(item.job_name) ? String(item.job_name).trim() : "";
+    const fromRef = isClientJobLabel(jobNameFromCustRef(item.cust_ref))
+      ? jobNameFromCustRef(item.cust_ref)
+      : "";
+    const name = fromJob || fromRef;
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
+function joinClientNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+export function packingSlipUploadMessage(input: {
+  imported: number;
+  clientNames: string[];
+  overlapNames: string[];
+  unassigned: string[];
+}): string {
+  const lineWord = input.imported === 1 ? "line" : "lines";
+  const base = `Read ${input.imported} packing-list ${lineWord}`;
+  const who =
+    input.clientNames.length === 0
+      ? base
+      : input.clientNames.length === 1
+        ? `${base} for ${input.clientNames[0]}`
+        : `${base} for ${input.clientNames.length} clients`;
+  const overlap = [...new Set(input.overlapNames.map((name) => name.trim()).filter(Boolean))];
+  const flag =
+    overlap.length === 0
+      ? ""
+      : ` ${joinClientNames(overlap)} already ${overlap.length === 1 ? "has" : "have"} a row. Open this slip to merge or keep ${overlap.length === 1 ? "it" : "them"} separate.`;
+  const missing = [
+    ...new Set(input.unassigned.map((name) => name.trim()).filter((name) => name && !overlap.includes(name))),
+  ].slice(0, 4);
+  const missingNote =
+    missing.length === 0
+      ? ""
+      : ` ${joinClientNames(missing)} ${missing.length === 1 ? "has" : "have"} no open job yet.`;
+  return `${who}.${flag}${missingNote}`.replace(/\s+/g, " ").trim();
 }
 
 export async function findJobFromFilename(filename: string | null | undefined): Promise<string | null> {
@@ -901,12 +988,15 @@ function slipFromStudioSummary(
       so_number: summary.so_number,
       cust_ref: hint || summary.order_name,
       job_name: hint || jobNameFromCustRef(summary.order_name),
-      description: [line.description, line.product_type, line.finish].filter(Boolean).join(" ") || null,
+      description:
+        [line.description, line.dimensions, line.product_type, line.finish].filter(Boolean).join(" ") ||
+        null,
       qty: line.qty,
+      source_page: line.line_no,
       vendor_sku: /^\d{6,}$/.test(line.item_code) ? line.item_code : null,
     })),
     parse_quality: {
-      source: "studio-order-table",
+      source: "order-lines",
       total_items: summary.lines.length,
       filename,
       so_number: summary.so_number,
@@ -946,11 +1036,7 @@ export async function reparseShipment(id: string): Promise<{ added: number; kept
   let kept = 0;
   const now = new Date().toISOString();
   for (const item of parsed.items) {
-    const match = existing.find(
-      (row) =>
-        codesMatch(row.item_number, item.item_number) &&
-        (row.container_id ?? "") === (item.container_id ?? ""),
-    );
+    const match = existing.find((row) => sameSlipLine(row, item));
     if (!match) {
       const { error: insertError } = await supabase.from("ic_shipment_items").insert({
         shipment_id: id,

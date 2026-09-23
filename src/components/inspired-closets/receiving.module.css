@@ -67,6 +67,15 @@
   text-transform: uppercase;
 }
 
+.overlap {
+  margin-top: 0.25rem;
+  color: #8a5a00;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .shipPanel {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;

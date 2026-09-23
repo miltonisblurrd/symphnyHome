@@ -18,6 +18,10 @@ import {
   parseProductSummary,
   type ParsedProductSummary,
 } from "@/lib/inspired-closets-ops-product-summary";
+import {
+  existingRowFlags,
+  type ExistingRowFlag,
+} from "@/lib/inspired-closets-ops-shipment-display";
 
 const STUDIO_SOURCE = "studio_order";
 
@@ -554,4 +558,238 @@ export async function publishDropshipLines(input: {
   const { error } = await supabase.from("ic_shipment_items").insert(rows);
   if (error) throw error;
   return rows.length;
+}
+
+function shipmentRowLabel(ship: {
+  source_filename?: string | null;
+  notice?: string | null;
+}): string {
+  const file = String(ship.source_filename ?? "")
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.[^.]+$/, "")
+    .trim();
+  const notice = String(ship.notice ?? "").trim();
+  return file || notice || "Existing row";
+}
+
+/** Other live receiving rows that already list these jobs. Studio placeholders are not rows Bryant scans. */
+export async function findExistingReceivingRows(shipmentId: string): Promise<ExistingRowFlag[]> {
+  const supabase = getSupabaseAdmin();
+  const { data: mine } = await supabase
+    .from("ic_shipment_items")
+    .select("job_id, job_name, cust_ref")
+    .eq("shipment_id", shipmentId)
+    .not("job_id", "is", null);
+  const jobNames = new Map<string, string>();
+  for (const row of mine ?? []) {
+    if (!row.job_id || jobNames.has(String(row.job_id))) continue;
+    jobNames.set(String(row.job_id), String(row.job_name || row.cust_ref || "Client"));
+  }
+  const jobIds = [...jobNames.keys()];
+  if (jobIds.length === 0) return [];
+
+  const { data: others } = await supabase
+    .from("ic_shipment_items")
+    .select("shipment_id, job_id")
+    .in("job_id", jobIds)
+    .neq("shipment_id", shipmentId);
+  const pairs = new Map<string, { shipmentId: string; jobId: string }>();
+  for (const row of others ?? []) {
+    if (!row.shipment_id || !row.job_id) continue;
+    const shipment = String(row.shipment_id);
+    const jobId = String(row.job_id);
+    pairs.set(`${jobId}:${shipment}`, { shipmentId: shipment, jobId });
+  }
+  if (pairs.size === 0) return [];
+
+  const { data: ships } = await supabase
+    .from("ic_shipments")
+    .select("id, notice, source_filename, parse_quality")
+    .in("id", [...new Set([...pairs.values()].map((pair) => pair.shipmentId))])
+    .is("deleted_at", null);
+  const live = new Map(
+    (ships ?? [])
+      .filter((ship) => !isStudioReceivingShipment(ship))
+      .map((ship) => [String(ship.id), ship]),
+  );
+  const flags: ExistingRowFlag[] = [];
+  for (const pair of pairs.values()) {
+    const ship = live.get(pair.shipmentId);
+    if (!ship) continue;
+    flags.push({
+      job_id: pair.jobId,
+      job_name: jobNames.get(pair.jobId) || "Client",
+      shipment_id: pair.shipmentId,
+      label: shipmentRowLabel(ship),
+    });
+  }
+  flags.sort((a, b) => a.job_name.localeCompare(b.job_name) || a.label.localeCompare(b.label));
+  return flags.slice(0, 24);
+}
+
+async function writeExistingRowFlags(shipmentId: string, flags: ExistingRowFlag[]): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("ic_shipments")
+    .select("parse_quality")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const quality = asQuality(data?.parse_quality);
+  quality.existing_rows = flags;
+  await supabase
+    .from("ic_shipments")
+    .update({ parse_quality: quality, updated_at: new Date().toISOString() })
+    .eq("id", shipmentId);
+}
+
+export async function dismissExistingRowFlag(input: {
+  shipmentId: string;
+  jobId?: string;
+  destShipmentId?: string;
+}): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("ic_shipments")
+    .select("parse_quality")
+    .eq("id", input.shipmentId)
+    .maybeSingle();
+  const remaining = existingRowFlags(data?.parse_quality).filter((flag) => {
+    if (input.jobId && flag.job_id !== input.jobId) return true;
+    if (input.destShipmentId && flag.shipment_id !== input.destShipmentId) return true;
+    return false;
+  });
+  await writeExistingRowFlags(input.shipmentId, remaining);
+}
+
+/** Move one client's lines from this slip onto a row Frank already has. */
+export async function mergeJobOntoExistingRow(input: {
+  sourceShipmentId: string;
+  destShipmentId: string;
+  jobId: string;
+}): Promise<{ moved: number; merged: number; pruned: boolean }> {
+  if (input.sourceShipmentId === input.destShipmentId) {
+    throw new Error("Pick a different row to merge into.");
+  }
+  const supabase = getSupabaseAdmin();
+  const { data: destShip } = await supabase
+    .from("ic_shipments")
+    .select("id, status")
+    .eq("id", input.destShipmentId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!destShip) throw new Error("That row is no longer on the list.");
+
+  const { data: destRows } = await supabase
+    .from("ic_shipment_items")
+    .select("id, item_number, vendor_sku, received_qty, damaged_qty, qty, status, needs_credit")
+    .eq("shipment_id", input.destShipmentId);
+  const destLines = [...(destRows ?? [])];
+  const { data: sourceRows } = await supabase
+    .from("ic_shipment_items")
+    .select("id, item_number, vendor_sku, qty, received_qty, damaged_qty, status, needs_credit")
+    .eq("shipment_id", input.sourceShipmentId)
+    .eq("job_id", input.jobId);
+  if ((sourceRows ?? []).length === 0) throw new Error("Those products are no longer on this slip.");
+
+  let moved = 0;
+  let merged = 0;
+  let hasOpen = false;
+  const now = new Date().toISOString();
+  for (const source of sourceRows ?? []) {
+    if ((Number(source.received_qty) || 0) < (Number(source.qty) || 1)) hasOpen = true;
+    const match = destLines.find((row) =>
+      receivingLinesMatch(
+        { item_number: String(source.item_number), vendor_sku: source.vendor_sku as string | null },
+        { item_number: String(row.item_number), vendor_sku: row.vendor_sku as string | null },
+      ),
+    );
+    if (match) {
+      const destReceived = Number(match.received_qty) || 0;
+      const sourceReceived = Number(source.received_qty) || 0;
+      await supabase
+        .from("ic_shipment_items")
+        .update({
+          received_qty: Math.max(destReceived, sourceReceived),
+          damaged_qty: Math.max(Number(match.damaged_qty) || 0, Number(source.damaged_qty) || 0),
+          needs_credit: Boolean(match.needs_credit) || Boolean(source.needs_credit),
+          updated_at: now,
+        })
+        .eq("id", match.id);
+      await supabase
+        .from("ic_shipment_scans")
+        .update({ shipment_id: input.destShipmentId, item_id: match.id })
+        .eq("item_id", source.id);
+      await supabase
+        .from("ic_shipment_claims")
+        .update({ shipment_id: input.destShipmentId, item_id: match.id })
+        .eq("item_id", source.id);
+      await supabase.from("ic_shipment_items").delete().eq("id", source.id);
+      merged += 1;
+      continue;
+    }
+    await supabase
+      .from("ic_shipment_scans")
+      .update({ shipment_id: input.destShipmentId })
+      .eq("item_id", source.id);
+    await supabase
+      .from("ic_shipment_claims")
+      .update({ shipment_id: input.destShipmentId })
+      .eq("item_id", source.id);
+    await supabase
+      .from("ic_shipment_items")
+      .update({ shipment_id: input.destShipmentId, note: "From packaging slip", updated_at: now })
+      .eq("id", source.id);
+    moved += 1;
+  }
+
+  if (hasOpen && destShip.status === "complete") {
+    await supabase
+      .from("ic_shipments")
+      .update({ status: "in_progress", updated_at: now })
+      .eq("id", input.destShipmentId);
+  }
+
+  const { data: sourceShip } = await supabase
+    .from("ic_shipments")
+    .select("notice, ship_date, source_filename, storage_path, public_url, parse_quality")
+    .eq("id", input.sourceShipmentId)
+    .maybeSingle();
+  if (sourceShip?.storage_path || sourceShip?.public_url || sourceShip?.source_filename) {
+    const { data: destQualityRow } = await supabase
+      .from("ic_shipments")
+      .select("parse_quality")
+      .eq("id", input.destShipmentId)
+      .maybeSingle();
+    const quality = asQuality(destQualityRow?.parse_quality);
+    const lists = Array.isArray(quality.packing_lists)
+      ? [...(quality.packing_lists as Array<Record<string, unknown>>)]
+      : [];
+    const key = sourceShip.storage_path || sourceShip.public_url || sourceShip.source_filename;
+    const already = key
+      ? lists.some((row) => String(row.storage_path || row.public_url || row.source_filename) === key)
+      : false;
+    if (!already) {
+      lists.push({
+        notice: sourceShip.notice,
+        ship_date: sourceShip.ship_date,
+        source_filename: sourceShip.source_filename,
+        storage_path: sourceShip.storage_path,
+        public_url: sourceShip.public_url,
+      });
+      quality.packing_lists = lists;
+      await supabase
+        .from("ic_shipments")
+        .update({ parse_quality: quality, updated_at: now })
+        .eq("id", input.destShipmentId);
+    }
+  }
+
+  const pruned = await pruneEmptyShipment(input.sourceShipmentId);
+  if (!pruned) {
+    const remaining = existingRowFlags(sourceShip?.parse_quality).filter(
+      (flag) => !(flag.job_id === input.jobId && flag.shipment_id === input.destShipmentId),
+    );
+    await writeExistingRowFlags(input.sourceShipmentId, remaining);
+  }
+  return { moved, merged, pruned };
 }

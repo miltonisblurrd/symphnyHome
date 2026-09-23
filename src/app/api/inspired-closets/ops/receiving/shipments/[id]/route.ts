@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { IC_STAFF_ID_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
+  dismissExistingRowFlag,
+  mergeJobOntoExistingRow,
+} from "@/lib/inspired-closets-ops-dropship-receiving";
+import {
   loadShipmentItemRows,
   missingReceivingTable,
   relinkShipmentItems,
@@ -105,6 +109,44 @@ export async function PATCH(request: Request, ctx: Ctx) {
     } catch (error) {
       return NextResponse.json(
         { ok: false, error: error instanceof Error ? error.message : "Relink failed." },
+        { status: 400 },
+      );
+    }
+  }
+  if (body.action === "dismiss_overlap") {
+    try {
+      await dismissExistingRowFlag({
+        shipmentId: id,
+        jobId: typeof body.job_id === "string" ? body.job_id : undefined,
+        destShipmentId: typeof body.shipment_id === "string" ? body.shipment_id : undefined,
+      });
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Could not keep this separate." },
+        { status: 400 },
+      );
+    }
+  }
+  if (body.action === "merge_overlap") {
+    const jobId = typeof body.job_id === "string" ? body.job_id : "";
+    const destShipmentId = typeof body.shipment_id === "string" ? body.shipment_id : "";
+    if (!jobId || !destShipmentId) {
+      return NextResponse.json(
+        { ok: false, error: "Choose which client and which row to merge." },
+        { status: 400 },
+      );
+    }
+    try {
+      const result = await mergeJobOntoExistingRow({
+        sourceShipmentId: id,
+        destShipmentId,
+        jobId,
+      });
+      return NextResponse.json({ ok: true, merged: result });
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: error instanceof Error ? error.message : "Could not merge." },
         { status: 400 },
       );
     }

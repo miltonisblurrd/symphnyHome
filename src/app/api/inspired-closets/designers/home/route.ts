@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { getDesigner } from "@/lib/inspired-closets-designer-auth";
+import { stageLabel } from "@/lib/inspired-closets-ops-jobs";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export async function GET() {
   }
 
   const supabase = getSupabaseAdmin();
-  const [leadsResult, appointmentsResult, clientsResult] = await Promise.all([
+  const [leadsResult, appointmentsResult, clientsResult, profileResult] = await Promise.all([
     supabase
       .from("ic_leads")
       .select("id, client_id, first_name, last_name, stage, source, notes, updated_at, converted_job_id")
@@ -30,13 +31,14 @@ export async function GET() {
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true })
       .limit(80),
-    supabase.from("ic_clients").select("id, name").is("deleted_at", null).limit(3000),
+    supabase.from("ic_clients").select("id, name, phone, address").is("deleted_at", null).limit(3000),
+    supabase.from("ic_staff").select("id, name, avatar_url, phone").eq("id", designer.id).maybeSingle(),
   ]);
 
   let jobsResult = await supabase
     .from("ic_jobs")
     .select(
-      "id, client_id, title, stage, notes, field_notes, install_date, sold_date, install_grade, skip_job_check, ready_to_order",
+      "id, client_id, title, stage, job_kind, visit_window, notes, field_notes, install_date, sold_date, install_grade, skip_job_check, ready_to_order",
     )
     .eq("designer_id", designer.id)
     .is("deleted_at", null)
@@ -45,7 +47,7 @@ export async function GET() {
   if (jobsResult.error && /install_grade|skip_job_check|column|schema cache/i.test(jobsResult.error.message)) {
     const fallback = await supabase
       .from("ic_jobs")
-      .select("id, client_id, title, stage, notes, field_notes, install_date, sold_date, ready_to_order")
+      .select("id, client_id, title, stage, job_kind, visit_window, notes, field_notes, install_date, sold_date, ready_to_order")
       .eq("designer_id", designer.id)
       .is("deleted_at", null)
       .order("sold_date", { ascending: false, nullsFirst: false })
@@ -60,26 +62,36 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: jobsResult.error.message }, { status: 500 });
   }
 
-  const clients = new Map((clientsResult.data ?? []).map((row) => [row.id, row.name as string]));
+  type ClientRow = { id: string; name: string; phone: string | null; address: string | null };
+  const clients = new Map(((clientsResult.data ?? []) as ClientRow[]).map((row) => [row.id, row]));
   const nameFor = (clientId: string | null, first?: string | null, last?: string | null) => {
-    const fromClient = clientId ? clients.get(clientId) : null;
+    const fromClient = clientId ? clients.get(clientId)?.name : null;
     if (fromClient) return fromClient;
     return [first, last].filter(Boolean).join(" ") || "Client";
   };
+  const contactFor = (clientId: string | null) => {
+    const row = clientId ? clients.get(clientId) : null;
+    return { client_phone: row?.phone ?? null, client_address: row?.address ?? null };
+  };
+  const profile = profileResult.data as { avatar_url?: string | null; phone?: string | null } | null;
 
   return NextResponse.json({
     ok: true,
-    designer,
+    designer: { ...designer, avatar_url: profile?.avatar_url ?? null, phone: profile?.phone ?? null },
     leads: (leadsResult.data ?? []).map((lead) => ({
       ...lead,
+      ...contactFor(lead.client_id),
       client_name: nameFor(lead.client_id, lead.first_name, lead.last_name),
     })),
     jobs: (jobsResult.data ?? []).map((job) => ({
       ...job,
+      ...contactFor(job.client_id),
+      stage_label: stageLabel(job.stage),
       client_name: nameFor(job.client_id),
     })),
     appointments: (appointmentsResult.data ?? []).map((row) => ({
       ...row,
+      ...contactFor(row.client_id),
       client_name: nameFor(row.client_id),
     })),
   });

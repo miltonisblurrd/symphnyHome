@@ -12,7 +12,7 @@ import {
   IC_STAFF_NAME_COOKIE,
   IC_STAFF_ROLE_COOKIE,
 } from "@/lib/inspired-closets-ops-field";
-import { roleHomePath, staffMatchesLoginId } from "@/lib/inspired-closets-ops-roles";
+import { IC_OPS_HOME, roleHomePath, staffMatchesLoginId } from "@/lib/inspired-closets-ops-roles";
 import { applyDesignerSession } from "@/lib/inspired-closets-designer-auth";
 
 export const runtime = "nodejs";
@@ -122,7 +122,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       ok: true,
       mode: "prototype",
-      redirectTo: "/inspired-closets/gavin",
+      redirectTo: IC_OPS_HOME,
     });
     clearStaffCookies(response);
     return response;
@@ -141,7 +141,7 @@ export async function POST(request: Request) {
   const response = NextResponse.json({
     ok: true,
     mode: "prototype",
-    redirectTo: "/inspired-closets/gavin",
+    redirectTo: IC_OPS_HOME,
   });
   response.cookies.set({
     name: INSPIRED_CLOSETS_ACCESS_COOKIE,

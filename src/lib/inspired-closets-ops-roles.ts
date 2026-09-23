@@ -4,6 +4,7 @@
  */
 
 export const IC_INVENTORY_HOME = "/inspired-closets/ops/inventory";
+export const IC_OPS_HOME = "/inspired-closets/ops/projects";
 
 /** Page prefixes the inventory role may open. Receiving lives under inventory. */
 export const INVENTORY_PAGE_PREFIXES = [
@@ -35,7 +36,7 @@ export function isInventoryRole(role: string | null | undefined): boolean {
 export function roleHomePath(role: string | null | undefined): string {
   if (isInventoryRole(role)) return IC_INVENTORY_HOME;
   if (role === "designer") return "/inspired-closets/designers";
-  return "/inspired-closets/gavin";
+  return IC_OPS_HOME;
 }
 
 export function canAccessOpsPage(

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { IC_INVENTORY_HOME, isInventoryRole } from "@/lib/inspired-closets-ops-roles";
+import { IC_INVENTORY_HOME, IC_OPS_HOME, isInventoryRole } from "@/lib/inspired-closets-ops-roles";
 import styles from "./access.module.css";
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
@@ -11,7 +11,7 @@ const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 export default function InspiredClosetsAccessForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnTo = searchParams.get("returnTo") ?? "/inspired-closets/gavin";
+  const returnTo = searchParams.get("returnTo") ?? IC_OPS_HOME;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

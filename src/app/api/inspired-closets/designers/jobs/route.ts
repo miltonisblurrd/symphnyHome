@@ -351,7 +351,9 @@ export async function POST(request: Request) {
 
     let saved = await supabase.from("ic_jobs").update(updates).eq("id", id).select("*").single();
     if (saved.error && /design_ready|column|schema cache/i.test(saved.error.message)) {
-      const { design_ready_at: _at, design_ready_choice: _choice, ...withoutReady } = updates;
+      const withoutReady = { ...updates };
+      delete withoutReady.design_ready_at;
+      delete withoutReady.design_ready_choice;
       saved = await supabase.from("ic_jobs").update(withoutReady).eq("id", id).select("*").single();
     }
     const { data, error } = saved;

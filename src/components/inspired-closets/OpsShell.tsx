@@ -40,7 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
       { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▣" },
       { href: "/inspired-closets/ops/installers", label: "Install Workers", icon: "◎" },
-      { href: "/inspired-closets/designers", label: "Designer portal", icon: "✎" },
+      { href: "/inspired-closets/ops/designers", label: "Designer portal", icon: "✎" },
     ],
   },
   {

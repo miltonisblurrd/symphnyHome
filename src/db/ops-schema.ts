@@ -326,6 +326,11 @@ export const icJobs = pgTable("ic_jobs", {
   proposalFilename: text("proposal_filename"),
   notes: text("notes"),
   fieldNotes: text("field_notes"),
+  /** Notes the designer writes on the job, before the installer is assigned. */
+  designerNotes: text("designer_notes"),
+  /** When she told Frank the design is done, and which handoff she chose. */
+  designReadyAt: timestamp("design_ready_at", { withTimezone: true }),
+  designReadyChoice: text("design_ready_choice"),
   /** Craig RTO — Frank's order queue. */
   readyToOrder: boolean("ready_to_order").notNull().default(false),
   /** Designer grade of the install, 1–5. */

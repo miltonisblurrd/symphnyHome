@@ -8,11 +8,17 @@ export type JobPhoto = {
   caption: string | null;
   created_at: string;
   public_url: string | null;
+  mime_type: string | null;
   installer_name: string | null;
 };
 
 export function mediaKindLabel(kind: string): string {
+  if (kind === "other") return "Paperwork";
   return MEDIA_KINDS.find((row) => row.id === kind)?.label ?? kind.replace(/_/g, " ");
+}
+
+export function isImageMime(mime: string | null | undefined): boolean {
+  return !mime || mime.startsWith("image/");
 }
 
 /** Photos installers posted on a job, with a fresh view link. */
@@ -20,7 +26,7 @@ export async function listJobPhotos(jobId: string): Promise<JobPhoto[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ic_job_media")
-    .select("id, job_id, installer_id, kind, storage_path, public_url, caption, created_at")
+    .select("id, job_id, installer_id, kind, storage_path, public_url, caption, mime_type, created_at")
     .eq("job_id", jobId)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -52,6 +58,7 @@ export async function listJobPhotos(jobId: string): Promise<JobPhoto[]> {
         caption: (row.caption as string | null) ?? null,
         created_at: row.created_at as string,
         public_url: url,
+        mime_type: (row.mime_type as string | null) ?? null,
         installer_name: row.installer_id ? names.get(row.installer_id) ?? null : null,
       };
     }),

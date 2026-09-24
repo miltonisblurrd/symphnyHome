@@ -992,6 +992,15 @@
   color: #3a1010;
 }
 
+.chipSource {
+  background: #f6d76b;
+  color: #3a2e08;
+}
+
+.packetActionsThree {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .homeGrid {
   display: grid;
   gap: 1rem;
@@ -1803,10 +1812,25 @@
   margin-top: 0.85rem;
 }
 
+.packetActions.packetActionsThree {
+  display: flex;
+  flex-wrap: wrap;
+  grid-template-columns: none;
+}
+
+.packetActionsThree .packetActionBtn {
+  flex: 0 0 auto;
+  padding: 0.7rem 1.05rem;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
 .packetActionBtn {
   display: grid;
   place-items: center;
   min-height: 2.75rem;
+  padding: 0.7rem 0.85rem;
+  box-sizing: border-box;
   border-radius: 0.8rem;
   border: 1px solid rgba(130, 31, 45, 0.28);
   background: var(--ic-blush);
@@ -2367,6 +2391,12 @@
 
   .packetActions {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .packetActions.packetActionsThree {
+    display: flex;
+    flex-wrap: wrap;
+    grid-template-columns: none;
   }
 
   .packetJump {

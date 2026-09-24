@@ -8,7 +8,7 @@ import Link from "next/link";
 import { PAYMENT_MILESTONES } from "@/lib/inspired-closets-ops-billing";
 import { JOB_KINDS } from "@/lib/inspired-closets-ops-jobs";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
-import type { JobPhoto } from "@/lib/inspired-closets-ops-media";
+import { isImageMime, type JobPhoto } from "@/lib/inspired-closets-ops-media";
 import OpsProductSummary from "@/components/inspired-closets/OpsProductSummary";
 import OpsStowSalesOrder from "@/components/inspired-closets/OpsStowSalesOrder";
 import styles from "./ops-payroll.module.css";
@@ -37,6 +37,7 @@ export type ProjectJob = {
   install_date: string | null;
   completed_date?: string | null;
   notes: string | null;
+  designer_notes?: string | null;
   community_ref?: string | null;
   studio_ref?: string | null;
   receive_date?: string | null;
@@ -515,6 +516,12 @@ export default function OpsProjectFile({
             <span className={styles.fieldLabel}>Collected</span>
             <input className={styles.input} value={cents(job.collected_cents)} readOnly />
           </label>
+          {job.designer_notes ? (
+            <label className={`${styles.field} ${styles.fileNotes}`} style={{ gridColumn: "1 / -1" }}>
+              <span className={styles.fieldLabel}>Designer notes</span>
+              <textarea className={styles.input} rows={3} value={job.designer_notes} readOnly />
+            </label>
+          ) : null}
           <label className={`${styles.field} ${styles.fileNotes}`} style={{ gridColumn: "1 / -1" }}>
             <span className={styles.fieldLabel}>Notes</span>
             <textarea
@@ -670,19 +677,25 @@ export default function OpsProjectFile({
       </div>
 
       <div className={`${styles.detailSection} ${styles.fileBand}`}>
-        <p className={styles.detailSectionTitle}>Install photos</p>
+        <p className={styles.detailSectionTitle}>Photos</p>
         {(file?.photos ?? []).length === 0 ? (
-          <p className={styles.empty}>No photos on this job yet. They show up here after an installer posts them.</p>
+          <p className={styles.empty}>
+            No photos or paperwork on this job yet. They show up here after an installer or the designer adds them.
+          </p>
         ) : (
           <div className={styles.photoGrid}>
             {(file?.photos ?? []).map((photo) => (
               <figure key={photo.id} className={styles.photoCard}>
-                {photo.public_url ? (
+                {photo.public_url && isImageMime(photo.mime_type) ? (
                   <a href={photo.public_url} target="_blank" rel="noreferrer">
                     <img src={photo.public_url} alt={photo.caption || photo.kind_label} />
                   </a>
+                ) : photo.public_url ? (
+                  <a href={photo.public_url} target="_blank" rel="noreferrer" className={styles.photoMissing}>
+                    Open paperwork
+                  </a>
                 ) : (
-                  <div className={styles.photoMissing}>Photo unavailable</div>
+                  <div className={styles.photoMissing}>File unavailable</div>
                 )}
                 <figcaption className={styles.photoMeta}>
                   {photo.kind_label}

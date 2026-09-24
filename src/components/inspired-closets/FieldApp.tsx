@@ -100,6 +100,7 @@ type Job = {
   packet_slip?: PacketSlip[];
   packet_order?: PacketOrder | null;
   proposal_url?: string | null;
+  designer_notes?: string | null;
   proposal_filename?: string | null;
   miles?: { miles_out: number; miles_back: number; drive_date: string } | null;
 };
@@ -278,15 +279,17 @@ function parseOfficeNotes(notes: string | null | undefined): { facts: OfficeFact
 
 function OfficePacket({
   notes,
+  designerNotes,
   proposalUrl,
   proposalFilename,
 }: {
   notes: string | null | undefined;
+  designerNotes?: string | null;
   proposalUrl?: string | null;
   proposalFilename?: string | null;
 }) {
   const { facts, site } = parseOfficeNotes(notes);
-  if (facts.length === 0 && site.length === 0 && !proposalUrl) return null;
+  if (facts.length === 0 && site.length === 0 && !proposalUrl && !designerNotes) return null;
   return (
     <div className={styles.packetOffice}>
       {facts.length > 0 ? (
@@ -307,6 +310,14 @@ function OfficePacket({
               <li key={`${item}-${index}`}>{item}</li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {designerNotes ? (
+        <div className={styles.packetBlock}>
+          <h3 className={styles.packetSection}>Designer notes</h3>
+          <p className={styles.packetBody} style={{ whiteSpace: "pre-wrap" }}>
+            {designerNotes}
+          </p>
         </div>
       ) : null}
       {proposalUrl ? (
@@ -1977,6 +1988,7 @@ export default function FieldApp() {
 
                     <OfficePacket
                       notes={workJob.notes}
+                      designerNotes={workJob.designer_notes}
                       proposalUrl={workJob.proposal_url}
                       proposalFilename={workJob.proposal_filename}
                     />

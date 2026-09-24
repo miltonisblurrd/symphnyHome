@@ -28,6 +28,7 @@ const DESIGN_STAGES = new Set([
   "job_check",
 ]);
 const INSTALLED_STAGES = new Set(["install_complete", "final_payment", "closed"]);
+const GRADE_STAGES = new Set(["install_in_progress", "install_complete", "final_payment", "closed"]);
 
 type Designer = { id: string; name: string; avatar_url?: string | null; phone?: string | null };
 
@@ -69,14 +70,29 @@ type AppointmentRow = Contact & {
   location_text: string | null;
 };
 
+const PHOTO_KINDS = [
+  { id: "before", label: "Before" },
+  { id: "during", label: "During" },
+  { id: "after", label: "After" },
+  { id: "issue", label: "Issue" },
+  { id: "staging", label: "Staging" },
+  { id: "other", label: "Paperwork" },
+] as const;
+
 type Photo = {
   id: string;
   kind_label: string;
   caption: string | null;
   created_at: string;
   public_url: string | null;
+  mime_type?: string | null;
   installer_name: string | null;
 };
+
+function isPhotoImage(photo: Photo): boolean {
+  if (photo.mime_type) return photo.mime_type.startsWith("image/");
+  return !/\.pdf(\?|$)/i.test(photo.public_url ?? "");
+}
 
 type JobDetail = {
   id: string;
@@ -87,6 +103,10 @@ type JobDetail = {
   install_date?: string | null;
   visit_window?: string | null;
   proposal_url?: string | null;
+  proposal_filename?: string | null;
+  designer_notes?: string | null;
+  design_ready_at?: string | null;
+  design_ready_choice?: "job_check" | "skip" | string | null;
   notes: string | null;
   field_notes: string | null;
   install_grade: number | null;
@@ -215,10 +235,18 @@ function TabIcon({ id }: { id: DesignerTab }) {
   );
 }
 
-function ContactActions({ phone, address }: { phone?: string | null; address?: string | null }) {
+function ContactActions({
+  phone,
+  address,
+  three,
+}: {
+  phone?: string | null;
+  address?: string | null;
+  three?: boolean;
+}) {
   if (!phone && !address) return null;
   return (
-    <div className={styles.packetActions}>
+    <div className={`${styles.packetActions} ${three ? styles.packetActionsThree : ""}`}>
       {phone ? (
         <a className={styles.packetActionBtn} href={phoneHref(phone, "tel")}>
           Call
@@ -251,10 +279,19 @@ export default function DesignerApp() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [grade, setGrade] = useState(0);
   const [gradeNote, setGradeNote] = useState("");
+  const [photoKind, setPhotoKind] = useState<(typeof PHOTO_KINDS)[number]["id"]>("other");
+  const [photoCaption, setPhotoCaption] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [designerNotes, setDesignerNotes] = useState("");
+  const [proposalBusy, setProposalBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [leadLimit, setLeadLimit] = useState(8);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const openJobIdRef = useRef<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const proposalInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadHome = useCallback(async () => {
     const response = await fetch("/api/inspired-closets/designers/home");
@@ -291,6 +328,36 @@ export default function DesignerApp() {
       }
     })();
   }, [loadHome]);
+
+  const refreshOpenJob = useCallback(async (id: string) => {
+    const response = await fetch(`/api/inspired-closets/designers/jobs?id=${id}`);
+    const payload = (await response.json()) as { ok?: boolean; job?: JobDetail; photos?: Photo[] };
+    if (!response.ok || !payload.ok || !payload.job || openJobIdRef.current !== id) return;
+    setJob(payload.job);
+    setPhotos(payload.photos ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (!designer) return;
+    let timer = 0;
+    const pull = () => {
+      if (document.visibilityState === "hidden") return;
+      void loadHome().catch(() => undefined);
+      const id = openJobIdRef.current;
+      if (id) void refreshOpenJob(id).catch(() => undefined);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") pull();
+    };
+    timer = window.setInterval(pull, 20000);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", pull);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", pull);
+    };
+  }, [designer, loadHome, refreshOpenJob]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -376,6 +443,7 @@ export default function DesignerApp() {
 
   function goToTab(next: DesignerTab) {
     setTab(next);
+    openJobIdRef.current = null;
     setJob(null);
     setMenuOpen(false);
     setNotice(null);
@@ -421,6 +489,7 @@ export default function DesignerApp() {
   async function signOut() {
     await fetch("/api/inspired-closets/designers/auth", { method: "DELETE" });
     setDesigner(null);
+    openJobIdRef.current = null;
     setJob(null);
     setLeads([]);
     setJobs([]);
@@ -441,13 +510,126 @@ export default function DesignerApp() {
         photos?: Photo[];
       };
       if (!response.ok || !payload.ok || !payload.job) throw new Error(payload.error ?? "Could not open the job.");
+      openJobIdRef.current = payload.job.id;
       setJob(payload.job);
       setPhotos(payload.photos ?? []);
       setGrade(payload.job.install_grade ?? 0);
       setGradeNote(payload.job.install_grade_note ?? "");
+      setDesignerNotes(payload.job.designer_notes ?? "");
       window.scrollTo({ top: 0 });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not open the job." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadPhotos(files: FileList | File[]) {
+    if (!job) return;
+    const list = Array.from(files).filter(
+      (file) => file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"),
+    );
+    if (list.length === 0) {
+      setNotice({ kind: "error", text: "Choose a photo or a PDF." });
+      return;
+    }
+    if (list.some((file) => file.size > 12 * 1024 * 1024)) {
+      setNotice({ kind: "error", text: "Keep each file under 12 MB." });
+      return;
+    }
+    setPhotoBusy(true);
+    setNotice(null);
+    try {
+      const added: Photo[] = [];
+      for (const file of list) {
+        const form = new FormData();
+        form.set("id", job.id);
+        form.set("kind", photoKind);
+        if (photoCaption.trim()) form.set("caption", photoCaption.trim());
+        form.set("file", file);
+        const response = await fetch("/api/inspired-closets/designers/jobs", { method: "POST", body: form });
+        const payload = (await response.json()) as { ok?: boolean; error?: string; photo?: Photo };
+        if (!response.ok || !payload.ok || !payload.photo) {
+          throw new Error(payload.error ?? "Could not save the file.");
+        }
+        added.push(payload.photo);
+      }
+      setPhotos((current) => [...added, ...current]);
+      setPhotoCaption("");
+      await loadHome();
+      setNotice({
+        kind: "ok",
+        text:
+          list.length === 1
+            ? "Saved on the job. It shows on the project."
+            : `${list.length} files saved on the job. They show on the project.`,
+      });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save the file." });
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function uploadProposal(file: File) {
+    if (!job) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf && !file.type.startsWith("image/")) {
+      setNotice({ kind: "error", text: "The proposal needs to be a PDF or a photo." });
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setNotice({ kind: "error", text: "Keep the proposal under 20 MB." });
+      return;
+    }
+    setProposalBusy(true);
+    setNotice(null);
+    try {
+      const form = new FormData();
+      form.set("id", job.id);
+      form.set("action", "proposal");
+      form.set("file", file);
+      const response = await fetch("/api/inspired-closets/designers/jobs", { method: "POST", body: form });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        proposal_url?: string;
+        proposal_filename?: string;
+      };
+      if (!response.ok || !payload.ok || !payload.proposal_url) {
+        throw new Error(payload.error ?? "Could not save the proposal.");
+      }
+      setJob({
+        ...job,
+        proposal_url: payload.proposal_url,
+        proposal_filename: payload.proposal_filename ?? file.name,
+      });
+      await loadHome();
+      setNotice({ kind: "ok", text: "Proposal saved on the job. Valu and the project can open it." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save the proposal." });
+    } finally {
+      setProposalBusy(false);
+    }
+  }
+
+  async function saveDesignerNotes() {
+    if (!job) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/inspired-closets/designers/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: job.id, action: "notes", notes: designerNotes }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not save the notes.");
+      setJob({ ...job, designer_notes: designerNotes });
+      await loadHome();
+      setNotice({ kind: "ok", text: "Notes saved on the job." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save the notes." });
     } finally {
       setBusy(false);
     }
@@ -468,6 +650,7 @@ export default function DesignerApp() {
       setNotice({ kind: "ok", text: "Grade saved on the job." });
       setJob({ ...job, install_grade: grade, install_grade_note: gradeNote });
       await loadHome();
+      await refreshOpenJob(job.id);
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save the grade." });
     } finally {
@@ -497,6 +680,8 @@ export default function DesignerApp() {
         stage,
         stage_label: stage === job.stage ? job.stage_label : pretty(stage),
         skip_job_check: payload.job?.skip_job_check ?? choice === "skip",
+        design_ready_choice: choice,
+        design_ready_at: new Date().toISOString(),
       });
       setNotice({
         kind: "ok",
@@ -654,16 +839,6 @@ export default function DesignerApp() {
               </button>
               {menuOpen ? (
                 <div className={`${styles.dropdown} ${styles.dropdownNarrow}`} role="menu">
-                  <button
-                    type="button"
-                    className={styles.dropdownItem}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      void loadHome();
-                    }}
-                  >
-                    Refresh
-                  </button>
                   <button type="button" className={styles.dropdownItem} onClick={() => void signOut()}>
                     Sign out
                   </button>
@@ -724,37 +899,43 @@ export default function DesignerApp() {
               </div>
 
               <div className={styles.feedStack}>
-                <section className={`${styles.dashCard} ${styles.feedCol}`} aria-label="Needs you">
-                  <p className={styles.colLabel}>Needs you</p>
-                  {actionItems.length === 0 ? (
-                    <p className={styles.empty}>
-                      You&apos;re caught up. Jobs waiting on your design and installs to grade show here.
-                    </p>
+                <section className={`${styles.dashCard} ${styles.feedCol}`} aria-label="Leads">
+                  <p className={styles.colLabel}>Leads</p>
+                  {openLeads.length === 0 ? (
+                    <p className={styles.empty}>No open leads assigned to you.</p>
                   ) : (
                     <div className={styles.feedList}>
-                      {actionItems.map((item) => (
+                      {openLeads.slice(0, leadLimit).map((row) => (
                         <button
-                          key={item.key}
+                          key={row.id}
                           type="button"
                           className={styles.feedCard}
                           style={{ textAlign: "left", cursor: "pointer", font: "inherit", width: "100%" }}
-                          onClick={() => void openJob(item.jobId)}
+                          onClick={() => goToTab("leads")}
                         >
                           <div className={styles.feedCardTop}>
-                            <span
-                              className={`${styles.feedTag} ${
-                                item.tag === "Design" ? styles.feedTagCompany : styles.feedTagPersonal
-                              }`}
-                            >
-                              {item.tag}
-                            </span>
+                            <span className={`${styles.feedTag} ${styles.feedTagCompany}`}>{pretty(row.stage)}</span>
+                            <time className={styles.historyDate}>{formatDay(row.updated_at)}</time>
                           </div>
-                          <h3 className={styles.jobName}>{item.title}</h3>
-                          <p className={styles.jobMeta}>{item.body}</p>
+                          <h3 className={styles.jobName}>{row.client_name}</h3>
+                          <p className={styles.jobMeta}>
+                            {[row.source ? pretty(row.source) : null, row.notes].filter(Boolean).join(" · ") ||
+                              "Open lead"}
+                          </p>
                         </button>
                       ))}
                     </div>
                   )}
+                  {openLeads.length > leadLimit ? (
+                    <button
+                      type="button"
+                      className={styles.btnGhost}
+                      style={{ marginTop: "0.85rem", width: "100%" }}
+                      onClick={() => setLeadLimit((count) => count + 8)}
+                    >
+                      Load more
+                    </button>
+                  ) : null}
                 </section>
               </div>
 
@@ -812,6 +993,38 @@ export default function DesignerApp() {
                     </ul>
                   )}
                 </aside>
+                <section className={styles.dashCard} aria-label="Needs you">
+                  <p className={styles.colLabel}>Needs you</p>
+                  {actionItems.length === 0 ? (
+                    <p className={styles.empty}>
+                      You&apos;re caught up. Jobs waiting on your design and installs to grade show here.
+                    </p>
+                  ) : (
+                    <div className={styles.feedList}>
+                      {actionItems.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={styles.feedCard}
+                          style={{ textAlign: "left", cursor: "pointer", font: "inherit", width: "100%" }}
+                          onClick={() => void openJob(item.jobId)}
+                        >
+                          <div className={styles.feedCardTop}>
+                            <span
+                              className={`${styles.feedTag} ${
+                                item.tag === "Design" ? styles.feedTagCompany : styles.feedTagPersonal
+                              }`}
+                            >
+                              {item.tag}
+                            </span>
+                          </div>
+                          <h3 className={styles.jobName}>{item.title}</h3>
+                          <p className={styles.jobMeta}>{item.body}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
             </div>
           ) : null}
@@ -838,7 +1051,7 @@ export default function DesignerApp() {
                     <p className={styles.jobsHeroMeta}>{openLeads[0].client_address}</p>
                   ) : null}
                   {openLeads[0].notes ? <p className={styles.jobMeta}>{openLeads[0].notes}</p> : null}
-                  <ContactActions phone={openLeads[0].client_phone} address={openLeads[0].client_address} />
+                  <ContactActions three phone={openLeads[0].client_phone} address={openLeads[0].client_address} />
                 </section>
               ) : (
                 <section className={`${styles.dashCard} ${styles.jobsHero}`}>
@@ -857,13 +1070,13 @@ export default function DesignerApp() {
                         <div className={styles.jobsHeroTop}>
                           <p className={styles.colLabel}>{pretty(row.stage)}</p>
                           {row.source ? (
-                            <span className={`${styles.chip} ${styles.chipService}`}>{pretty(row.source)}</span>
+                            <span className={`${styles.chip} ${styles.chipSource}`}>{pretty(row.source)}</span>
                           ) : null}
                         </div>
                         <h3 className={styles.jobTileName}>{row.client_name}</h3>
                         <p className={styles.jobMeta}>Updated {formatDay(row.updated_at)}</p>
                         {row.notes ? <p className={styles.jobMeta}>{row.notes}</p> : null}
-                        <ContactActions phone={row.client_phone} address={row.client_address} />
+                        <ContactActions three phone={row.client_phone} address={row.client_address} />
                       </article>
                     ))}
                   </div>
@@ -960,7 +1173,14 @@ export default function DesignerApp() {
           {tab === "jobs" && job ? (
             <div className={styles.jobsPacketView}>
               <div className={styles.packetToolbar}>
-                <button type="button" className={styles.btnGhost} onClick={() => setJob(null)}>
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={() => {
+                    openJobIdRef.current = null;
+                    setJob(null);
+                  }}
+                >
                   ← All jobs
                 </button>
                 <div className={styles.packetToolbarActions}>
@@ -971,8 +1191,10 @@ export default function DesignerApp() {
               <nav className={styles.packetJump} aria-label="Packet sections">
                 {[
                   { id: "packet-brief", label: "Brief" },
-                  { id: "packet-design", label: "Design done" },
+                  { id: "packet-proposal", label: "Proposal" },
+                  { id: "packet-notes", label: "Notes" },
                   { id: "packet-photos", label: "Photos" },
+                  { id: "packet-design", label: "Design done" },
                   { id: "packet-grade", label: "Grade" },
                 ].map((item) => (
                   <button
@@ -1007,13 +1229,6 @@ export default function DesignerApp() {
                         <a href={phoneHref(job.client.phone, "tel")}>{job.client.phone}</a>
                       </p>
                     ) : null}
-                    {job.proposal_url ? (
-                      <div className={styles.packetActions}>
-                        <a className={styles.packetActionBtn} href={job.proposal_url} target="_blank" rel="noreferrer">
-                          Design / proposal
-                        </a>
-                      </div>
-                    ) : null}
                     {job.title ? (
                       <div className={styles.packetBlock}>
                         <h3 className={styles.packetSection}>Project</h3>
@@ -1040,40 +1255,105 @@ export default function DesignerApp() {
                     ) : null}
                   </section>
 
+                  <section className={styles.dashCard} id="packet-proposal">
+                    <p className={styles.colLabel}>For the installer and the project</p>
+                    <h3 className={styles.packetSection}>Proposal</h3>
+                    <p className={styles.jobMeta}>
+                      Upload the design. It stays on this job, so Valu can open it with the install and the office sees it on the project.
+                    </p>
+                    {job.proposal_url ? (
+                      <div className={styles.packetActions}>
+                        <a className={styles.packetActionBtn} href={job.proposal_url} target="_blank" rel="noreferrer">
+                          {job.proposal_filename || "Open proposal"}
+                        </a>
+                      </div>
+                    ) : (
+                      <p className={styles.packetEmpty}>No proposal on this job yet.</p>
+                    )}
+                    <input
+                      ref={proposalInputRef}
+                      type="file"
+                      accept="application/pdf,image/*"
+                      className={styles.avatarFileInput}
+                      disabled={proposalBusy}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void uploadProposal(file);
+                        event.target.value = "";
+                      }}
+                    />
+                    <div className={styles.photoActions}>
+                      <button
+                        type="button"
+                        className={`${styles.btn} ${styles.photoPrimary}`}
+                        disabled={proposalBusy}
+                        onClick={() => proposalInputRef.current?.click()}
+                      >
+                        {proposalBusy ? "Saving…" : job.proposal_url ? "Replace proposal" : "Upload proposal"}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className={styles.dashCard} id="packet-notes">
+                    <p className={styles.colLabel}>Before the install</p>
+                    <h3 className={styles.packetSection}>Your notes</h3>
+                    <p className={styles.jobMeta}>
+                      What you designed, what to watch for, anything the installer and the office should know.
+                    </p>
+                    <textarea
+                      className={`${styles.textarea} ${styles.packetNotesArea}`}
+                      value={designerNotes}
+                      onChange={(event) => setDesignerNotes(event.target.value)}
+                      placeholder="Measurements, finishes, what changed from the first visit…"
+                    />
+                    <button
+                      type="button"
+                      className={`${styles.btn} ${styles.packetBtn}`}
+                      disabled={busy}
+                      onClick={() => void saveDesignerNotes()}
+                    >
+                      Save notes
+                    </button>
+                  </section>
+
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-design">
                     <p className={styles.colLabel}>Hand off to Frank</p>
                     <h3 className={styles.packetSection}>Design is done</h3>
-                    {DESIGN_STAGES.has(job.stage) ? (
-                      <>
-                        <p className={styles.jobMeta}>
-                          Tell Frank what happens next. Nothing goes to the customer.
-                        </p>
-                        <div className={styles.profileActions}>
-                          <button
-                            type="button"
-                            className={styles.btnOk}
-                            disabled={busy}
-                            onClick={() => void finishDesign("job_check")}
-                          >
-                            Needs a job check
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.btnGhost}
-                            disabled={busy}
-                            onClick={() => void finishDesign("skip")}
-                          >
-                            Simple closet, skip job check
-                          </button>
-                        </div>
-                      </>
+                    {job.design_ready_choice || job.skip_job_check ? (
+                      <p className={styles.jobMeta}>
+                        {job.design_ready_choice === "skip" || job.skip_job_check
+                          ? "Sent to Frank. Simple closet — job check skipped. He can get it ready to order."
+                          : "Sent to Frank. This job needs a job check before it is ordered."}
+                      </p>
                     ) : (
-                      <p className={styles.packetEmpty}>
-                        {job.skip_job_check
-                          ? "Simple closet — job check skipped. Frank has it."
-                          : `This job is at ${job.stage_label}. Frank has it.`}
+                      <p className={styles.jobMeta}>
+                        Send Frank a confirmation when the design is finished. Nothing goes to the customer.
                       </p>
                     )}
+                    {DESIGN_STAGES.has(job.stage) ? (
+                      <div className={styles.profileActions}>
+                        <button
+                          type="button"
+                          className={job.design_ready_choice === "job_check" ? styles.btnOk : styles.btnGhost}
+                          disabled={busy}
+                          onClick={() => void finishDesign("job_check")}
+                        >
+                          {job.design_ready_choice === "job_check" ? "Sent · needs a job check" : "Needs a job check"}
+                        </button>
+                        <button
+                          type="button"
+                          className={
+                            job.design_ready_choice === "skip" || job.skip_job_check ? styles.btnOk : styles.btnGhost
+                          }
+                          disabled={busy}
+                          onClick={() => void finishDesign("skip")}
+                        >
+                          {job.design_ready_choice === "skip" || job.skip_job_check
+                            ? "Sent · skip job check"
+                            : "Simple closet, skip job check"}
+                        </button>
+                      </div>
+                    ) : null}
                   </section>
                 </div>
 
@@ -1081,25 +1361,92 @@ export default function DesignerApp() {
                   <section className={`${styles.dashCard} ${styles.packetDocCard}`} id="packet-photos">
                     <div className={styles.packetDocHead}>
                       <div>
-                        <p className={styles.colLabel}>From the install crew</p>
+                        <p className={styles.colLabel}>On this job</p>
                         <h3 className={styles.packetSection}>Photos</h3>
-                        <p className={styles.jobMeta}>Everything the installers posted on this job.</p>
+                        <p className={styles.jobMeta}>
+                          Installer photos are here. Add your own, including paperwork that cannot be scanned.
+                          It saves on the project.
+                        </p>
                       </div>
                       <span className={styles.packetCount}>{photos.length}</span>
                     </div>
+
+                    <div className={styles.kindChips} role="group" aria-label="File type">
+                      {PHOTO_KINDS.map((kind) => (
+                        <button
+                          key={kind.id}
+                          type="button"
+                          className={`${styles.kindChip} ${photoKind === kind.id ? styles.kindChipActive : ""}`}
+                          onClick={() => setPhotoKind(kind.id)}
+                        >
+                          {kind.label}
+                        </button>
+                      ))}
+                    </div>
+                    <label className={styles.field}>
+                      <span className={styles.label}>Caption (optional)</span>
+                      <input
+                        className={styles.input}
+                        value={photoCaption}
+                        onChange={(event) => setPhotoCaption(event.target.value)}
+                        placeholder="What is this?"
+                      />
+                    </label>
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      className={styles.avatarFileInput}
+                      disabled={photoBusy}
+                      onChange={(event) => {
+                        const files = event.target.files;
+                        if (files?.length) void uploadPhotos(files);
+                        event.target.value = "";
+                      }}
+                    />
+                    <div className={styles.photoActions}>
+                      <button
+                        type="button"
+                        className={`${styles.btn} ${styles.photoPrimary}`}
+                        disabled={photoBusy}
+                        onClick={() => photoInputRef.current?.click()}
+                      >
+                        {photoBusy ? "Saving…" : "Add photos or paperwork"}
+                      </button>
+                    </div>
+
                     {photos.length > 0 ? (
                       <div className={styles.mediaGrid}>
                         {photos.map((photo) =>
                           photo.public_url ? (
                             <figure key={photo.id} className={styles.mediaFigure}>
-                              <a href={photo.public_url} target="_blank" rel="noreferrer">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={photo.public_url}
-                                  alt={photo.caption || photo.kind_label}
+                              {isPhotoImage(photo) ? (
+                                <a href={photo.public_url} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={photo.public_url}
+                                    alt={photo.caption || photo.kind_label}
+                                    className={styles.mediaThumb}
+                                  />
+                                </a>
+                              ) : (
+                                <a
+                                  href={photo.public_url}
+                                  target="_blank"
+                                  rel="noreferrer"
                                   className={styles.mediaThumb}
-                                />
-                              </a>
+                                  style={{
+                                    display: "grid",
+                                    placeItems: "center",
+                                    fontWeight: 700,
+                                    textDecoration: "none",
+                                    color: "inherit",
+                                  }}
+                                >
+                                  Open PDF
+                                </a>
+                              )}
                               <figcaption className={styles.mediaCaption}>
                                 <span>
                                   {photo.kind_label}
@@ -1112,14 +1459,22 @@ export default function DesignerApp() {
                         )}
                       </div>
                     ) : (
-                      <p className={styles.packetEmpty}>No installer photos on this job yet.</p>
+                      <p className={styles.packetEmpty}>Nothing on this job yet.</p>
                     )}
                   </section>
 
                   <section className={styles.dashCard} id="packet-grade">
-                    <p className={styles.colLabel}>Quality</p>
+                    <p className={styles.colLabel}>After the install</p>
                     <h3 className={styles.packetSection}>Grade the install</h3>
-                    <p className={styles.jobMeta}>1 is poor, 5 is perfect. Only the office sees this.</p>
+                    {GRADE_STAGES.has(job.stage) || job.install_grade ? (
+                      <p className={styles.jobMeta}>1 is poor, 5 is perfect. Only the office sees this.</p>
+                    ) : (
+                      <p className={styles.packetEmpty}>
+                        Grade this after the installer has been to the job. Photos, the proposal, and your notes come first.
+                      </p>
+                    )}
+                    {GRADE_STAGES.has(job.stage) || job.install_grade ? (
+                      <>
                     <div className={styles.kindChips} role="group" aria-label="Install grade">
                       {[1, 2, 3, 4, 5].map((value) => (
                         <button
@@ -1149,6 +1504,8 @@ export default function DesignerApp() {
                     >
                       {job.install_grade ? "Update grade" : "Save grade"}
                     </button>
+                      </>
+                    ) : null}
                   </section>
                 </div>
               </div>

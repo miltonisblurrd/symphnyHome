@@ -116,20 +116,22 @@ export async function GET(request: Request) {
     .not("designer_id", "is", null)
     .limit(2000);
   if (jobsResult.error && /column|schema cache/i.test(jobsResult.error.message)) {
-    jobsResult = await supabase
+    const mid = await supabase
       .from("ic_jobs")
       .select(`designer_id, ${JOB_SELECT_MID}`)
       .is("deleted_at", null)
       .not("designer_id", "is", null)
       .limit(2000);
+    jobsResult = mid as unknown as typeof jobsResult;
   }
   if (jobsResult.error && /column|schema cache/i.test(jobsResult.error.message)) {
-    jobsResult = await supabase
+    const basic = await supabase
       .from("ic_jobs")
       .select("id, designer_id, client_id, title, stage, job_kind, visit_window, notes, install_date")
       .is("deleted_at", null)
       .not("designer_id", "is", null)
       .limit(2000);
+    jobsResult = basic as unknown as typeof jobsResult;
   }
   if (jobsResult.error) {
     return NextResponse.json({ ok: false, error: jobsResult.error.message }, { status: 500 });

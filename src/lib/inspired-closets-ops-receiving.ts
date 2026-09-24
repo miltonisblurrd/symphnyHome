@@ -13,6 +13,12 @@ import {
   looksLikeProductSummary,
   parseStowProductSummaryText,
 } from "@/lib/inspired-closets-ops-product-summary-text";
+import {
+  looksLikeTruliteSlip,
+  parseTruliteCuts,
+  truliteOrderDate,
+  trulitePurchaseOrder,
+} from "@/lib/inspired-closets-ops-trulite-slip";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 import { codeKeys, codesMatch } from "@/lib/inspired-closets-ops-scan-codes";
 import {
@@ -45,7 +51,7 @@ export {
 
 export { codeKeys, codesMatch, normalizeCode } from "@/lib/inspired-closets-ops-scan-codes";
 
-export const RECEIVING_VENDORS = ["stow", "richelieu", "hafele", "other"] as const;
+export const RECEIVING_VENDORS = ["stow", "richelieu", "hafele", "trulite", "wurth", "other"] as const;
 export const PALLET_MISSING_THRESHOLD = 0.7;
 
 export type ParsedSlipItem = {
@@ -197,7 +203,7 @@ export function clientHintFromFilename(filename: string | null | undefined): str
   if (!base) return "";
   const withoutStamp = base.replace(/^\d{8}[_-]?\d{0,6}[_-]*/, "");
   const stripped = withoutStamp.replace(
-    /^(stow|studio|summary|product|packing|pack|slip|order|so)[_-\s]+/i,
+    /^(stow|studio|summary|product|packing|pack|slip|order|so|trulite|w[uü]rth)[_-\s]+/i,
     "",
   );
   const hint = clientHintFromSlip(stripped, stripped.split(/[-_\s]/)[0] ?? stripped);
@@ -450,9 +456,13 @@ async function findPartId(codes: string[]): Promise<string | null> {
   return null;
 }
 
+function isCutSizeCode(sku: string): boolean {
+  return /\d/.test(sku) && /\sx\s/i.test(sku) && /\d\/\d/.test(sku);
+}
+
 async function ensurePartForSlipItem(item: ParsedSlipItem): Promise<string | null> {
   const sku = item.item_number.trim();
-  if (!sku) return null;
+  if (!sku || isCutSizeCode(sku)) return null;
   const existing = await findPartId([sku, item.vendor_sku ?? ""]);
   if (existing) return existing;
 
@@ -763,14 +773,23 @@ export async function classifyReceivingPdf(input: {
   return "unknown";
 }
 
-const PARSE_SYSTEM = `You extract line items from Inspired Closets packing slips and vendor order receipts (Stow, Richelieu, Häfele, Hardware Resources).
-Return ONLY JSON: {"notice": string|null, "ship_date": "YYYY-MM-DD", "vendor": "stow"|"richelieu"|"hafele"|"other", "total_pages": number, "order_number": string|null, "po_number": string|null, "order_total": number|null, "weight_lbs": number|null, "items": [...]}.
-notice is a SHORT identity only: shipment notice number, order number, or PO (e.g. 80133562, D804518, BLACKHAWK / POHLMAN). Never a sentence, disclaimer, tariff paragraph, or filename.
+const PARSE_SYSTEM = `You extract line items from Inspired Closets packing slips and vendor order receipts (Stow, Richelieu, Häfele, Hardware Resources, Würth, Trulite, and any other 3rd party).
+Return ONLY JSON: {"notice": string|null, "ship_date": "YYYY-MM-DD", "vendor": "stow"|"richelieu"|"hafele"|"wurth"|"trulite"|"other", "total_pages": number, "order_number": string|null, "po_number": string|null, "order_total": number|null, "weight_lbs": number|null, "items": [...]}.
+notice is a SHORT identity only: shipment notice number, order number, or PO (e.g. 80133562, D804518, BLACKHAWK / POHLMAN, STOCK). Never a sentence, disclaimer, tariff paragraph, or filename.
 ship_date is REQUIRED. Read the printed ship / delivery / requested ship / Lieferdatum / Date d'expédition / invoice date. Accept any format (MM/DD/YY, DD.MM.YYYY, 18 Sep 2026, YYYY-MM-DD) and return YYYY-MM-DD. Never leave ship_date empty if any date is visible.
-order_total is dollars if printed. weight_lbs if printed. vendor "other" for Hardware Resources and unknown 3rd party.
-Each item: item_number (SKU / barcode), so_number, cust_ref (client name as printed, often NAME_MMDDYY), job_name (client last name — not STOCK, not the vendor), project_number, description, qty (integer), container_id (pallet ID only when printed), source_page, vendor_sku (manufacturer # if different from item_number).
+order_total is dollars if printed. weight_lbs if printed. vendor "wurth" when the document or filename says Würth. vendor "other" for Hardware Resources and any unknown 3rd party. STOCK is Frank's shop label, not a reason to drop the vendor or the lines.
+Each item: item_number (SKU / barcode), so_number, cust_ref (client name as printed, often NAME_MMDDYY; STOCK when Frank labeled it stock), job_name (client last name — not the vendor name), project_number, description, qty (integer), container_id (pallet ID only when printed), source_page, vendor_sku (manufacturer # if different from item_number).
 Skip shipping / handling charge rows (item SH, Estimated Shipping Charges, freight fees).
 Do not invent SKUs. Qty defaults to 1 if missing. cust_ref is the client label Frank wrote on the order.`;
+
+function vendorFromDocument(filename: string, text: string, parsed: string | undefined): string {
+  if (/w[uü]rth/i.test(`${filename}\n${text}`)) return "wurth";
+  const value = (parsed || "").toLowerCase();
+  if (value === "richelieu" || value === "hafele" || value === "trulite" || value === "wurth" || value === "stow" || value === "other") {
+    return value;
+  }
+  return "stow";
+}
 
 function requiredShipDate(input: {
   parsed?: string | null;
@@ -958,6 +977,53 @@ function stampSlipItems(
   });
 }
 
+function slipFromTrulite(
+  filename: string,
+  text: string,
+  pages: number,
+): {
+  notice: string | null;
+  ship_date: string | null;
+  vendor: string;
+  total_pages: number;
+  items: ParsedSlipItem[];
+  parse_quality: Record<string, unknown>;
+} | null {
+  const cuts = parseTruliteCuts(text);
+  if (cuts.length === 0) return null;
+  const po = trulitePurchaseOrder(text);
+  const hint = po || clientHintFromFilename(filename) || null;
+  return {
+    notice: hint,
+    ship_date: requiredShipDate({
+      parsed: truliteOrderDate(text),
+      text,
+      filename,
+    }),
+    vendor: "trulite",
+    total_pages: pages,
+    items: cuts.map((cut, index) => ({
+      item_number: cut.item_number,
+      cust_ref: hint,
+      job_name: hint,
+      description: cut.description,
+      qty: cut.qty,
+      source_page: index + 1,
+      vendor_sku: null,
+    })),
+    parse_quality: {
+      source: "trulite",
+      total_items: cuts.length,
+      filename,
+      po_number: po,
+      client_hint: hint,
+      order_number: null,
+      order_total: null,
+      weight_lbs: null,
+    },
+  };
+}
+
 function slipFromStudioSummary(
   filename: string,
   text: string,
@@ -1012,7 +1078,7 @@ export async function reparseShipment(id: string): Promise<{ added: number; kept
   const supabase = getSupabaseAdmin();
   const { data: ship, error } = await supabase
     .from("ic_shipments")
-    .select("source_filename, storage_path, public_url")
+    .select("source_filename, storage_path, public_url, parse_quality, notice, vendor, ship_date")
     .eq("id", id)
     .maybeSingle();
   if (error || !ship) throw new Error(error?.message ?? "Shipment not found.");
@@ -1038,6 +1104,7 @@ export async function reparseShipment(id: string): Promise<{ added: number; kept
   for (const item of parsed.items) {
     const match = existing.find((row) => sameSlipLine(row, item));
     if (!match) {
+      const links = await linkItemToOs(item, { createPart: false });
       const { error: insertError } = await supabase.from("ic_shipment_items").insert({
         shipment_id: id,
         item_number: item.item_number,
@@ -1052,7 +1119,7 @@ export async function reparseShipment(id: string): Promise<{ added: number; kept
         source_page: item.source_page ?? null,
         status: "expected",
         vendor_sku: item.vendor_sku ?? null,
-        job_id: item.job_id ?? null,
+        job_id: item.job_id || links.job_id || null,
       });
       if (!insertError) added += 1;
       continue;
@@ -1073,6 +1140,24 @@ export async function reparseShipment(id: string): Promise<{ added: number; kept
         updated_at: now,
       })
       .eq("id", match.id);
+  }
+  if (parsed.items.length > 0) {
+    const prior =
+      ship.parse_quality && typeof ship.parse_quality === "object" && !Array.isArray(ship.parse_quality)
+        ? (ship.parse_quality as Record<string, unknown>)
+        : {};
+    await supabase
+      .from("ic_shipments")
+      .update({
+        notice: parsed.notice || ship.notice,
+        vendor: parsed.vendor || ship.vendor,
+        ship_date: parsed.ship_date || ship.ship_date,
+        parse_error: null,
+        parse_quality: { ...prior, ...parsed.parse_quality },
+        total_pages: parsed.total_pages,
+        updated_at: now,
+      })
+      .eq("id", id);
   }
   return { added, kept };
 }
@@ -1106,6 +1191,17 @@ export async function parsePackingSlip(input: {
     return {
       ...fromStudio,
       items: stampSlipItems(fromStudio.items, input.filename, input.jobId ?? null),
+    };
+  }
+
+  const fromTrulite =
+    extractedText && looksLikeTruliteSlip(extractedText, input.filename)
+      ? slipFromTrulite(input.filename, extractedText, pages)
+      : null;
+  if (fromTrulite) {
+    return {
+      ...fromTrulite,
+      items: stampSlipItems(fromTrulite.items, input.filename, input.jobId ?? null),
     };
   }
 
@@ -1224,7 +1320,7 @@ export async function parsePackingSlip(input: {
     return {
       notice,
       ship_date: shipDate || requiredShipDate({ filename: input.filename }),
-      vendor: parsed.vendor || "stow",
+      vendor: vendorFromDocument(input.filename, extractedText, parsed.vendor),
       total_pages: Number(parsed.total_pages) || pages,
       items,
       parse_quality: {

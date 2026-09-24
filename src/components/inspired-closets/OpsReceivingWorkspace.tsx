@@ -51,6 +51,8 @@ function shipmentKind(ship: Shipment): string {
   const vendor = (ship.vendor ?? "").toLowerCase();
   if (vendor === "hafele") return "Häfele";
   if (vendor === "richelieu") return "Richelieu";
+  if (vendor === "trulite") return "Trulite";
+  if (vendor === "wurth") return "Würth";
   if (vendor === "other") return "Stow + 3rd party";
   return "Packaging slip";
 }
@@ -77,6 +79,7 @@ function shipmentTitle(ship: Shipment): string {
   if (isStudioList(ship.notice)) {
     return (ship.notice ?? "").replace(/^(STUDIO|DROP)-/, "");
   }
+  if (/^stock$/i.test((ship.notice ?? "").trim())) return "Stock";
   if (ship.notice && /^\d{6,}$/.test(ship.notice)) return ship.notice;
   if (ship.source_filename) return ship.source_filename.replace(/\.[^.]+$/, "");
   return "No job yet";
@@ -89,7 +92,7 @@ function shipmentMeta(ship: Shipment): string {
   if (
     notice &&
     !isStudioList(notice) &&
-    notice !== title &&
+    notice.toLowerCase() !== title.toLowerCase() &&
     isPlausibleJobLabel(notice) &&
     !/slatwall/i.test(notice)
   ) {

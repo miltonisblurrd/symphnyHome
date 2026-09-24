@@ -70,6 +70,8 @@ export function shipmentVendorLabel(input: {
   const file = input.source_filename ?? "";
   if (vendor === "hafele") return "Häfele";
   if (vendor === "richelieu") return "Richelieu";
+  if (vendor === "trulite") return "Trulite";
+  if (vendor === "wurth") return "Würth";
   if (/hardware\s*resources|\bhr[-_]/i.test(file)) return "Hardware Resources";
   if (vendor === "other") return "3rd party";
   return "Stow";

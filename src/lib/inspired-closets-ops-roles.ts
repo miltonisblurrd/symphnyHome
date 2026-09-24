@@ -77,7 +77,7 @@ export function normalizeOfficeLoginId(input: string): string {
  * Username "frank" matches email "frank@…" or name "Frank".
  */
 export function staffMatchesLoginId(
-  staff: { name: string; email?: string | null },
+  staff: { name: string; email?: string | null; workbook_tab?: string | null },
   loginId: string,
 ): boolean {
   const id = normalizeOfficeLoginId(loginId);
@@ -95,6 +95,10 @@ export function staffMatchesLoginId(
   // Single-token username against first name
   const first = name.split(/\s+/)[0] ?? "";
   if (first && first === id) return true;
+
+  const tab = (staff.workbook_tab ?? "").trim().toLowerCase();
+  const tabToken = tab.split(/\s+/)[0] ?? "";
+  if (tabToken && tabToken === id) return true;
 
   return false;
 }

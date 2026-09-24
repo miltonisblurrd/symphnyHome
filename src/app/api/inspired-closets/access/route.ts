@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseAdmin();
     const { data: staffRows, error } = await supabase
       .from("ic_staff")
-      .select("id, name, role, email, active, password_hash")
+      .select("id, name, role, email, workbook_tab, active, password_hash")
       .eq("active", true)
       .is("deleted_at", null)
       .neq("role", "installer");

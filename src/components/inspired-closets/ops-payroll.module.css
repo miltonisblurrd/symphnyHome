@@ -1696,6 +1696,59 @@ a.buttonGhost {
   color: inherit;
 }
 
+.starGrades {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.starGrades p {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.starRow {
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.starOn {
+  color: #c4a035;
+}
+
+.starOff {
+  color: #d9d3c7;
+}
+
+.starEmpty {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.logList {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.logList li {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.82rem;
+}
+
+.logList span {
+  color: var(--muted);
+}
+
 .installerMediaGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));

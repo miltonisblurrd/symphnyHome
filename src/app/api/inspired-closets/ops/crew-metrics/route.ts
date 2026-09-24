@@ -4,6 +4,8 @@ import {
   daysAgoIso,
   gradeInstallerJobs,
   gradeInstallerOverall,
+  gradeVehicleStars,
+  gradeWorkStars,
   summarizeJobsInputs,
   viewVehicleGrade,
 } from "@/lib/inspired-closets-ops-installer-grade";
@@ -45,8 +47,15 @@ type JobRow = {
   completed_date: string | null;
   client_id: string | null;
   notes: string | null;
+  field_notes?: string | null;
+  designer_notes?: string | null;
   job_kind: string | null;
   visit_window: string | null;
+  install_grade?: number | null;
+  install_grade_note?: string | null;
+  proposal_path?: string | null;
+  proposal_filename?: string | null;
+  proposal_url?: string | null;
 };
 
 type ClientRow = {
@@ -163,6 +172,10 @@ function buildInstaller(
   const jobDurations = [...minutesByJob.values()];
   const jobsGrade = buildJobsGrade(person.id, entries, issueRows, jobRows);
   const overall = gradeInstallerOverall(jobsGrade, vehicleGrade);
+  const stars = {
+    work: gradeWorkStars(theirJobs.map((job) => job.install_grade)),
+    vehicle: gradeVehicleStars(vehicleGrade.lights, vehicleGrade.overall !== "none"),
+  };
 
   return {
     id: person.id,
@@ -196,6 +209,7 @@ function buildInstaller(
       jobs: jobsGrade,
       vehicle: vehicleGrade,
     },
+    stars,
   };
 }
 
@@ -227,7 +241,7 @@ export async function GET(request: Request) {
   const mediaQuery = installerId
     ? supabase
         .from("ic_job_media")
-        .select("id, job_id, kind, public_url, caption, created_at")
+        .select("id, job_id, kind, storage_path, public_url, caption, mime_type, created_at")
         .eq("installer_id", installerId)
         .order("created_at", { ascending: false })
         .limit(80)
@@ -271,7 +285,7 @@ export async function GET(request: Request) {
     supabase
       .from("ic_jobs")
       .select(
-        "id, installer_id, stage, install_date, completed_date, client_id, notes, job_kind, visit_window",
+        "id, installer_id, stage, install_date, completed_date, client_id, notes, field_notes, designer_notes, job_kind, visit_window, install_grade, install_grade_note, proposal_path, proposal_filename, proposal_url",
       )
       .is("deleted_at", null)
       .limit(5000),
@@ -285,7 +299,29 @@ export async function GET(request: Request) {
       .eq("active", true),
   ]);
 
-  if (staffError || timeError || issuesError || jobsError || mediaError || apptError) {
+  let jobRows = (jobs ?? []) as JobRow[];
+  if (jobsError && /schema cache|column/i.test(jobsError.message)) {
+    const mid = await supabase
+      .from("ic_jobs")
+      .select(
+        "id, installer_id, stage, install_date, completed_date, client_id, notes, field_notes, job_kind, visit_window, install_grade, install_grade_note, proposal_path, proposal_filename, proposal_url",
+      )
+      .is("deleted_at", null)
+      .limit(5000);
+    if (!mid.error) {
+      jobRows = (mid.data ?? []) as JobRow[];
+    } else {
+      const fallback = await supabase
+        .from("ic_jobs")
+        .select("id, installer_id, stage, install_date, completed_date, client_id, notes, job_kind, visit_window")
+        .is("deleted_at", null)
+        .limit(5000);
+      if (fallback.error) {
+        return NextResponse.json({ ok: false, error: fallback.error.message }, { status: 500 });
+      }
+      jobRows = (fallback.data ?? []) as JobRow[];
+    }
+  } else if (staffError || timeError || issuesError || jobsError || mediaError || apptError) {
     return NextResponse.json(
       {
         ok: false,
@@ -305,7 +341,6 @@ export async function GET(request: Request) {
   const clientsById = new Map(((clients ?? []) as ClientRow[]).map((c) => [c.id, c]));
   const entries = (timeEntries ?? []) as TimeEntry[];
   const issueRows = (issues ?? []) as IssueRow[];
-  const jobRows = (jobs ?? []) as JobRow[];
   const staffRows = (staff ?? []) as StaffRow[];
 
   const trucksMissing =
@@ -385,11 +420,12 @@ export async function GET(request: Request) {
         row.issuesReported > 0,
     )
     .sort((a, b) => {
-      const rank = (status: string) =>
-        status === "due" ? 0 : status === "warn" ? 1 : status === "new" || status === "none" ? 3 : 2;
-      const byGrade = rank(a.grade.overall.overall) - rank(b.grade.overall.overall);
-      if (byGrade !== 0) return byGrade;
-      return Number(b.onSiteNow) - Number(a.onSiteNow) || b.totalMinutes - a.totalMinutes || a.name.localeCompare(b.name);
+      const rank = (stars: number | null) => (stars == null ? 6 : stars);
+      const byWork = rank(a.stars.work.stars) - rank(b.stars.work.stars);
+      if (byWork !== 0) return byWork;
+      const byTruck = rank(a.stars.vehicle.stars) - rank(b.stars.vehicle.stars);
+      if (byTruck !== 0) return byTruck;
+      return Number(b.onSiteNow) - Number(a.onSiteNow) || a.name.localeCompare(b.name);
     });
 
   function mapSession(entry: TimeEntry) {
@@ -471,6 +507,13 @@ export async function GET(request: Request) {
           jobKind: job.job_kind,
           visitWindow: job.visit_window,
           notes: job.notes,
+          fieldNotes: job.field_notes ?? null,
+          designerNotes: job.designer_notes ?? null,
+          installGrade: job.install_grade ?? null,
+          installGradeNote: job.install_grade_note ?? null,
+          proposalFilename: job.proposal_filename ?? null,
+          proposalPath: job.proposal_path ?? null,
+          proposalUrl: job.proposal_url ?? null,
         };
       })
       .sort((a, b) => {
@@ -482,26 +525,38 @@ export async function GET(request: Request) {
         );
       });
 
-    const media = ((mediaRows ?? []) as Array<{
-      id: string;
-      job_id: string;
-      kind: string;
-      public_url: string | null;
-      caption: string | null;
-      created_at: string;
-    }>).map((item) => {
-      const job = jobRows.find((j) => j.id === item.job_id);
-      const client = job ? clientFor(job, clientsById) : null;
-      return {
-        id: item.id,
-        jobId: item.job_id,
-        kind: item.kind,
-        publicUrl: item.public_url,
-        caption: item.caption,
-        createdAt: item.created_at,
-        clientName: client?.name ?? "Job",
-      };
-    });
+    const media = await Promise.all(
+      ((mediaRows ?? []) as Array<{
+        id: string;
+        job_id: string;
+        kind: string;
+        storage_path?: string | null;
+        public_url: string | null;
+        caption: string | null;
+        mime_type?: string | null;
+        created_at: string;
+      }>).map(async (item) => {
+        const job = jobRows.find((j) => j.id === item.job_id);
+        const client = job ? clientFor(job, clientsById) : null;
+        let publicUrl = item.public_url;
+        if (item.storage_path) {
+          const signed = await supabase.storage
+            .from("ic-field-media")
+            .createSignedUrl(item.storage_path, 60 * 60 * 12);
+          publicUrl = signed.data?.signedUrl ?? publicUrl;
+        }
+        return {
+          id: item.id,
+          jobId: item.job_id,
+          kind: item.kind,
+          publicUrl,
+          mimeType: item.mime_type ?? null,
+          caption: item.caption,
+          createdAt: item.created_at,
+          clientName: client?.name ?? "Job",
+        };
+      }),
+    );
 
     const upcoming = ((appointmentRows ?? []) as Array<{
       id: string;
@@ -537,19 +592,50 @@ export async function GET(request: Request) {
     ]);
 
     const truck = trucksByInstaller.get(installerId) ?? null;
+    const jobsWithProposal = await Promise.all(
+      jobsForFile.map(async (job) => {
+        let proposalUrl = job.proposalUrl;
+        if (job.proposalPath) {
+          const signed = await supabase.storage
+            .from("ic-field-media")
+            .createSignedUrl(job.proposalPath, 60 * 60 * 12);
+          proposalUrl = signed.data?.signedUrl ?? proposalUrl;
+        }
+        return { ...job, proposalUrl };
+      }),
+    );
+    const [{ data: notices }, { data: updates }] = await Promise.all([
+      supabase
+        .from("ic_field_notices")
+        .select("id, kind, title, body, read_at, created_at")
+        .eq("installer_id", installerId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase
+        .from("ic_company_updates")
+        .select("id, title, body, author_name, created_at")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(8),
+    ]);
+    const truckLogs = truck ? (logsByVehicle.get(truck.id) ?? []).slice(0, 24) : [];
     payload.installer = { ...installer, hasPassword: Boolean(access?.password_hash) };
     payload.sessions = entries.filter((e) => e.installer_id === installerId).map(mapSession);
     payload.issues = issueRows.filter((i) => i.installer_id === installerId).map(mapIssue);
-    payload.jobs = jobsForFile;
+    payload.jobs = jobsWithProposal;
     payload.media = media;
     payload.upcoming = upcoming;
     payload.timeOff = timeOff ?? [];
     payload.pay = pay ?? null;
+    payload.notices = notices ?? [];
+    payload.updates = updates ?? [];
     payload.vehicle = truck
       ? {
           id: truck.id,
           label: vehicleLabel(truck),
           grade: vehicleGrade,
+          logs: truckLogs,
+          weekMiles: milesByInstaller.get(installerId) ?? 0,
         }
       : null;
   }

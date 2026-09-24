@@ -267,6 +267,45 @@ export function viewVehicleGrade(
   };
 }
 
+export type StarGrade = {
+  stars: number | null;
+  detail: string;
+};
+
+/** Designer grades of 4 or 5 count as positive and pull the work stars up. */
+const POSITIVE_INSTALL_GRADE = 4;
+
+export function gradeWorkStars(grades: Array<number | null | undefined>): StarGrade {
+  const scored = grades.filter((grade): grade is number => typeof grade === "number" && grade >= 1 && grade <= 5);
+  if (scored.length === 0) {
+    return { stars: null, detail: "No designer grades yet" };
+  }
+  const positive = scored.filter((grade) => grade >= POSITIVE_INSTALL_GRADE).length;
+  const average = scored.reduce((sum, grade) => sum + grade, 0) / scored.length;
+  const stars = Math.min(5, Math.max(1, Math.round(average)));
+  return {
+    stars,
+    detail: `${positive} of ${scored.length} designer grades were 4 or 5`,
+  };
+}
+
+export function gradeVehicleStars(lights: GradeLight[], hasTruck: boolean): StarGrade {
+  if (!hasTruck || lights.length === 0) {
+    return { stars: null, detail: "No truck assigned" };
+  }
+  const score = lights.reduce((sum, light) => {
+    if (light.status === "ok") return sum + 1;
+    if (light.status === "warn") return sum + 0.5;
+    return sum;
+  }, 0);
+  const stars = Math.min(5, Math.max(1, Math.round((score / lights.length) * 5)));
+  const open = lights.filter((light) => light.status !== "ok");
+  return {
+    stars,
+    detail: open.length === 0 ? "Truck care is current" : open.map((light) => light.detail).join(" · "),
+  };
+}
+
 export function gradeInstallerOverall(
   jobs: InstallerJobsGrade,
   vehicle: InstallerVehicleGradeView,

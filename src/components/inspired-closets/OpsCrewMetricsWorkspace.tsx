@@ -8,7 +8,9 @@ import type {
   InstallerJobsGrade,
   InstallerOverallGrade,
   InstallerVehicleGradeView,
+  StarGrade,
 } from "@/lib/inspired-closets-ops-installer-grade";
+import { isImageMime } from "@/lib/inspired-closets-ops-media";
 import type { GradeLight, GradeStatus } from "@/lib/inspired-closets-ops-vehicles";
 import styles from "./ops-payroll.module.css";
 
@@ -43,6 +45,7 @@ type InstallerMetric = {
   openIssues: number;
   hasPassword?: boolean;
   grade: GradeBundle;
+  stars: { work: StarGrade; vehicle: StarGrade };
 };
 
 type SessionRow = {
@@ -77,12 +80,20 @@ type JobFileRow = {
   jobKind: string | null;
   visitWindow: string | null;
   notes: string | null;
+  fieldNotes?: string | null;
+  designerNotes?: string | null;
+  installGrade?: number | null;
+  installGradeNote?: string | null;
+  proposalFilename?: string | null;
+  proposalUrl?: string | null;
 };
 
 type MediaRow = {
   id: string;
   kind: string;
   publicUrl: string | null;
+  mimeType?: string | null;
+  jobId?: string;
   caption: string | null;
   createdAt: string;
   clientName: string;
@@ -125,7 +136,33 @@ type DetailFile = {
     id: string;
     label: string;
     grade: InstallerVehicleGradeView;
+    weekMiles?: number;
+    logs?: Array<{
+      id: string;
+      kind: string;
+      logged_at: string;
+      odometer: number | null;
+      gallons: number | null;
+      amount_cents: number | null;
+      clean_ok: boolean | null;
+      note: string | null;
+    }>;
   } | null;
+  notices: Array<{
+    id: string;
+    kind: string;
+    title: string;
+    body: string | null;
+    read_at: string | null;
+    created_at: string;
+  }>;
+  updates?: Array<{
+    id: string;
+    title: string;
+    body: string;
+    author_name: string | null;
+    created_at: string;
+  }>;
 };
 
 type ApiResponse = {
@@ -141,6 +178,8 @@ type ApiResponse = {
   timeOff?: DetailFile["timeOff"];
   pay?: DetailFile["pay"];
   vehicle?: DetailFile["vehicle"];
+  notices?: DetailFile["notices"];
+  updates?: DetailFile["updates"];
 };
 
 type DetailTab = "details" | "jobs" | "clocks" | "issues" | "photos" | "timeoff" | "access";
@@ -193,20 +232,30 @@ function gradeToneClass(status: GradeStatus | "new" | "none"): string {
   return styles.gradeOk;
 }
 
-function GradeChip({
-  label,
-  status,
-  prefix,
-}: {
-  label: string;
-  status: GradeStatus | "new" | "none";
-  prefix?: string;
-}) {
+function needsAttention(row: InstallerMetric): boolean {
+  const work = row.stars?.work.stars;
+  const vehicle = row.stars?.vehicle.stars;
+  return (work != null && work <= 2) || (vehicle != null && vehicle <= 2);
+}
+
+function Stars({ stars }: { stars: number | null }) {
+  if (stars == null) return <span className={styles.starEmpty}>No score yet</span>;
   return (
-    <span className={`${styles.gradeChip} ${gradeToneClass(status)}`}>
-      {prefix ? `${prefix} · ${label}` : label}
+    <span className={styles.starRow} aria-label={`${stars} of 5 stars`}>
+      <span className={styles.starOn}>{"★".repeat(stars)}</span>
+      <span className={styles.starOff}>{"★".repeat(5 - stars)}</span>
     </span>
   );
+}
+
+function logKindLabel(kind: string): string {
+  if (kind === "fuel") return "Gas";
+  if (kind === "wash") return "Wash";
+  if (kind === "clean_check") return "Cab check";
+  if (kind === "oil") return "Oil";
+  if (kind === "odometer") return "Miles";
+  if (kind === "service") return "Service";
+  return kind.replace(/_/g, " ");
 }
 
 function GradeLights({ lights }: { lights: GradeLight[] }) {
@@ -301,6 +350,8 @@ export default function OpsCrewMetricsWorkspace() {
         timeOff: payload.timeOff ?? [],
         pay: payload.pay ?? null,
         vehicle: payload.vehicle ?? null,
+        notices: payload.notices ?? [],
+        updates: payload.updates ?? [],
       });
     } catch (error) {
       setNotice({
@@ -352,12 +403,7 @@ export default function OpsCrewMetricsWorkspace() {
   const visibleInstallers = useMemo(() => {
     if (listFilter === "on_site") return installers.filter((row) => row.onSiteNow);
     if (listFilter === "needs_attention") {
-      return installers.filter(
-        (row) =>
-          row.grade.overall.overall === "due" ||
-          row.grade.jobs.overall === "due" ||
-          row.grade.vehicle.overall === "due",
-      );
+      return installers.filter((row) => needsAttention(row));
     }
     return installers;
   }, [installers, listFilter]);
@@ -365,12 +411,7 @@ export default function OpsCrewMetricsWorkspace() {
   const totalIssues = installers.reduce((sum, row) => sum + row.issuesReported, 0);
   const totalCompletions = installers.reduce((sum, row) => sum + row.completions, 0);
   const onSiteCount = installers.filter((row) => row.onSiteNow).length;
-  const needsAttentionCount = installers.filter(
-    (row) =>
-      row.grade.overall.overall === "due" ||
-      row.grade.jobs.overall === "due" ||
-      row.grade.vehicle.overall === "due",
-  ).length;
+  const needsAttentionCount = installers.filter((row) => needsAttention(row)).length;
 
   function closeFile() {
     setSelectedId(null);
@@ -541,10 +582,15 @@ export default function OpsCrewMetricsWorkspace() {
                 {person.onSiteNow ? <span className={styles.liveChip}>On site</span> : null}
               </h1>
               <p className={styles.leadContact}>{contact}</p>
-              <div className={styles.gradeChipRow}>
-                <GradeChip label={grade.overall.label} status={grade.overall.overall} prefix="Overall" />
-                <GradeChip label={grade.jobs.label} status={grade.jobs.overall} prefix="Jobs" />
-                <GradeChip label={vehicleGrade.label} status={vehicleGrade.overall} prefix="Vehicle" />
+              <div className={styles.starGrades}>
+                <p>
+                  <span>Work</span>
+                  <Stars stars={person.stars.work.stars} />
+                </p>
+                <p>
+                  <span>Vehicle</span>
+                  <Stars stars={person.stars.vehicle.stars} />
+                </p>
               </div>
             </div>
           </div>
@@ -582,20 +628,13 @@ export default function OpsCrewMetricsWorkspace() {
           <div className={styles.detailStack}>
             {detailTab === "details" ? (
               <>
-                <section className={styles.panel}>
-                  <p className={styles.railTitle}>Overall</p>
-                  <div className={styles.gradeChipRow}>
-                    <GradeChip label={grade.overall.label} status={grade.overall.overall} />
-                  </div>
-                  <p className={styles.gradeSummary}>{grade.overall.summary}</p>
-                </section>
-
                 <div className={styles.gradeTwoUp}>
                   <section className={styles.panel}>
                     <div className={styles.gradeCardHead}>
-                      <p className={styles.railTitle}>Jobs</p>
-                      <GradeChip label={grade.jobs.label} status={grade.jobs.overall} />
+                      <p className={styles.railTitle}>Work</p>
+                      <Stars stars={person.stars.work.stars} />
                     </div>
+                    <p className={styles.gradeSummary}>{person.stars.work.detail}</p>
                     <GradeLights lights={grade.jobs.lights} />
                     <button
                       type="button"
@@ -609,16 +648,92 @@ export default function OpsCrewMetricsWorkspace() {
                   <section className={styles.panel}>
                     <div className={styles.gradeCardHead}>
                       <p className={styles.railTitle}>Vehicle</p>
-                      <GradeChip label={vehicleGrade.label} status={vehicleGrade.overall} />
+                      <Stars stars={person.stars.vehicle.stars} />
                     </div>
+                    <p className={styles.gradeSummary}>{person.stars.vehicle.detail}</p>
                     {vehicleGrade.label_name ? (
                       <p className={styles.leadContact} style={{ marginBottom: "0.55rem" }}>
                         {vehicleGrade.label_name}
                       </p>
                     ) : null}
                     <GradeLights lights={vehicleGrade.lights} />
+                    {(detail.vehicle?.logs ?? []).length === 0 ? (
+                      <p className={styles.leadContact}>No gas, wash, cab, or oil logs yet.</p>
+                    ) : (
+                      <ul className={styles.logList}>
+                        {(detail.vehicle?.logs ?? []).map((log) => (
+                          <li key={log.id}>
+                            <strong>{logKindLabel(log.kind)}</strong>
+                            <span>
+                              {formatStamp(log.logged_at)}
+                              {log.odometer != null ? ` · ${log.odometer.toLocaleString()} mi` : ""}
+                              {log.gallons != null ? ` · ${log.gallons} gal` : ""}
+                              {log.clean_ok === false ? " · cab not ok" : ""}
+                              {log.note ? ` · ${log.note}` : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {detail.vehicle?.weekMiles ? (
+                      <p className={styles.leadContact}>{detail.vehicle.weekMiles} miles driven this week</p>
+                    ) : null}
                   </section>
                 </div>
+
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>Schedule</p>
+                  {detail.jobs.filter((job) => job.installDate).length === 0 ? (
+                    <p className={styles.leadContact}>No install dates on their jobs.</p>
+                  ) : (
+                    detail.jobs
+                      .filter((job) => job.installDate)
+                      .slice()
+                      .sort((a, b) => (a.installDate ?? "").localeCompare(b.installDate ?? ""))
+                      .filter((job) => (job.installDate ?? "") >= new Date().toISOString().slice(0, 10))
+                      .concat(
+                        detail.jobs
+                          .filter((job) => job.installDate && (job.installDate ?? "") < new Date().toISOString().slice(0, 10))
+                          .slice()
+                          .sort((a, b) => (b.installDate ?? "").localeCompare(a.installDate ?? "")),
+                      )
+                      .slice(0, 8)
+                      .map((job) => (
+                        <p key={job.id} className={styles.leadContact}>
+                          <strong>{job.clientName}</strong>
+                          {" · "}
+                          {formatDay(job.installDate)}
+                          {job.visitWindow ? ` · ${job.visitWindow}` : ""}
+                          {" · "}
+                          {stageLabel(job.stage)}
+                        </p>
+                      ))
+                  )}
+                </section>
+
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>Notices on their Today screen</p>
+                  {(detail.updates ?? []).length === 0 && (detail.notices ?? []).length === 0 ? (
+                    <p className={styles.leadContact}>No company updates or personal notices.</p>
+                  ) : (
+                    <>
+                      {(detail.updates ?? []).map((item) => (
+                        <p key={item.id} className={styles.leadContact}>
+                          <strong>{item.title}</strong>
+                          {" · "}
+                          {item.body}
+                        </p>
+                      ))}
+                      {(detail.notices ?? []).map((item) => (
+                        <p key={item.id} className={styles.leadContact}>
+                          <strong>{item.title}</strong>
+                          {item.body ? ` · ${item.body}` : ""}
+                          {item.read_at ? "" : " · unread"}
+                        </p>
+                      ))}
+                    </>
+                  )}
+                </section>
 
                 <section className={styles.panel}>
                   <p className={styles.railTitle}>Last 30 days</p>
@@ -690,36 +805,47 @@ export default function OpsCrewMetricsWorkspace() {
             ) : null}
 
             {detailTab === "jobs" ? (
-              <div className={styles.panel}>
+              <div className={styles.detailStack}>
                 {detail.jobs.length === 0 ? (
-                  <p className={styles.empty}>No jobs assigned or timed for this installer yet.</p>
+                  <div className={styles.panel}>
+                    <p className={styles.empty}>No jobs assigned or timed for this installer yet.</p>
+                  </div>
                 ) : (
-                  <table className={styles.table} style={{ minWidth: "42rem" }}>
-                    <thead>
-                      <tr>
-                        <th>Client</th>
-                        <th>Address</th>
-                        <th>Stage</th>
-                        <th>Kind</th>
-                        <th>Install</th>
-                        <th>Window</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.jobs.map((job) => (
-                        <tr key={job.id}>
-                          <td>
-                            <strong>{job.clientName}</strong>
-                          </td>
-                          <td className={styles.notesCell}>{job.address ?? "—"}</td>
-                          <td>{stageLabel(job.stage)}</td>
-                          <td>{jobKindLabel(job.jobKind)}</td>
-                          <td>{formatDay(job.installDate ?? job.completedDate)}</td>
-                          <td>{job.visitWindow ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  detail.jobs.map((job) => (
+                    <section key={job.id} className={styles.panel}>
+                      <div className={styles.gradeCardHead}>
+                        <p className={styles.railTitle}>{job.clientName}</p>
+                        {job.installGrade ? <Stars stars={job.installGrade} /> : <span className={styles.starEmpty}>Not graded</span>}
+                      </div>
+                      <p className={styles.leadContact}>
+                        {stageLabel(job.stage)} · {jobKindLabel(job.jobKind)} · Install {formatDay(job.installDate ?? job.completedDate)}
+                        {job.visitWindow ? ` · ${job.visitWindow}` : ""}
+                        {job.address ? ` · ${job.address}` : ""}
+                      </p>
+                      {job.installGradeNote ? <p className={styles.leadContact}>Designer note on the grade: {job.installGradeNote}</p> : null}
+                      <p className={styles.leadContact}>
+                        <strong>Designer notes. </strong>
+                        {job.designerNotes || "None yet."}
+                      </p>
+                      <p className={styles.leadContact}>
+                        <strong>Field notes. </strong>
+                        {job.fieldNotes || "None yet."}
+                      </p>
+                      <p className={styles.leadContact}>
+                        <strong>Office notes. </strong>
+                        {job.notes || "None."}
+                      </p>
+                      {job.proposalUrl ? (
+                        <p className={styles.leadContact}>
+                          <a href={job.proposalUrl} target="_blank" rel="noreferrer">
+                            Open design PDF{job.proposalFilename ? ` · ${job.proposalFilename}` : ""}
+                          </a>
+                        </p>
+                      ) : (
+                        <p className={styles.leadContact}>No proposal on this job yet.</p>
+                      )}
+                    </section>
+                  ))
                 )}
               </div>
             ) : null}
@@ -795,28 +921,44 @@ export default function OpsCrewMetricsWorkspace() {
             ) : null}
 
             {detailTab === "photos" ? (
-              <div className={styles.panel}>
+              <div className={styles.detailStack}>
                 {detail.media.length === 0 ? (
-                  <p className={styles.empty}>No photos from this installer yet.</p>
-                ) : (
-                  <div className={styles.installerMediaGrid}>
-                    {detail.media.map((item) => (
-                      <figure key={item.id} className={styles.installerMediaCard}>
-                        {item.publicUrl ? (
-                          <a href={item.publicUrl} target="_blank" rel="noreferrer">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={item.publicUrl} alt={item.caption || item.kind} />
-                          </a>
-                        ) : (
-                          <div className={styles.installerMediaMissing}>No preview</div>
-                        )}
-                        <figcaption>
-                          {mediaLabel(item.kind)} · {item.clientName}
-                          {item.caption ? ` · ${item.caption}` : ""}
-                        </figcaption>
-                      </figure>
-                    ))}
+                  <div className={styles.panel}>
+                    <p className={styles.empty}>No photos from this installer yet.</p>
                   </div>
+                ) : (
+                  [...new Map(detail.media.map((item) => [item.jobId ?? item.clientName, item.clientName])).entries()].map(
+                    ([jobKey, clientName]) => {
+                      const items = detail.media.filter((item) => (item.jobId ?? item.clientName) === jobKey);
+                      return (
+                        <section key={String(jobKey)} className={styles.panel}>
+                          <p className={styles.railTitle}>{clientName}</p>
+                          <div className={styles.installerMediaGrid}>
+                            {items.map((item) => (
+                              <figure key={item.id} className={styles.installerMediaCard}>
+                                {item.publicUrl && isImageMime(item.mimeType) ? (
+                                  <a href={item.publicUrl} target="_blank" rel="noreferrer">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={item.publicUrl} alt={item.caption || item.kind} />
+                                  </a>
+                                ) : item.publicUrl ? (
+                                  <a className={styles.installerMediaMissing} href={item.publicUrl} target="_blank" rel="noreferrer">
+                                    Open paperwork
+                                  </a>
+                                ) : (
+                                  <div className={styles.installerMediaMissing}>No preview</div>
+                                )}
+                                <figcaption>
+                                  {mediaLabel(item.kind)}
+                                  {item.caption ? ` · ${item.caption}` : ""}
+                                </figcaption>
+                              </figure>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    },
+                  )
                 )}
               </div>
             ) : null}
@@ -1016,7 +1158,7 @@ export default function OpsCrewMetricsWorkspace() {
   return (
     <OpsShell
       title="Install Workers"
-      subtitle="Grades for jobs and trucks — open a card when something needs a closer look."
+      subtitle="Work stars from designer grades, and a separate grade for the truck."
     >
       {notice ? (
         <p className={`${styles.notice} ${notice.kind === "error" ? styles.noticeError : ""}`}>
@@ -1151,9 +1293,7 @@ export default function OpsCrewMetricsWorkspace() {
             <button
               key={row.id}
               type="button"
-              className={`${styles.rosterCard} ${
-                row.grade.overall.overall === "due" ? styles.rosterCardAlert : ""
-              }`}
+              className={`${styles.rosterCard} ${needsAttention(row) ? styles.rosterCardAlert : ""}`}
               onClick={() => openInstaller(row.id)}
             >
               <div className={styles.rosterCardTop}>
@@ -1163,18 +1303,15 @@ export default function OpsCrewMetricsWorkspace() {
                   {row.onSiteNow ? <span className={styles.liveChip}>On site</span> : null}
                 </div>
               </div>
-              <div className={styles.gradeChipRow}>
-                <GradeChip
-                  label={row.grade.overall.label}
-                  status={row.grade.overall.overall}
-                  prefix="Overall"
-                />
-                <GradeChip label={row.grade.jobs.label} status={row.grade.jobs.overall} prefix="Jobs" />
-                <GradeChip
-                  label={row.grade.vehicle.label}
-                  status={row.grade.vehicle.overall}
-                  prefix="Vehicle"
-                />
+              <div className={styles.starGrades}>
+                <p>
+                  <span>Work</span>
+                  <Stars stars={row.stars?.work.stars ?? null} />
+                </p>
+                <p>
+                  <span>Vehicle</span>
+                  <Stars stars={row.stars?.vehicle.stars ?? null} />
+                </p>
               </div>
               <div className={styles.rosterStats}>
                 <span>

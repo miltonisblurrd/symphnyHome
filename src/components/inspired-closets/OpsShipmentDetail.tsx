@@ -65,6 +65,7 @@ type Stats = {
 
 type Claim = {
   id: string;
+  item_id: string | null;
   claim_type: string;
   description: string;
   damaged_qty: number;
@@ -98,6 +99,8 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
   const [manual, setManual] = useState({ item_number: "", description: "", qty: "1", cust_ref: "" });
   const [relinking, setRelinking] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [claimItemId, setClaimItemId] = useState<string | null>(null);
+  const [claimBusy, setClaimBusy] = useState(false);
   const [editDraft, setEditDraft] = useState({ item_number: "", qty: "", cust_ref: "", description: "" });
 
   const load = useCallback(async () => {
@@ -166,6 +169,27 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
     const payload = (await response.json()) as { ok: boolean; error?: string };
     if (!payload.ok) throw new Error(payload.error ?? "Update failed.");
     await load();
+  }
+
+  async function fileClaim(item: Item, form: HTMLFormElement) {
+    const data = new FormData(form);
+    data.set("shipment_id", shipmentId);
+    data.set("item_id", item.id);
+    const label = item.job_name || item.cust_ref || "";
+    data.set("description", `${label} ${item.item_number} ${item.description ?? ""}`.trim());
+    setClaimBusy(true);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/receiving/claims", { method: "POST", body: data });
+      const payload = (await response.json()) as { ok: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not save the claim.");
+      setClaimItemId(null);
+      setNotice("Claim saved. Submit it from Claims once it's filed with the vendor.");
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save the claim.");
+    } finally {
+      setClaimBusy(false);
+    }
   }
 
   async function addManual(event: React.FormEvent) {
@@ -552,6 +576,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                 </li>
               ))}
             </ul>
+            <Link href="/inspired-closets/ops/inventory/receiving/claims">All claims →</Link>
           </section>
         ) : null}
 
@@ -685,9 +710,59 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                       >
                         {item.needs_credit ? "Credit filed" : "Credit later"}
                       </button>
+                      {item.status === "missing" || item.status === "damaged" || item.needs_credit ? (
+                        claims.some((claim) => claim.item_id === item.id) ? (
+                          <span className={styles.lineMeta}>Claim filed</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={payroll.buttonGhost}
+                            onClick={() => setClaimItemId(claimItemId === item.id ? null : item.id)}
+                          >
+                            File claim
+                          </button>
+                        )
+                      ) : null}
                     </>
                   ) : null}
                 </span>
+                {claimItemId === item.id ? (
+                  <form
+                    style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void fileClaim(item, event.currentTarget);
+                    }}
+                  >
+                    <select
+                      name="claim_type"
+                      className={payroll.input}
+                      style={{ width: "auto" }}
+                      defaultValue={item.status === "missing" ? "MISSING" : "DAMAGED"}
+                    >
+                      <option value="DAMAGED">Damaged</option>
+                      <option value="MISSING">Missing</option>
+                      <option value="DEFECTIVE">Defective</option>
+                      <option value="WRONG">Wrong item</option>
+                    </select>
+                    <input
+                      name="qty"
+                      type="number"
+                      min={1}
+                      className={payroll.input}
+                      style={{ width: "5rem" }}
+                      defaultValue={Math.max(1, item.qty - item.received_qty || item.damaged_qty || 1)}
+                      aria-label="Quantity"
+                    />
+                    <input name="photos" type="file" accept="image/*" multiple aria-label="Up to 5 photos" />
+                    <button type="submit" className={payroll.buttonPrimary} disabled={claimBusy}>
+                      {claimBusy ? "Saving…" : "Save claim"}
+                    </button>
+                    <button type="button" className={payroll.buttonGhost} onClick={() => setClaimItemId(null)}>
+                      Cancel
+                    </button>
+                  </form>
+                ) : null}
               </div>
             );
           })}

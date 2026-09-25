@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import OpsReadinessBanner from "@/components/inspired-closets/OpsReadinessBanner";
 import OpsWeekCalendar, {
   type WeekCalEvent,
 } from "@/components/inspired-closets/OpsWeekCalendar";
@@ -816,6 +817,7 @@ export default function OpsScheduleWorkspace({
           {notice.text}
         </p>
       ) : null}
+      <OpsReadinessBanner />
 
       <div className={styles.listToolbar}>
         <nav className={styles.tabs} aria-label="Calendar views">

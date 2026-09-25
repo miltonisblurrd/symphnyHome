@@ -109,6 +109,9 @@ export default function OpsDesignersWorkspace() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
   const [media, setMedia] = useState<MediaRow[]>([]);
+  const [portalPassword, setPortalPassword] = useState("");
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalNote, setPortalNote] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -153,6 +156,32 @@ export default function OpsDesignersWorkspace() {
   useEffect(() => {
     if (selectedId) void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
+
+  useEffect(() => {
+    setPortalPassword("");
+    setPortalNote(null);
+  }, [selectedId]);
+
+  async function savePortalPassword(id: string) {
+    setPortalBusy(true);
+    setPortalNote(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/designers/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, password: portalPassword }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string; username?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not set password.");
+      setPortalPassword("");
+      setPortalNote(`Saved. They sign in at the designer portal with “${payload.username}” and this password.`);
+      await loadList();
+    } catch (error) {
+      setPortalNote(error instanceof Error ? error.message : "Could not set password.");
+    } finally {
+      setPortalBusy(false);
+    }
+  }
 
   const person = designers.find((row) => row.id === selectedId) ?? null;
   const openLeadCount = designers.reduce((sum, row) => sum + row.openLeads, 0);
@@ -236,6 +265,37 @@ export default function OpsDesignersWorkspace() {
                   <span className={styles.fieldLabel}>Portal login</span>
                   <p className={styles.readValue}>{person.hasPassword ? "Password is set" : "No password yet"}</p>
                 </label>
+                <form
+                  className={styles.field}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void savePortalPassword(person.id);
+                  }}
+                >
+                  <span className={styles.fieldLabel}>
+                    {person.hasPassword ? "Reset password" : "Set password"} · signs in as “
+                    {(person.name.trim().split(/\s+/)[0] ?? person.name).toLowerCase()}”
+                  </span>
+                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                    <input
+                      className={styles.input}
+                      type="text"
+                      autoComplete="off"
+                      minLength={6}
+                      value={portalPassword}
+                      onChange={(event) => setPortalPassword(event.target.value)}
+                      placeholder="At least 6 characters"
+                    />
+                    <button
+                      type="submit"
+                      className={styles.buttonPrimary}
+                      disabled={portalBusy || portalPassword.length < 6}
+                    >
+                      {portalBusy ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  {portalNote ? <p className={styles.leadContact}>{portalNote}</p> : null}
+                </form>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>Open leads</span>
                   <p className={styles.readValue}>{person.openLeads}</p>

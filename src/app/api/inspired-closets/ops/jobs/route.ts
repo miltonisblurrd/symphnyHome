@@ -92,7 +92,7 @@ export async function GET(request: Request) {
     jobsQuery = jobsQuery.eq("ready_to_order", true);
   }
 
-  let [jobsResult, staffResult, clientsWithMerge] = await Promise.all([
+  const [firstJobsResult, staffResult, clientsWithMerge] = await Promise.all([
     jobsQuery,
     supabase
       .from("ic_staff")
@@ -107,6 +107,7 @@ export async function GET(request: Request) {
       .limit(3000),
   ]);
 
+  let jobsResult = firstJobsResult;
   if (jobsResult.error && /archived_at|ready_to_order|column|schema cache/i.test(jobsResult.error.message)) {
     let fallback = supabase
       .from("ic_jobs")

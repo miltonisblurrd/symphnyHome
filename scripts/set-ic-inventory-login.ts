@@ -1,10 +1,12 @@
 /**
- * Upsert Frank as inventory staff with an office login password.
+ * Upsert a warehouse person (Frank, Bryant) as inventory staff with an office login.
+ * Inventory staff only see Inventory + Receiving; scans are recorded under their name.
  *
  * Usage:
- *   npx tsx scripts/set-ic-frank-login.ts [password] [email-or-username]
+ *   npx tsx scripts/set-ic-inventory-login.ts [name] [password] [username]
  *
- * Defaults: password FrankTemp26, email frank
+ * Defaults: name Frank, password <Name>Temp26, username = lowercase first name
+ *   npx tsx scripts/set-ic-inventory-login.ts Bryant   → bryant / BryantTemp26
  */
 import path from "node:path";
 import { loadDotEnv } from "./content-engine/load-env";
@@ -18,9 +20,10 @@ async function main() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 
-  const password = process.argv[2] || "FrankTemp26";
-  const email = (process.argv[3] || "frank").trim().toLowerCase();
-  const name = "Frank";
+  const name = (process.argv[2] || "Frank").trim();
+  const firstName = name.split(/\s+/)[0] ?? name;
+  const password = process.argv[3] || `${firstName}Temp26`;
+  const email = (process.argv[4] || firstName).trim().toLowerCase();
   const hash = await hashPassword(password);
 
   const headers = {
@@ -44,9 +47,15 @@ async function main() {
   }>;
 
   const existing =
-    rows.find((row) => row.name.trim().toLowerCase() === "frank") ??
+    rows.find((row) => row.name.trim().toLowerCase() === name.toLowerCase()) ??
     rows.find((row) => (row.email ?? "").trim().toLowerCase() === email) ??
     null;
+
+  if (existing && existing.role !== "inventory" && existing.role !== "admin") {
+    throw new Error(
+      `${existing.name} already exists as ${existing.role}. Refusing to change their role — pick a different name.`,
+    );
+  }
 
   let staffId: string;
   if (existing) {

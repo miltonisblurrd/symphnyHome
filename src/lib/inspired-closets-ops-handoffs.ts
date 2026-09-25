@@ -139,3 +139,28 @@ export async function notifyConsultComplete(input: {
     /* Slack optional */
   }
 }
+
+export async function notifyFieldIssue(input: {
+  clientName: string;
+  installerName: string;
+  issueType: string;
+  issueLabel: string;
+  description: string;
+}): Promise<void> {
+  const installer = input.installerName.trim() || "Installer";
+  const assignees = input.issueType === "missing_part" ? ["Frank", "Bryant"] : ["Des", "Craig"];
+  for (const assignee of assignees) {
+    try {
+      await postInspiredClosetsSlackNotification({
+        assignee,
+        title: `${input.issueLabel} — ${input.clientName}`,
+        severity: "warning",
+        todoLabel: `${installer} reported this from the job`,
+        notifyMessage: input.description,
+        requestedBy: installer,
+      });
+    } catch {
+      /* Slack optional */
+    }
+  }
+}

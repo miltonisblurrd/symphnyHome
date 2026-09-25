@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { requireFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
+import { ISSUE_TYPES } from "@/lib/inspired-closets-ops-field";
+import { notifyFieldIssue } from "@/lib/inspired-closets-ops-handoffs";
 
 export const runtime = "nodejs";
 
@@ -83,6 +85,22 @@ export async function POST(request: Request) {
     action: "reported",
     actor_id: installerId,
     changes: { job_id: jobId, issue_type: issueType },
+  });
+
+  const { data: job } = await supabase
+    .from("ic_jobs")
+    .select("title, client_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  const { data: client } = job?.client_id
+    ? await supabase.from("ic_clients").select("name").eq("id", job.client_id).maybeSingle()
+    : { data: null };
+  await notifyFieldIssue({
+    clientName: client?.name ?? job?.title ?? "Job",
+    installerName: auth.installer.name,
+    issueType,
+    issueLabel: ISSUE_TYPES.find((type) => type.id === issueType)?.label ?? "Issue",
+    description,
   });
 
   return NextResponse.json({ ok: true, issue: data });

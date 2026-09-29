@@ -29,6 +29,7 @@ export async function GET() {
       .eq("designer_id", designer.id)
       .is("deleted_at", null)
       .neq("status", "cancelled")
+      .gte("scheduled_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
       .order("scheduled_at", { ascending: true })
       .limit(80),
     supabase.from("ic_clients").select("id, name, phone, address").is("deleted_at", null).limit(3000),

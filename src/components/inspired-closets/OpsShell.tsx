@@ -50,6 +50,10 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/inspired-closets/ops/finance", label: "Billing", icon: "◆" },
     ],
   },
+  {
+    label: "Growth",
+    items: [{ href: "/inspired-closets/ops/ads", label: "Meta Ads", icon: "◐" }],
+  },
 ];
 
 function readCookie(name: string): string | null {

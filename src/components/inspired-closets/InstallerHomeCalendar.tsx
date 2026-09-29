@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { eachDateInclusive } from "@/lib/inspired-closets-field-dates";
-import { ymdFromIso } from "@/lib/inspired-closets-ops-calendar";
+import { eachDateInclusive, installDateSpan } from "@/lib/inspired-closets-field-dates";
 import styles from "./field.module.css";
 
 type CalJob = {
   id: string;
   install_date: string | null;
+  estimated_install_days?: number | null;
   visit_window?: string | null;
   client: { name: string } | null;
 };
@@ -64,12 +64,11 @@ export default function InstallerHomeCalendar({
   const jobsByDate = useMemo(() => {
     const map = new Map<string, CalJob[]>();
     for (const job of jobs) {
-      if (!job.install_date) continue;
-      const key = ymdFromIso(job.install_date);
-      if (!key) continue;
-      const list = map.get(key) ?? [];
-      list.push(job);
-      map.set(key, list);
+      for (const key of installDateSpan(job.install_date, job.estimated_install_days)) {
+        const list = map.get(key) ?? [];
+        list.push(job);
+        map.set(key, list);
+      }
     }
     return map;
   }, [jobs]);
@@ -211,9 +210,10 @@ export default function InstallerHomeCalendar({
           <ul className={styles.calMonthJobs}>
             {jobs
               .filter((job) => {
-                if (!job.install_date) return false;
-                const key = ymdFromIso(job.install_date);
-                return key.startsWith(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+                const prefix = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+                return installDateSpan(job.install_date, job.estimated_install_days).some((day) =>
+                  day.startsWith(prefix),
+                );
               })
               .sort((a, b) => (a.install_date ?? "").localeCompare(b.install_date ?? ""))
               .map((job) => (

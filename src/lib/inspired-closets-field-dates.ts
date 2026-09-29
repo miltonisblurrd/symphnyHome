@@ -20,6 +20,22 @@ export function installerOffOn(
   );
 }
 
+/** Consecutive install days starting on install_date. One day when the count is blank. */
+export function installDateSpan(
+  installDate: string | null | undefined,
+  estimatedDays: number | null | undefined,
+): string[] {
+  const start = installDate?.slice(0, 10) ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return [];
+  const days = Math.min(21, Math.max(1, Math.round(Number(estimatedDays) || 1)));
+  const end = new Date(`${start}T12:00:00`);
+  end.setDate(end.getDate() + days - 1);
+  const y = end.getFullYear();
+  const m = String(end.getMonth() + 1).padStart(2, "0");
+  const d = String(end.getDate()).padStart(2, "0");
+  return eachDateInclusive(start, `${y}-${m}-${d}`);
+}
+
 export function eachDateInclusive(start: string, end: string): string[] {
   const out: string[] = [];
   const cur = new Date(`${start}T12:00:00`);

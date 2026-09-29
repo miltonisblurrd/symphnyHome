@@ -13,6 +13,7 @@ import FieldVehicleCard from "@/components/inspired-closets/FieldVehicleCard";
 import FieldVehicleTab, {
   type FieldVehicleSnapshot,
 } from "@/components/inspired-closets/FieldVehicleTab";
+import { installDateSpan } from "@/lib/inspired-closets-field-dates";
 import access from "@/app/inspired-closets/access/access.module.css";
 import styles from "./field.module.css";
 
@@ -87,6 +88,7 @@ type Job = {
   id: string;
   stage: string;
   install_date: string | null;
+  estimated_install_days?: number | null;
   visit_window?: string | null;
   job_kind?: string | null;
   field_notes?: string | null;
@@ -378,10 +380,15 @@ function isCompletedStage(stage: string) {
   return ["install_complete", "final_payment", "closed"].includes(stage);
 }
 
-function isPastJob(job: { stage: string; install_date?: string | null }) {
+function isPastJob(job: {
+  stage: string;
+  install_date?: string | null;
+  estimated_install_days?: number | null;
+}) {
   if (isCompletedStage(job.stage)) return true;
-  const day = job.install_date?.slice(0, 10);
-  return Boolean(day && day < localYmd());
+  const span = installDateSpan(job.install_date, job.estimated_install_days);
+  const end = span[span.length - 1];
+  return Boolean(end && end < localYmd());
 }
 
 function Avatar({

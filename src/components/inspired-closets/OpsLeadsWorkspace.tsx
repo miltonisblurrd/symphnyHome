@@ -175,6 +175,32 @@ function formatListDate(value: string | null | undefined): string {
   });
 }
 
+function leadSearchHaystack(lead: Lead): string {
+  return [
+    lead.client?.name,
+    lead.first_name,
+    lead.last_name,
+    lead.client?.phone,
+    lead.client?.email,
+    lead.client?.address,
+    formatLeadAddress(lead),
+    lead.community_name,
+    lead.designer?.name,
+    lead.owner?.name,
+    lead.lead_owner_name,
+    lead.account?.name,
+    lead.source,
+    sourceLabel(lead.source),
+    lead.stage,
+    stageLabel(lead.stage),
+    lead.form_type,
+    lead.notes,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function formatRelative(value: string): string {
   const ms = Date.now() - new Date(value).getTime();
   const hours = Math.floor(ms / 3_600_000);
@@ -250,12 +276,17 @@ export default function OpsLeadsWorkspace() {
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [importing, setImporting] = useState(false);
   const [listView, setListView] = useState<"all" | "confirm">("all");
+  const [query, setQuery] = useState("");
   const importFileRef = useRef<HTMLInputElement>(null);
   const confirmCount = useMemo(() => leads.filter((l) => (l.pendingMatches ?? 0) > 0).length, [leads]);
-  const visibleLeads = useMemo(
-    () => (listView === "confirm" ? leads.filter((l) => (l.pendingMatches ?? 0) > 0) : leads),
-    [leads, listView],
-  );
+  const visibleLeads = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return leads.filter((lead) => {
+      if (listView === "confirm" && (lead.pendingMatches ?? 0) === 0) return false;
+      if (!q) return true;
+      return leadSearchHaystack(lead).includes(q);
+    });
+  }, [leads, listView, query]);
 
   const designers = useMemo(
     () => staff.filter((s) => s.role === "designer" || s.role === "front_office" || s.role === "owner"),
@@ -2042,6 +2073,13 @@ export default function OpsLeadsWorkspace() {
             Needs confirmation ({confirmCount})
           </button>
         </nav>
+        <input
+          className={`${styles.input} ${styles.toolbarSearch}`}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find a lead, phone, staff member, source…"
+          aria-label="Find a lead"
+        />
         <div className={styles.toolbarRight}>
           <p className={styles.updatedStamp}>
             {listUpdatedAt
@@ -2306,7 +2344,11 @@ export default function OpsLeadsWorkspace() {
           <p className={styles.empty}>Loading leads…</p>
         ) : visibleLeads.length === 0 ? (
           <p className={styles.empty}>
-            {listView === "confirm" ? "Nothing needs confirmation." : "No leads yet."}
+            {query.trim()
+              ? "No leads match that search."
+              : listView === "confirm"
+                ? "Nothing needs confirmation."
+                : "No leads yet."}
           </p>
         ) : (
           <table className={styles.table} style={{ minWidth: "52rem" }}>

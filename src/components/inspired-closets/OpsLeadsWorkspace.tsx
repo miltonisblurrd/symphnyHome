@@ -27,6 +27,7 @@ import {
 } from "@/lib/inspired-closets-ops-accounts";
 import type { AddressParts } from "@/lib/inspired-closets-google-places";
 import { CONSULT_OUTCOMES, type IcConsultOutcome } from "@/lib/inspired-closets-ops-appointments";
+import OpsLeadMatchReview from "./OpsLeadMatchReview";
 import styles from "./ops-payroll.module.css";
 
 type Staff = { id: string; name: string; role: string; active: boolean };
@@ -73,6 +74,9 @@ type Lead = {
   created_at: string;
   updated_at: string;
   followUpNeeded?: boolean;
+  pendingMatches?: number;
+  data_flags?: string[] | null;
+  lead_owner_name?: string | null;
   client: Client | null;
   account: IcAccount | null;
   owner: Staff | null;
@@ -245,7 +249,13 @@ export default function OpsLeadsWorkspace() {
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [listUpdatedAt, setListUpdatedAt] = useState<Date | null>(null);
   const [importing, setImporting] = useState(false);
+  const [listView, setListView] = useState<"all" | "confirm">("all");
   const importFileRef = useRef<HTMLInputElement>(null);
+  const confirmCount = useMemo(() => leads.filter((l) => (l.pendingMatches ?? 0) > 0).length, [leads]);
+  const visibleLeads = useMemo(
+    () => (listView === "confirm" ? leads.filter((l) => (l.pendingMatches ?? 0) > 0) : leads),
+    [leads, listView],
+  );
 
   const designers = useMemo(
     () => staff.filter((s) => s.role === "designer" || s.role === "front_office" || s.role === "owner"),
@@ -939,6 +949,22 @@ export default function OpsLeadsWorkspace() {
           ))}
         </div>
 
+        <OpsLeadMatchReview
+          leadId={detail.id}
+          onResolved={() => {
+            void loadDetail(detail.id);
+            void loadList({ silent: true });
+          }}
+        />
+        {detail.data_flags?.includes("missing_contact") ? (
+          <p className={styles.notice}>
+            <span className={styles.mergeBadge} style={{ marginLeft: 0, marginRight: "0.45rem" }}>
+              Missing phone/email — from calendar
+            </span>
+            This lead was created from the designers&apos; calendar. Add the phone and email from Community.
+          </p>
+        ) : null}
+
         <div className={styles.leadLayout}>
           <div className={styles.panel}>
             {detailTab === "details" ? (
@@ -1030,7 +1056,10 @@ export default function OpsLeadsWorkspace() {
                   </label>
 
                   <label className={styles.field}>
-                    <span className={styles.fieldLabel}>Designer</span>
+                    <span className={styles.fieldLabel}>
+                      Staff member
+                      {detail.lead_owner_name ? ` (Community: ${detail.lead_owner_name})` : ""}
+                    </span>
                     <select
                       className={styles.input}
                       value={draft.designer_id ?? ""}
@@ -1998,8 +2027,19 @@ export default function OpsLeadsWorkspace() {
 
       <div className={styles.listToolbar}>
         <nav className={styles.tabs} aria-label="Lead views">
-          <button type="button" className={`${styles.tab} ${styles.tabActive}`}>
+          <button
+            type="button"
+            className={`${styles.tab} ${listView === "all" ? styles.tabActive : ""}`}
+            onClick={() => setListView("all")}
+          >
             All
+          </button>
+          <button
+            type="button"
+            className={`${styles.tab} ${listView === "confirm" ? styles.tabActive : ""}`}
+            onClick={() => setListView("confirm")}
+          >
+            Needs confirmation ({confirmCount})
           </button>
         </nav>
         <div className={styles.toolbarRight}>
@@ -2264,8 +2304,10 @@ export default function OpsLeadsWorkspace() {
       <div className={styles.panel}>
         {loading ? (
           <p className={styles.empty}>Loading leads…</p>
-        ) : leads.length === 0 ? (
-          <p className={styles.empty}>No leads yet.</p>
+        ) : visibleLeads.length === 0 ? (
+          <p className={styles.empty}>
+            {listView === "confirm" ? "Nothing needs confirmation." : "No leads yet."}
+          </p>
         ) : (
           <table className={styles.table} style={{ minWidth: "52rem" }}>
             <thead>
@@ -2277,13 +2319,13 @@ export default function OpsLeadsWorkspace() {
                 <th>Status</th>
                 <th>Form Type</th>
                 <th>Source</th>
-                <th>Designer</th>
+                <th>Staff member</th>
                 <th>Created Date</th>
                 <th>Last Modified</th>
               </tr>
             </thead>
             <tbody>
-              {leads.map((lead) => (
+              {visibleLeads.map((lead) => (
                 <tr
                   key={lead.id}
                   className={`${styles.leadRow} ${lead.followUpNeeded ? styles.rowHeld : ""}`}
@@ -2294,6 +2336,12 @@ export default function OpsLeadsWorkspace() {
                 >
                   <td>
                     <strong>{lead.client?.name ?? "—"}</strong>
+                    {(lead.pendingMatches ?? 0) > 0 ? (
+                      <span className={styles.mergeBadge}>Needs confirmation</span>
+                    ) : null}
+                    {lead.data_flags?.includes("missing_contact") ? (
+                      <span className={styles.mergeBadge}>Missing phone/email</span>
+                    ) : null}
                   </td>
                   <td>{lead.client?.phone ?? "—"}</td>
                   <td>{lead.zip ?? "—"}</td>

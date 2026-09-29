@@ -36,6 +36,7 @@ type Client = {
 
 type Job = {
   id: string;
+  import_batch?: string | null;
   client_id: string | null;
   lead_id?: string | null;
   designer_id: string | null;
@@ -111,7 +112,10 @@ const STATUS_TABS = [
   { id: "completed", label: "Completed" },
   { id: "paid_10", label: "10% paid" },
   { id: "paid_50", label: "50% paid" },
+  { id: "sheet_update", label: "Changed by sheet 9/28" },
 ] as const;
+
+const SHEET_UPDATE_BATCH = "2026-09-28-cleanup";
 
 const PAGE_SIZES = [50, 100, 200] as const;
 
@@ -126,6 +130,7 @@ function jobPassesStatus(job: Job, status: StatusFilter): boolean {
   if (status === "not_complete") return !isCompletedStage(job.stage);
   if (status === "paid_50") return isFiftyPercentPaid(job);
   if (status === "paid_10") return isTenPercentPaid(job);
+  if (status === "sheet_update") return job.import_batch === SHEET_UPDATE_BATCH;
   return true;
 }
 

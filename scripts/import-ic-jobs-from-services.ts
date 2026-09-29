@@ -7,9 +7,10 @@ import {
   clientIdentityKey,
   jobDescriptorFromName,
 } from "../src/lib/inspired-closets-ops-clients";
+import { resolveStaffAlias } from "../src/lib/inspired-closets-ops-staff-aliases";
 
 const ROOT = path.resolve(__dirname, "..");
-const DOCS = path.join(ROOT, "docs");
+const DOCS = process.env.IC_SERVICES_DIR || path.join(ROOT, "docs");
 
 const FILES = {
   sold: "SERVICES COPY REVISED 12-15(ALL SOLD JOBS 2026 ).csv",
@@ -650,6 +651,8 @@ export function buildDrafts(): BuildResult {
       trackingNew += 1;
     }
 
+    // Tracking rows on an install are service/punch visits; the install date comes from the tabs.
+    const hasTabDates = d.kind === "new_install" && d.sources.some((source) => source !== "tracking");
     d.sources.push("tracking");
     d.designerHint = cell(row, 3) || d.designerHint;
     const days = Number(cell(row, 4));
@@ -659,8 +662,12 @@ export function buildDrafts(): BuildResult {
     if (cell(row, 7)) pushNote(d.notes, "Payment type", cell(row, 7));
     if (cell(row, 8)) pushNote(d.notes, "Payment", cell(row, 8));
     const visit = parseDate(dateRaw);
-    d.installDate = takeNewer(d.installDate, visit);
-    if (dateRaw && !visit) pushNote(d.notes, "Visit", dateRaw);
+    if (hasTabDates && d.installDate) {
+      if (dateRaw && visit !== d.installDate) pushNote(d.notes, "Visit", dateRaw);
+    } else {
+      d.installDate = takeNewer(d.installDate, visit);
+      if (dateRaw && !visit) pushNote(d.notes, "Visit", dateRaw);
+    }
     applyCrew(d, installer);
   }
 
@@ -693,6 +700,8 @@ export function buildDrafts(): BuildResult {
 function matchStaff(hint: string | null, staff: Array<{ id: string; name: string }>): string | null {
   const first = firstName(hint);
   if (!first) return null;
+  const aliased = resolveStaffAlias(first, staff);
+  if (aliased) return aliased;
   const hits = staff.filter((member) => member.name.trim().split(/\s+/)[0].toUpperCase() === first);
   return hits.length === 1 ? hits[0].id : null;
 }

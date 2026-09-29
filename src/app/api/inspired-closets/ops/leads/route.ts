@@ -282,6 +282,18 @@ export async function GET(request: Request) {
     if (a.lead_id && !apptByLead.has(a.lead_id)) apptByLead.set(a.lead_id, a);
   }
 
+  const pendingMatches = new Map<string, number>();
+  const matchesResult = await supabase
+    .from("ic_lead_match_candidates")
+    .select("lead_id")
+    .eq("status", "pending")
+    .limit(5000);
+  if (!matchesResult.error) {
+    for (const row of matchesResult.data ?? []) {
+      pendingMatches.set(row.lead_id, (pendingMatches.get(row.lead_id) ?? 0) + 1);
+    }
+  }
+
   const terminal = new Set([
     "junk",
     "duplicate",
@@ -307,11 +319,14 @@ export async function GET(request: Request) {
       designer: lead.designer_id ? staffById.get(lead.designer_id) ?? null : null,
       appointment,
       followUpNeeded,
+      pendingMatches: pendingMatches.get(lead.id) ?? 0,
       attemptsRemaining: Math.max(0, MAX_FOLLOW_UP_ATTEMPTS - (lead.contact_attempts ?? 0)),
     };
   });
 
-  if (view === "needs") {
+  if (view === "confirm") {
+    leads = leads.filter((l) => l.pendingMatches > 0);
+  } else if (view === "needs") {
     leads = leads.filter((l) => l.followUpNeeded && !terminal.has(l.stage));
   } else if (view === "unscheduled") {
     leads = leads.filter(

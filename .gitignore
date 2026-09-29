@@ -48,3 +48,6 @@ next-env.d.ts
 
 # Installer vehicle / license / insurance scans (PII — do not commit)
 /vheicleStuff/
+
+# local data work (customer data)
+/.tmp

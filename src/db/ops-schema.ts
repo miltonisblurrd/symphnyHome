@@ -144,6 +144,13 @@ export const icLeadSourceEnum = pgEnum("ic_lead_source", [
   "facebook",
   "email",
   "other",
+  "pinterest",
+  "showroom_walk_in",
+  "self_generated",
+  "web",
+  "online",
+  "paid_instagram_ads",
+  "google_business_profile",
 ]);
 
 export const icLeadStageEnum = pgEnum("ic_lead_stage", [
@@ -262,12 +269,33 @@ export const icLeads = pgTable("ic_leads", {
   pipelineSourceLabel: text("pipeline_source_label"),
   convertedJobId: uuid("converted_job_id"),
   riskFlag: boolean("risk_flag").notNull().default(false),
+  /** Data-quality tags, e.g. "missing_contact" for leads created from the calendar. */
+  dataFlags: text("data_flags").array().notNull().default([]),
+  importBatch: text("import_batch"),
   notes: text("notes"),
   createdBy: uuid("created_by").references(() => icStaff.id),
   updatedBy: uuid("updated_by").references(() => icStaff.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/** Partial lead ↔ job/client/lead match that needs a human Link / Keep separate. */
+export const icLeadMatchCandidates = pgTable("ic_lead_match_candidates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leadId: uuid("lead_id")
+    .notNull()
+    .references(() => icLeads.id, { onDelete: "cascade" }),
+  targetType: text("target_type").notNull(),
+  targetId: uuid("target_id").notNull(),
+  matchedFields: jsonb("matched_fields").$type<Record<string, string>>().notNull().default({}),
+  mismatchedFields: jsonb("mismatched_fields").$type<Record<string, string>>().notNull().default({}),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  resolvedBy: uuid("resolved_by").references(() => icStaff.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /** Chatter posts / notes on a lead (Community Chatter equivalent). */

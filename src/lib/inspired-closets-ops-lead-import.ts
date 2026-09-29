@@ -12,6 +12,7 @@ import {
   type IcLeadSourceId,
   type IcLeadStageId,
 } from "@/lib/inspired-closets-ops-leads";
+import { resolveStaffAlias } from "@/lib/inspired-closets-ops-staff-aliases";
 
 export type ImportedLeadRow = {
   first_name: string;
@@ -216,6 +217,7 @@ function mapSource(raw: string): IcLeadSourceId {
   if (byId) return byId.id;
   const byLabel = LEAD_SOURCES.find((s) => normalizeHeader(s.label) === n);
   if (byLabel) return byLabel.id;
+  if (n.includes("paid_instagram")) return "paid_instagram_ads";
   if (n.includes("instagram")) return "instagram";
   if (n.includes("facebook") || n === "meta") return "facebook";
   if (n.includes("yelp")) return "yelp";
@@ -224,17 +226,13 @@ function mapSource(raw: string): IcLeadSourceId {
   if (n.includes("chatgpt") || n.includes("chat_gpt")) return "chatgpt";
   if (n.includes("organic")) return "organic_search";
   if (n.includes("paid_search") || n === "ppc" || n === "ads") return "paid_search";
-  if (n.includes("website") || n === "web" || n === "online") return "website";
+  if (n.includes("pinterest")) return "pinterest";
+  if (n.includes("showroom") || n.includes("walk_in")) return "showroom_walk_in";
+  if (n.includes("self_gen")) return "self_generated";
+  if (n.includes("google_business")) return "google_business_profile";
+  if (n.includes("website")) return "website";
   if (n.includes("google")) return "google";
-  if (
-    n.includes("pinterest") ||
-    n.includes("direct_mail") ||
-    n.includes("showroom") ||
-    n.includes("walk_in") ||
-    n.includes("self_gen")
-  ) {
-    return "other";
-  }
+  if (n.includes("direct_mail")) return "other";
   if (n.includes("referral") && (n.includes("co") || n.includes("company"))) return "referral_company";
   if (n.includes("referral")) return "referral_personal";
   if (n.includes("phone") || n === "call" || n.includes("inbound")) return "call";
@@ -410,9 +408,9 @@ export function matchStaffId(
   staff: Array<{ id: string; name: string }>,
 ): string | null {
   if (!name?.trim()) return null;
+  const aliased = resolveStaffAlias(name, staff);
+  if (aliased) return aliased;
   const key = staffKey(name);
-  const exact = staff.find((person) => staffKey(person.name) === key);
-  if (exact) return exact.id;
   const parts = key.split(" ");
   const last = parts[parts.length - 1] ?? "";
   const first = parts[0] ?? "";

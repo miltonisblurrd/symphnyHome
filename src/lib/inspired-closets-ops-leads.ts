@@ -15,6 +15,13 @@ export const LEAD_SOURCES = [
   { id: "referral_company", label: "Referral – Company" },
   { id: "referral_personal", label: "Referral – Personal" },
   { id: "chatgpt", label: "ChatGPT" },
+  { id: "pinterest", label: "Pinterest" },
+  { id: "showroom_walk_in", label: "Showroom Walk-In" },
+  { id: "self_generated", label: "Self-Generated" },
+  { id: "web", label: "Web" },
+  { id: "online", label: "Online" },
+  { id: "paid_instagram_ads", label: "Paid Instagram Ads" },
+  { id: "google_business_profile", label: "Google Business Profile" },
   { id: "other", label: "Other" },
 ] as const;
 

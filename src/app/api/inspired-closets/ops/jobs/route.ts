@@ -443,7 +443,7 @@ export async function PATCH(request: Request) {
       jobId: id,
       kind: "rto_ready",
       title: `${client?.name ?? "Job"} is ready to order`,
-      body: "Job check is done. Upload the project summary PDF.",
+      body: "Job check is done. Upload the product summary PDF.",
       severity: "info",
     });
   }

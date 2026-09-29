@@ -916,6 +916,24 @@ export const icJobSummaries = pgTable("ic_job_summaries", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Studio install report uploaded in Receiving. The PDF lives on the job file. */
+export const icInstallReports = pgTable("ic_install_reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id").references(() => icJobs.id, { onDelete: "set null" }),
+  orderName: text("order_name"),
+  soNumber: text("so_number"),
+  shipDate: date("ship_date"),
+  itemCount: integer("item_count").notNull().default(0),
+  sourceFilename: text("source_filename"),
+  storagePath: text("storage_path"),
+  publicUrl: text("public_url"),
+  status: text("status").notNull().default("unmatched"),
+  parseQuality: jsonb("parse_quality"),
+  createdBy: uuid("created_by").references(() => icStaff.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const icJobSummaryLines = pgTable("ic_job_summary_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
   summaryId: uuid("summary_id")

@@ -499,7 +499,7 @@ export async function attachJobProductSummary(input: {
     .eq("id", input.summaryId)
     .select("*")
     .single();
-  if (error || !data) throw new Error(error?.message ?? "Could not attach project summary.");
+  if (error || !data) throw new Error(error?.message ?? "Could not attach product summary.");
 
   const { data: lineRows } = await supabase
     .from("ic_job_summary_lines")

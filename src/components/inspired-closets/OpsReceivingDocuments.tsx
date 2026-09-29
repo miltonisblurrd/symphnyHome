@@ -5,7 +5,7 @@ import Link from "next/link";
 import { formatMoney, formatShipDate } from "@/lib/inspired-closets-ops-shipment-display";
 import payroll from "./ops-payroll.module.css";
 
-type DocKind = "stow_sales_order" | "packing_slip" | "product_summary";
+type DocKind = "stow_sales_order" | "packing_slip" | "product_summary" | "install_report";
 
 type Doc = {
   id: string;
@@ -49,7 +49,8 @@ function whenLabel(value: string | null | undefined): string {
 function kindLabel(kind: DocKind): string {
   if (kind === "stow_sales_order") return "Sales order";
   if (kind === "packing_slip") return "Packaging slip";
-  return "Project summary";
+  if (kind === "install_report") return "Install report";
+  return "Product summary";
 }
 
 function statusLabel(kind: DocKind, status: string): string {
@@ -65,6 +66,10 @@ function statusLabel(kind: DocKind, status: string): string {
     if (status === "parsing") return "Reading";
     return "Ready to scan";
   }
+  if (kind === "install_report") {
+    if (status === "attached") return "On a job";
+    if (status === "unmatched") return "Needs a job";
+  }
   if (status === "confirmed") return "Confirmed";
   if (status === "review") return "Needs confirm";
   if (status === "unmatched") return "Needs a job";
@@ -79,7 +84,9 @@ function sourceLabel(kind: DocKind): string {
 function needsJob(doc: Doc): boolean {
   return (
     !doc.jobId &&
-    (doc.kind === "stow_sales_order" || doc.kind === "product_summary") &&
+    (doc.kind === "stow_sales_order" ||
+      doc.kind === "product_summary" ||
+      doc.kind === "install_report") &&
     doc.status !== "ignored"
   );
 }
@@ -143,6 +150,7 @@ export default function OpsReceivingDocuments({
       stow_sales_order: documents.filter((doc) => doc.kind === "stow_sales_order").length,
       packing_slip: documents.filter((doc) => doc.kind === "packing_slip").length,
       product_summary: documents.filter((doc) => doc.kind === "product_summary").length,
+      install_report: documents.filter((doc) => doc.kind === "install_report").length,
     }),
     [documents],
   );
@@ -210,7 +218,7 @@ export default function OpsReceivingDocuments({
         body: JSON.stringify({ id: summaryId, job_id: jobId }),
       });
       const payload = (await response.json()) as { ok?: boolean; error?: string };
-      if (!payload.ok) throw new Error(payload.error ?? "Could not attach project summary.");
+      if (!payload.ok) throw new Error(payload.error ?? "Could not attach product summary.");
       const jobName = jobs.find((job) => job.id === jobId)?.client?.name ?? null;
       setDocuments((rows) =>
         rows.map((row) =>
@@ -226,7 +234,39 @@ export default function OpsReceivingDocuments({
         ),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not attach project summary.");
+      setError(err instanceof Error ? err.message : "Could not attach product summary.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function attachInstallReport(reportId: string, jobId = attach[reportId]) {
+    if (!jobId) return;
+    setBusyId(reportId);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/receiving/install-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: reportId, job_id: jobId }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Could not attach install report.");
+      const jobName = jobs.find((job) => job.id === jobId)?.client?.name ?? null;
+      setDocuments((rows) =>
+        rows.map((row) =>
+          row.kind === "install_report" && row.id === reportId
+            ? {
+                ...row,
+                status: "attached",
+                jobId,
+                jobName,
+                href: `/inspired-closets/ops/projects?id=${jobId}`,
+              }
+            : row,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not attach install report.");
     } finally {
       setBusyId(null);
     }
@@ -236,7 +276,8 @@ export default function OpsReceivingDocuments({
     ["all", "All", counts.all],
     ["stow_sales_order", "Sales orders", counts.stow_sales_order],
     ["packing_slip", "Packaging slips", counts.packing_slip],
-    ["product_summary", "Project summaries", counts.product_summary],
+    ["product_summary", "Product summaries", counts.product_summary],
+    ["install_report", "Install reports", counts.install_report],
   ] as const;
 
   return (
@@ -272,7 +313,10 @@ export default function OpsReceivingDocuments({
           <span className={payroll.summaryStrong}>{counts.packing_slip}</span> packaging slips
         </span>
         <span>
-          <span className={payroll.summaryStrong}>{counts.product_summary}</span> project summaries
+          <span className={payroll.summaryStrong}>{counts.product_summary}</span> product summaries
+        </span>
+        <span>
+          <span className={payroll.summaryStrong}>{counts.install_report}</span> install reports
         </span>
       </div>
 
@@ -285,7 +329,7 @@ export default function OpsReceivingDocuments({
           <p className={payroll.empty}>
             {query.trim() || kind !== "all"
               ? "No documents match that search."
-              : "Nothing in yet. Sales orders land from Gmail. Frank uploads packaging slips and project summaries with the buttons above."}
+              : "Nothing in yet. Sales orders land from Gmail. Frank uploads packaging slips, product summaries, and install reports with the buttons above."}
           </p>
         ) : (
           <table className={`${payroll.table} ${payroll.docsTable}`}>
@@ -355,7 +399,9 @@ export default function OpsReceivingDocuments({
                           if (!jobId) return;
                           void (doc.kind === "product_summary"
                             ? attachSummary(doc.id, jobId)
-                            : attachSalesOrder(doc.id, jobId));
+                            : doc.kind === "install_report"
+                              ? attachInstallReport(doc.id, jobId)
+                              : attachSalesOrder(doc.id, jobId));
                         }}
                       >
                         <option value="">

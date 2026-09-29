@@ -369,7 +369,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           error:
-            "Choose Upload packaging slip or Upload project summary. Those are different files.",
+            "Choose Upload packaging slip, Upload Product Summary, or Upload install report. Those are different files.",
         },
         { status: 400 },
       );

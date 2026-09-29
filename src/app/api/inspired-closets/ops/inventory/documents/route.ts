@@ -6,6 +6,7 @@ import {
   shipmentIdentity,
   shipmentVendorLabel,
 } from "@/lib/inspired-closets-ops-shipment-display";
+import { missingInstallReportTable } from "@/lib/inspired-closets-ops-install-report";
 import { missingStowSalesOrderTable } from "@/lib/inspired-closets-ops-stow-sales-order";
 
 function missingSummaryTable(message: string): boolean {
@@ -14,7 +15,11 @@ function missingSummaryTable(message: string): boolean {
 
 export const runtime = "nodejs";
 
-export type InventoryDocumentKind = "stow_sales_order" | "packing_slip" | "product_summary";
+export type InventoryDocumentKind =
+  | "stow_sales_order"
+  | "packing_slip"
+  | "product_summary"
+  | "install_report";
 
 export type InventoryDocument = {
   id: string;
@@ -85,7 +90,7 @@ export async function GET() {
   const supabase = getSupabaseAdmin();
   const documents: InventoryDocument[] = [];
 
-  const [stowResult, summaryResult, slipResult] = await Promise.all([
+  const [stowResult, summaryResult, slipResult, reportResult] = await Promise.all([
     supabase
       .from("ic_stow_sales_orders")
       .select(
@@ -106,6 +111,13 @@ export async function GET() {
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(80),
+    supabase
+      .from("ic_install_reports")
+      .select(
+        "id, job_id, so_number, order_name, source_filename, public_url, status, item_count, ship_date, created_at",
+      )
+      .order("created_at", { ascending: false })
+      .limit(80),
   ]);
 
   if (stowResult.error && !missingStowSalesOrderTable(stowResult.error.message)) {
@@ -116,6 +128,9 @@ export async function GET() {
   }
   if (slipResult.error && !missingReceivingTable(slipResult.error.message)) {
     return NextResponse.json({ ok: false, error: slipResult.error.message }, { status: 500 });
+  }
+  if (reportResult.error && !missingInstallReportTable(reportResult.error.message)) {
+    return NextResponse.json({ ok: false, error: reportResult.error.message }, { status: 500 });
   }
 
   const slips = slipResult.error ? [] : (slipResult.data ?? []);
@@ -148,6 +163,7 @@ export async function GET() {
   const names = await jobNamesById(supabase, [
     ...(stowResult.error ? [] : (stowResult.data ?? []).map((row) => row.job_id)),
     ...(summaryResult.error ? [] : (summaryResult.data ?? []).map((row) => row.job_id)),
+    ...(reportResult.error ? [] : (reportResult.data ?? []).map((row) => row.job_id)),
     ...[...slipMeta.values()].map((row) => row.jobId),
     ...slips.map((row) => {
       const quality =
@@ -212,6 +228,32 @@ export async function GET() {
     }
   }
 
+  if (!reportResult.error) {
+    for (const row of reportResult.data ?? []) {
+      documents.push({
+        id: row.id,
+        kind: "install_report",
+        title: row.order_name || row.source_filename || "Install report",
+        filename: row.source_filename ?? null,
+        soNumber: row.so_number ?? null,
+        poNumber: null,
+        jobId: row.job_id ?? null,
+        jobName: row.job_id ? names.get(row.job_id) ?? null : null,
+        status: row.status ?? "unmatched",
+        itemCount: row.item_count > 0 ? row.item_count : null,
+        shipDate: row.ship_date ?? null,
+        orderTotal: null,
+        weightLbs: null,
+        vendor: "Studio",
+        createdAt: row.created_at,
+        publicUrl: row.public_url ?? null,
+        href: row.job_id
+          ? `/inspired-closets/ops/projects?id=${row.job_id}`
+          : row.public_url || "/inspired-closets/ops/inventory",
+      });
+    }
+  }
+
   for (const row of slips) {
     const meta = slipMeta.get(row.id);
     const quality = qualityRecord(row.parse_quality);
@@ -256,6 +298,7 @@ export async function GET() {
     stow_sales_order: documents.filter((row) => row.kind === "stow_sales_order").length,
     packing_slip: documents.filter((row) => row.kind === "packing_slip").length,
     product_summary: documents.filter((row) => row.kind === "product_summary").length,
+    install_report: documents.filter((row) => row.kind === "install_report").length,
   };
 
   return NextResponse.json({ ok: true, documents, counts });

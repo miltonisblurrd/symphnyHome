@@ -123,11 +123,12 @@ export default function OpsReceivingWorkspace() {
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [uploading, setUploading] = useState<"slip" | "summary" | false>(false);
+  const [uploading, setUploading] = useState<"slip" | "summary" | "install" | false>(false);
   const [docsTick, setDocsTick] = useState(0);
   const [lastTruck, setLastTruck] = useState("");
   const slipRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
+  const installRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -162,6 +163,30 @@ export default function OpsReceivingWorkspace() {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  async function uploadInstallReport(file: File) {
+    setUploading("install");
+    setNotice(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/inspired-closets/ops/receiving/install-reports", {
+        method: "POST",
+        body: form,
+      });
+      const payload = (await response.json()) as { ok: boolean; error?: string; message?: string };
+      if (!payload.ok) throw new Error(payload.error ?? "Upload failed.");
+      setNotice({ kind: "info", text: payload.message ?? "Install report saved." });
+      setDocsTick((n) => n + 1);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Upload failed.",
+      });
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function uploadFile(file: File, kind: "packing_list" | "studio_order") {
     setUploading(kind === "studio_order" ? "summary" : "slip");
     setNotice(null);
@@ -186,10 +211,10 @@ export default function OpsReceivingWorkspace() {
         text:
           payload.message ??
           (kind === "studio_order"
-            ? `Project summary: ${payload.imported ?? 0} lines saved.`
+            ? `Product summary: ${payload.imported ?? 0} lines saved.`
             : `Packing slip: ${payload.imported ?? 0} lines saved.`),
       });
-      await load();
+      if (kind === "packing_list") await load();
       setDocsTick((n) => n + 1);
     } catch (error) {
       setNotice({
@@ -213,7 +238,7 @@ export default function OpsReceivingWorkspace() {
   return (
     <OpsShell
       title="Receiving"
-      subtitle="Packaging slips for Bryant to scan. Project summaries go to their own tab. Sales orders come from Gmail."
+      subtitle="Packaging slips are the scan cards. Product summaries and install reports stay in the document list. Sales orders come from Gmail."
       actions={
         <>
           <input
@@ -238,6 +263,17 @@ export default function OpsReceivingWorkspace() {
               if (file) void uploadFile(file, "studio_order");
             }}
           />
+          <input
+            ref={installRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadInstallReport(file);
+            }}
+          />
           <button
             type="button"
             className={payroll.buttonPrimary}
@@ -252,7 +288,15 @@ export default function OpsReceivingWorkspace() {
             disabled={Boolean(uploading)}
             onClick={() => summaryRef.current?.click()}
           >
-            {uploading === "summary" ? "Reading summary…" : "Upload project summary"}
+            {uploading === "summary" ? "Reading summary…" : "Upload Product Summary"}
+          </button>
+          <button
+            type="button"
+            className={payroll.buttonPrimary}
+            disabled={Boolean(uploading)}
+            onClick={() => installRef.current?.click()}
+          >
+            {uploading === "install" ? "Saving report…" : "Upload install report"}
           </button>
         </>
       }

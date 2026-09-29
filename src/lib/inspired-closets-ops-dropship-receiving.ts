@@ -3,6 +3,8 @@
  * Receiving so Bryant can scan it. A packing-list line for the same SKU wins.
  */
 import { getSupabaseAdmin } from "@/db/client";
+import { extractPdfText } from "@/lib/inspired-closets-ops-pdf-text";
+import { productSummaryUploadError } from "@/lib/inspired-closets-ops-install-report";
 import {
   codesMatch,
   findJobFromFilename,
@@ -404,9 +406,19 @@ export async function ingestStudioOrderFromReceiving(input: {
     upsert: false,
   });
   if (uploadError) {
-    throw new Error(`Could not store the project summary: ${uploadError.message}`);
+    throw new Error(`Could not store the product summary: ${uploadError.message}`);
   }
   const publicUrl = supabase.storage.from("ic-field-media").getPublicUrl(path).data.publicUrl;
+  try {
+    const extracted = await extractPdfText(input.bytes);
+    const wrong = productSummaryUploadError(extracted.text);
+    if (wrong) {
+      await supabase.storage.from("ic-field-media").remove([path]);
+      throw new Error(wrong);
+    }
+  } catch (error) {
+    if (error instanceof Error && /install report/i.test(error.message)) throw error;
+  }
 
   let parsed: ParsedProductSummary;
   try {
@@ -459,7 +471,7 @@ export async function ingestStudioOrderFromReceiving(input: {
   const orderLabel = parsed.order_name ?? parsed.so_number ?? input.filename;
   const matchNote = jobId
     ? `Attached to the job from ${input.filename}. ${copied} vendor lines are on Receiving.`
-    : `No job matched ${input.filename} yet. It is on the Project summaries tab.`;
+    : `No job matched ${input.filename} yet. It is on the Product summaries tab.`;
 
   return {
     kind: "studio_order",
@@ -468,7 +480,7 @@ export async function ingestStudioOrderFromReceiving(input: {
     job_id: jobId,
     summary_id: String(saved.summary.id),
     imported: lineCount,
-    message: `Project summary ${orderLabel}: ${lineCount} lines read. ${matchNote}`,
+    message: `Product summary ${orderLabel}: ${lineCount} lines read. ${matchNote}`,
   };
 }
 

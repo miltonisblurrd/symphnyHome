@@ -19,6 +19,7 @@ import {
 } from "@/lib/inspired-closets-ops-tiers";
 import { sourceLabel as leadSourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
 import { isImageMime, type JobPhoto } from "@/lib/inspired-closets-ops-media";
+import OpsInstallReports from "@/components/inspired-closets/OpsInstallReports";
 import OpsJobReceivingFiles from "@/components/inspired-closets/OpsJobReceivingFiles";
 import OpsProductSummary from "@/components/inspired-closets/OpsProductSummary";
 import OpsStowSalesOrder from "@/components/inspired-closets/OpsStowSalesOrder";
@@ -878,6 +879,7 @@ export default function OpsProjectFile({
         <OpsStowSalesOrder jobId={job.id} />
         <OpsJobReceivingFiles jobId={job.id} />
         <OpsProductSummary jobId={job.id} onChanged={onMaterialsChanged} />
+        <OpsInstallReports jobId={job.id} />
         <p className={`${styles.fieldLabel} ${styles.fileSubhead}`}>
           Materials on this project ·{" "}
           <span className={styles.summaryStrong}>{cents(materialsTotal)}</span>

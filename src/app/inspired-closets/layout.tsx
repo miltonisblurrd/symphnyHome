@@ -9,9 +9,20 @@ const lato = Lato({
 
 export const metadata: Metadata = {
   title: "Gavin Executive Dashboard · Inspired Closets",
-  description:
-    "Symphony prototype for Inspired Closets Las Vegas — executive visibility into jobs, money, and risk.",
+  description: "Sign in to Inspired Closets.",
   robots: { index: false, follow: false },
+  openGraph: {
+    title: "Inspired Closets login",
+    description: "Sign in to Inspired Closets.",
+    siteName: "Inspired Closets",
+    images: [{ url: "/inspired-closets/opengraph-image", width: 1200, height: 630, alt: "Inspired Closets login" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Inspired Closets login",
+    description: "Sign in to Inspired Closets.",
+    images: ["/inspired-closets/opengraph-image"],
+  },
   icons: {
     icon: [{ url: "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png", type: "image/png" }],
     apple: "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png",

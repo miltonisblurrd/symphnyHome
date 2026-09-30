@@ -2,7 +2,20 @@ import type { Viewport } from "next";
 import FieldApp from "@/components/inspired-closets/FieldApp";
 
 export const metadata = {
-  title: "Inspired Closets OS · Installers",
+  title: { absolute: "Inspired Closets login" },
+  description: "Sign in to Inspired Closets.",
+  openGraph: {
+    title: "Inspired Closets login",
+    description: "Sign in to Inspired Closets.",
+    siteName: "Inspired Closets",
+    images: [{ url: "/inspired-closets/opengraph-image", width: 1200, height: 630, alt: "Inspired Closets login" }],
+  },
+  twitter: {
+    card: "summary_large_image" as const,
+    title: "Inspired Closets login",
+    description: "Sign in to Inspired Closets.",
+    images: ["/inspired-closets/opengraph-image"],
+  },
 };
 
 export const viewport: Viewport = {

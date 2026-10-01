@@ -1755,10 +1755,23 @@
   .packetLayout {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
   }
 
   .packetBriefCol {
     display: contents;
+  }
+
+  #packet-brief,
+  #packet-proposal,
+  #packet-notes,
+  .packetOpsCard,
+  .packetDocCol {
+    width: 100%;
+    max-width: 100%;
+    align-self: stretch;
+    justify-self: stretch;
+    box-sizing: border-box;
   }
 
   .packetDocCol {

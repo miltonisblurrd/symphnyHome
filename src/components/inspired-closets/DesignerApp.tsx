@@ -19,6 +19,33 @@ const NAV: { id: DesignerTab; label: string }[] = [
   { id: "jobs", label: "Jobs" },
 ];
 
+type DesignerPlace = { tab: DesignerTab; jobId: string | null };
+
+function designerHref(tab: DesignerTab, jobId: string | null) {
+  const path = `${window.location.pathname}${window.location.search}`;
+  if (jobId) return `${path}#job/${encodeURIComponent(jobId)}`;
+  if (tab === "today") return `${path}#home`;
+  return `${path}#${tab}`;
+}
+
+function historyState(extra: Record<string, unknown>) {
+  const prev = { ...((window.history.state ?? {}) as Record<string, unknown>) };
+  delete prev.icDesigner;
+  delete prev.icDesignerBumper;
+  return { ...prev, ...extra };
+}
+
+function parseDesignerHash(hash: string): DesignerPlace | null {
+  const raw = hash.replace(/^#/, "");
+  if (raw.startsWith("job/")) {
+    const jobId = decodeURIComponent(raw.slice(4));
+    return jobId ? { tab: "jobs", jobId } : null;
+  }
+  if (raw === "home" || raw === "today") return { tab: "today", jobId: null };
+  if (raw === "schedule" || raw === "leads" || raw === "jobs") return { tab: raw, jobId: null };
+  return null;
+}
+
 const DESIGN_STAGES = new Set([
   "lead",
   "consultation",
@@ -292,6 +319,8 @@ export default function DesignerApp() {
   const openJobIdRef = useRef<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const proposalInputRef = useRef<HTMLInputElement | null>(null);
+  const applyingHistory = useRef(false);
+  const openJobRef = useRef<(id: string, opts?: { recordHistory?: boolean }) => Promise<void>>(async () => {});
 
   const loadHome = useCallback(async () => {
     const response = await fetch("/api/inspired-closets/designers/home");
@@ -358,6 +387,47 @@ export default function DesignerApp() {
       window.removeEventListener("focus", pull);
     };
   }, [designer, loadHome, refreshOpenJob]);
+
+  useEffect(() => {
+    if (!designer) return;
+    const fromHash = parseDesignerHash(window.location.hash);
+    const initial: DesignerPlace = fromHash ?? { tab: "today", jobId: null };
+    const hasAppEntry = Boolean(
+      (window.history.state as { icDesigner?: DesignerPlace; icDesignerBumper?: boolean } | null)?.icDesigner ||
+        (window.history.state as { icDesignerBumper?: boolean } | null)?.icDesignerBumper,
+    );
+    if (!hasAppEntry) {
+      const path = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(historyState({ icDesignerBumper: true }), "", path);
+      window.history.pushState(
+        historyState({ icDesigner: { tab: "today", jobId: null } }),
+        "",
+        designerHref("today", null),
+      );
+      if (initial.tab !== "today" || initial.jobId) {
+        window.history.pushState(historyState({ icDesigner: initial }), "", designerHref(initial.tab, initial.jobId));
+      }
+    }
+    if (initial.jobId) showPlace("jobs", initial.jobId);
+    else if (initial.tab !== "today") showPlace(initial.tab, null);
+
+    const onPop = (event: PopStateEvent) => {
+      const nav = (event.state as { icDesigner?: DesignerPlace } | null)?.icDesigner;
+      if (!nav) {
+        const stay: DesignerPlace = { tab: "today", jobId: null };
+        window.history.pushState(historyState({ icDesigner: stay }), "", designerHref(stay.tab, stay.jobId));
+        showPlace(stay.tab, stay.jobId);
+        return;
+      }
+      applyingHistory.current = true;
+      showPlace(nav.tab, nav.jobId);
+      applyingHistory.current = false;
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // Seed once per signed-in designer. showPlace reads the latest openJob via ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [designer?.id]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -441,12 +511,35 @@ export default function DesignerApp() {
     [needsDesign, toGrade],
   );
 
+  function recordNav(next: DesignerTab, jobId: string | null) {
+    if (applyingHistory.current || typeof window === "undefined") return;
+    const current = (window.history.state as { icDesigner?: DesignerPlace } | null)?.icDesigner;
+    if (current && current.tab === next && (current.jobId ?? null) === jobId) return;
+    window.history.pushState(historyState({ icDesigner: { tab: next, jobId } }), "", designerHref(next, jobId));
+  }
+
+  function showPlace(next: DesignerTab, jobId: string | null) {
+    setMenuOpen(false);
+    setNotice(null);
+    if (jobId) {
+      void openJobRef.current(jobId, { recordHistory: false });
+      return;
+    }
+    openJobIdRef.current = null;
+    setJob(null);
+    setTab(next);
+    window.scrollTo({ top: 0 });
+  }
+
   function goToTab(next: DesignerTab) {
+    if (next === tab && !job) return;
     setTab(next);
     openJobIdRef.current = null;
     setJob(null);
     setMenuOpen(false);
     setNotice(null);
+    recordNav(next, null);
+    window.scrollTo({ top: 0 });
   }
 
   function openCalendarItem(itemId: string) {
@@ -497,7 +590,7 @@ export default function DesignerApp() {
     setMenuOpen(false);
   }
 
-  async function openJob(id: string) {
+  async function openJob(id: string, opts?: { recordHistory?: boolean }) {
     setBusy(true);
     setNotice(null);
     setTab("jobs");
@@ -516,6 +609,7 @@ export default function DesignerApp() {
       setGrade(payload.job.install_grade ?? 0);
       setGradeNote(payload.job.install_grade_note ?? "");
       setDesignerNotes(payload.job.designer_notes ?? "");
+      if (opts?.recordHistory !== false) recordNav("jobs", payload.job.id);
       window.scrollTo({ top: 0 });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not open the job." });
@@ -523,6 +617,8 @@ export default function DesignerApp() {
       setBusy(false);
     }
   }
+
+  openJobRef.current = openJob;
 
   async function uploadPhotos(files: FileList | File[]) {
     if (!job) return;
@@ -1179,6 +1275,12 @@ export default function DesignerApp() {
                   onClick={() => {
                     openJobIdRef.current = null;
                     setJob(null);
+                    setTab("jobs");
+                    window.history.replaceState(
+                      historyState({ icDesigner: { tab: "jobs", jobId: null } }),
+                      "",
+                      designerHref("jobs", null),
+                    );
                   }}
                 >
                   ← All jobs
@@ -1334,23 +1436,11 @@ export default function DesignerApp() {
                       <div className={styles.profileActions}>
                         <button
                           type="button"
-                          className={job.design_ready_choice === "job_check" ? styles.btnOk : styles.btnGhost}
+                          className={`${job.design_ready_choice === "job_check" ? styles.btnOk : styles.btn} ${styles.packetBtn}`}
                           disabled={busy}
                           onClick={() => void finishDesign("job_check")}
                         >
                           {job.design_ready_choice === "job_check" ? "Sent · needs a job check" : "Needs a job check"}
-                        </button>
-                        <button
-                          type="button"
-                          className={
-                            job.design_ready_choice === "skip" || job.skip_job_check ? styles.btnOk : styles.btnGhost
-                          }
-                          disabled={busy}
-                          onClick={() => void finishDesign("skip")}
-                        >
-                          {job.design_ready_choice === "skip" || job.skip_job_check
-                            ? "Sent · skip job check"
-                            : "Simple closet, skip job check"}
                         </button>
                       </div>
                     ) : null}

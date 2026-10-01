@@ -12,8 +12,9 @@ import {
 import {
   canAccessOpsPage,
   filterNavHrefForRole,
-  IC_INVENTORY_HOME,
   isInventoryRole,
+  isWarehouseRole,
+  scopedOpsHome,
 } from "@/lib/inspired-closets-ops-roles";
 import styles from "./ops-shell.module.css";
 
@@ -21,6 +22,16 @@ type NavItem = { href: string; label: string; icon: string };
 type NavGroup = { label: string; items: NavItem[] };
 
 /** Sequenced process for Des → Craig → money, then supporting lanes. */
+const WAREHOUSE_NAV: NavGroup[] = [
+  {
+    label: "Warehouse",
+    items: [
+      { href: "/inspired-closets/ops/warehouse", label: "Kitting", icon: "▣" },
+      { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▤" },
+    ],
+  },
+];
+
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Projects",
@@ -119,22 +130,37 @@ export default function OpsShell({
   useEffect(() => {
     setStaffRole(readCookie(IC_STAFF_ROLE_COOKIE));
     setStaffName(readCookie(IC_STAFF_NAME_COOKIE));
+    void (async () => {
+      try {
+        const response = await fetch("/api/inspired-closets/ops/session");
+        const payload = (await response.json()) as { me?: { name?: string; role?: string } | null };
+        if (!payload.me?.role) return;
+        setStaffRole(payload.me.role);
+        if (payload.me.name) setStaffName(payload.me.name);
+      } catch {
+        /* Keep the role from the sign-in cookie. */
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    if (!isInventoryRole(staffRole)) return;
+    const home = scopedOpsHome(staffRole);
+    if (!home) return;
     if (canAccessOpsPage(staffRole, pathname)) return;
-    router.replace(IC_INVENTORY_HOME);
+    router.replace(home);
   }, [staffRole, pathname, router]);
 
+  const warehouseOnly = isWarehouseRole(staffRole);
   const navGroups = useMemo(() => {
+    if (warehouseOnly) return WAREHOUSE_NAV;
     return NAV_GROUPS.map((group) => ({
       ...group,
       items: group.items.filter((item) => filterNavHrefForRole(staffRole, item.href)),
     })).filter((group) => group.items.length > 0);
-  }, [staffRole]);
+  }, [staffRole, warehouseOnly]);
 
   const inventoryOnly = isInventoryRole(staffRole);
+  const scopedOnly = inventoryOnly || warehouseOnly;
 
   async function signOut() {
     setSigningOut(true);
@@ -193,7 +219,7 @@ export default function OpsShell({
           </nav>
 
           <div className={styles.sidebarBottom}>
-            {inventoryOnly ? null : (
+            {scopedOnly ? null : (
               <>
                 <Link
                   href="/inspired-closets/ops/designer-sales"
@@ -211,7 +237,7 @@ export default function OpsShell({
                 </Link>
               </>
             )}
-            {staffName || inventoryOnly ? (
+            {staffName || scopedOnly ? (
               <div className={styles.sidebarSession}>
                 {staffName ? <p className={styles.sidebarSessionName}>{staffName}</p> : null}
                 <button

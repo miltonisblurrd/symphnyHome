@@ -10,6 +10,7 @@ import OpsWeekCalendar, {
 import type { IcJobKind } from "@/lib/inspired-closets-ops-jobs";
 import { CONSULT_OUTCOMES } from "@/lib/inspired-closets-ops-appointments";
 import { installerOffOn, eachDateInclusive } from "@/lib/inspired-closets-field-dates";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import {
   classifyAppointment,
   classifyJob,
@@ -234,7 +235,7 @@ export default function OpsScheduleWorkspace({
   }, [presetLeadId]);
 
   const designers = useMemo(
-    () => staff.filter((s) => s.role === "designer" || s.role === "owner"),
+    () => staff.filter((s) => isDesignDeskRole(s.role) || s.role === "owner"),
     [staff],
   );
   const installers = useMemo(

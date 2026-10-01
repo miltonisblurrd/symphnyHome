@@ -1039,8 +1039,8 @@ export default function OpsCrewMetricsWorkspace() {
                     />
                   </label>
                   <p className={styles.leadContact} style={{ gridColumn: "1 / -1" }}>
-                    Installers sign-in uses this exact phone. A random number on the app screen will fail
-                    unless you save it here first.
+                    They sign in at Installers with their name or this phone, plus the password. A random
+                    number on the app screen will fail unless you save it here first.
                     {person.hasPassword
                       ? " A password is already on file — reset only if they forgot it."
                       : " No password yet."}

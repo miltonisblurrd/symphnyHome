@@ -3,6 +3,7 @@ import {
   crewTokensFromNotes,
   displayNameForInstaller,
   installerKeyFromStaffName,
+  shouldRenameInstallerToCanonical,
   isFieldTestJob,
   isFieldTestStaff,
   matchInstallerStaff,
@@ -102,7 +103,7 @@ export async function syncInstallersFromJobs(input?: {
       changed = true;
     }
     const nice = displayNameForInstaller(token);
-    if (row.name !== nice && (row.name === row.name.toUpperCase() || row.name.toUpperCase() === "MANDO")) {
+    if (shouldRenameInstallerToCanonical(row.name, nice)) {
       patch.name = nice;
       row.name = nice;
       changed = true;

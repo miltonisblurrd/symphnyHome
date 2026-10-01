@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import styles from "./ops-payroll.module.css";
 
 type Staff = {
@@ -122,7 +123,7 @@ export default function OpsPayrollWorkspace() {
   }, [load]);
 
   const designers = useMemo(
-    () => staff.filter((member) => member.role === "designer" && member.active),
+    () => staff.filter((member) => isDesignDeskRole(member.role) && member.active),
     [staff],
   );
 

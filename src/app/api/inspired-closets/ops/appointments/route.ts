@@ -25,6 +25,7 @@ import {
   pushAppointmentById,
 } from "@/lib/inspired-closets-google-calendar";
 import { IC_STAFF_ID_COOKIE, IC_STAFF_NAME_COOKIE } from "@/lib/inspired-closets-ops-field";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import { notifyConsultComplete } from "@/lib/inspired-closets-ops-handoffs";
 import { postInspiredClosetsSlackNotification } from "@/lib/inspired-closets-slack";
 import { isJobKind, jobKindTag, resolveJobKind } from "@/lib/inspired-closets-ops-jobs";
@@ -146,7 +147,7 @@ export async function GET(request: Request) {
   });
 
   // Closing ratio strip: assigned leads vs converted for designers.
-  const designers = (staffResult.data ?? []).filter((s) => s.role === "designer");
+  const designers = (staffResult.data ?? []).filter((s) => isDesignDeskRole(s.role));
   const closing = designers.map((designer) => {
     const assigned = (leadsResult.data ?? []).filter((l) => l.designer_id === designer.id);
     const converted = assigned.filter((l) => Boolean(l.converted_job_id));

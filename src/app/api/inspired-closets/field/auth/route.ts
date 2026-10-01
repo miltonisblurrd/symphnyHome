@@ -8,7 +8,7 @@ import {
   verifyPassword,
 } from "@/lib/inspired-closets-field-auth";
 import { getFieldInstaller } from "@/lib/inspired-closets-field-auth-server";
-import { ensureFieldTestWorld, FIELD_TEST_PHONE } from "@/lib/inspired-closets-field-test-seed";
+import { ensureFieldTestWorld, FIELD_TEST_PHONE, isFieldTestInstaller } from "@/lib/inspired-closets-field-test-seed";
 
 export const runtime = "nodejs";
 
@@ -62,11 +62,16 @@ export async function POST(request: Request) {
     }
   }
 
-  const phone = normalizePhone(typeof body.phone === "string" ? body.phone : "");
+  const loginRaw =
+    (typeof body.login === "string" ? body.login : "") ||
+    (typeof body.phone === "string" ? body.phone : "");
+  const login = loginRaw.trim();
+  const phone = normalizePhone(login);
   const password = typeof body.password === "string" ? body.password : "";
-  if (phone.length < 10 || !password) {
+  const phoneOnly = phone.length >= 10 && !/[a-z]/i.test(login);
+  if ((!phoneOnly && login.length < 3) || !password) {
     return NextResponse.json(
-      { ok: false, error: "Enter your phone number and password." },
+      { ok: false, error: "Enter your name or phone and a password." },
       { status: 400 },
     );
   }
@@ -81,13 +86,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  const match = (staff ?? []).find((row) => phonesMatch(row.phone, phone));
+  const rows = staff ?? [];
+  const phoneHits = phoneOnly ? rows.filter((row) => phonesMatch(row.phone, phone)) : [];
+  const nameHits = phoneOnly
+    ? []
+    : rows.filter((row) => {
+        if (row.role !== "installer" || isFieldTestInstaller(row)) return false;
+        const full = row.name.trim().toLowerCase();
+        const id = login.toLowerCase();
+        if (full === id) return true;
+        const first = full.split(/\s+/)[0] ?? "";
+        return first === id;
+      });
+  const exactName = nameHits.filter((row) => row.name.trim().toLowerCase() === login.toLowerCase());
+  const match = phoneHits[0] ?? (exactName.length === 1 ? exactName[0] : nameHits.length === 1 ? nameHits[0] : null);
+
+  if (phoneHits.length > 1 || (!phoneOnly && nameHits.length > 1 && exactName.length !== 1)) {
+    return NextResponse.json(
+      { ok: false, error: "More than one installer matches. Sign in with your full name." },
+      { status: 401 },
+    );
+  }
   if (!match) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "No installer has that phone. Open Install Workers → their file → app login, save this number and a password, then use the same pair here.",
+        error: phoneOnly
+          ? "No installer has that phone. Open Install Workers → their file → app login, save this number and a password, then use the same pair here."
+          : "No installer matches that name. Use the name on your file, or the phone saved under app login.",
       },
       { status: 401 },
     );
@@ -106,7 +132,7 @@ export async function POST(request: Request) {
   }
   const ok = await verifyPassword(password, match.password_hash);
   if (!ok) {
-    return NextResponse.json({ ok: false, error: "That password doesn’t match this phone." }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "That password doesn’t match." }, { status: 401 });
   }
 
   return signInAs(match);

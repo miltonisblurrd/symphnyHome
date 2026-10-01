@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import {
@@ -32,11 +33,20 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
+  const staffId = (await cookies()).get(IC_STAFF_ID_COOKIE)?.value ?? "";
+  const me = staffId ? (data ?? []).find((member) => member.id === staffId) ?? null : null;
+  const response = NextResponse.json({
     ok: true,
     staff: data ?? [],
     installers: (data ?? []).filter((member) => member.role === "installer"),
+    me: me ? { id: me.id, name: me.name, role: me.role } : null,
   });
+  if (me) {
+    response.cookies.set(IC_STAFF_ID_COOKIE, me.id, COOKIE_OPTS);
+    response.cookies.set(IC_STAFF_ROLE_COOKIE, me.role, COOKIE_OPTS);
+    response.cookies.set(IC_STAFF_NAME_COOKIE, me.name, COOKIE_OPTS);
+  }
+  return response;
 }
 
 export async function POST(request: Request) {

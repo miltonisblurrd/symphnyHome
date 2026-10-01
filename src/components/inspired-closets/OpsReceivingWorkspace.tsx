@@ -125,7 +125,6 @@ export default function OpsReceivingWorkspace() {
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [uploading, setUploading] = useState<"slip" | "summary" | "install" | false>(false);
   const [docsTick, setDocsTick] = useState(0);
-  const [lastTruck, setLastTruck] = useState("");
   const slipRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
   const installRef = useRef<HTMLInputElement>(null);
@@ -154,7 +153,6 @@ export default function OpsReceivingWorkspace() {
   }, []);
 
   useEffect(() => {
-    setLastTruck(localStorage.getItem("ic-receiving-last") ?? "");
     void load();
     const timer = window.setInterval(() => {
       void load({ silent: true });
@@ -309,13 +307,6 @@ export default function OpsReceivingWorkspace() {
         ) : null}
         {hint ? <p className={payroll.notice}>{hint}</p> : null}
 
-        {lastTruck ? (
-          <p style={{ marginBottom: "0.75rem" }}>
-            <Link href={`/inspired-closets/ops/inventory/receiving/${lastTruck}/scan`} className={payroll.buttonPrimary}>
-              Resume last truck
-            </Link>
-          </p>
-        ) : null}
         <section className={`${payroll.panel} ${styles.shipPanel}`} style={{ marginBottom: "1rem" }}>
           {loading ? (
             <p className={payroll.empty}>Loading shipments…</p>

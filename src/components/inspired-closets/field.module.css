@@ -2144,6 +2144,51 @@
   margin-top: 0.2rem;
 }
 
+.warehouseReady,
+.warehouseHold {
+  margin: 0 0 1rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 0.8rem;
+}
+
+.warehouseReady {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.warehouseHold {
+  background: var(--ic-blush);
+  color: var(--ic-red);
+}
+
+.warehouseReady strong,
+.warehouseHold strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.warehouseReady p,
+.warehouseHold p,
+.warehouseReady ul,
+.warehouseHold ul {
+  margin: 0.35rem 0 0;
+}
+
+.warehousePhotos {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.warehousePhotos img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.45rem;
+  background: #fff;
+}
+
 .jobsPastLabel {
   margin-top: 1.15rem;
 }

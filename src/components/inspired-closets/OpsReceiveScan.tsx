@@ -52,7 +52,6 @@ type ScanLogRow = {
 };
 
 const OFFLINE_KEY = "ic-receiving-offline";
-const LAST_TRUCK_KEY = "ic-receiving-last";
 const SESSION_KEY = "ic-receiving-session";
 
 function readOffline(): Array<{ shipmentId: string; item_number: string; qty: number; pallet: string | null }> {
@@ -154,7 +153,6 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   }, [shipmentId]);
 
   useEffect(() => {
-    localStorage.setItem(LAST_TRUCK_KEY, shipmentId);
     const raw = localStorage.getItem(SESSION_KEY);
     const parsed = raw ? (JSON.parse(raw) as { id?: string; started?: number; pieces?: number }) : null;
     if (parsed?.id === shipmentId && parsed.started) {

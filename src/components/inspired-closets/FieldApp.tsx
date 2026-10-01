@@ -75,6 +75,8 @@ type PacketOrderLine = {
   dimensions: string | null;
   finish: string | null;
   qty: number;
+  gather_status?: string | null;
+  problem_note?: string | null;
 };
 
 type PacketOrder = {
@@ -101,6 +103,8 @@ type Job = {
   packet_materials?: PacketMaterial[];
   packet_slip?: PacketSlip[];
   packet_order?: PacketOrder | null;
+  warehouse_status?: string | null;
+  pile_location?: string | null;
   proposal_url?: string | null;
   designer_notes?: string | null;
   proposal_filename?: string | null;
@@ -923,7 +927,7 @@ export default function FieldApp() {
       const response = await fetch("/api/inspired-closets/field/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, password }),
+        body: JSON.stringify({ login: phone, password }),
       });
       await finishSignIn(response);
     } catch (error) {
@@ -1442,7 +1446,7 @@ export default function FieldApp() {
             </div>
             <h1 className={access.title}>Installer Login</h1>
             <p className={access.lead}>
-              Sign in with your phone number and password
+              Sign in with your name and password. A saved phone number works too.
             </p>
           </div>
           <form
@@ -1454,13 +1458,12 @@ export default function FieldApp() {
           >
             <input
               className={access.input}
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              aria-label="Phone number"
+              type="text"
+              autoComplete="username"
+              aria-label="Name or phone"
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
-              placeholder="Phone number"
+              placeholder="Name or phone"
               required
             />
             <input
@@ -2025,6 +2028,49 @@ export default function FieldApp() {
                   </section>
 
                   <section className={`${styles.dashCard} ${styles.packetOpsCard}`} id="packet-parts">
+                    {workJob.warehouse_status === "ready" || workJob.warehouse_status === "hold" ? (
+                      <div
+                        className={
+                          workJob.warehouse_status === "hold" ? styles.warehouseHold : styles.warehouseReady
+                        }
+                      >
+                        <strong>{workJob.warehouse_status === "hold" ? "Hold" : "Warehouse ready"}</strong>
+                        <p>
+                          {workJob.warehouse_status === "hold"
+                            ? "Bryant reopened this pile."
+                            : "The pile is ready to grab."}
+                        </p>
+                        {workJob.pile_location ? <p>Pile: {workJob.pile_location}</p> : null}
+                        {(workJob.packet_order?.lines ?? []).some(
+                          (line) => line.gather_status === "on_truck" || line.gather_status === "problem",
+                        ) ? (
+                          <ul>
+                            {(workJob.packet_order?.lines ?? [])
+                              .filter((line) => line.gather_status === "on_truck" || line.gather_status === "problem")
+                              .map((line) => (
+                                <li key={line.id}>
+                                  {line.description || line.item_code || "Part"}
+                                  {line.gather_status === "on_truck" ? " — still on the truck" : " — problem"}
+                                  {line.gather_status === "problem" && line.problem_note ? ` (${line.problem_note})` : ""}
+                                </li>
+                              ))}
+                          </ul>
+                        ) : workJob.warehouse_status === "ready" ? (
+                          <p>Everything from the product summary is in the pile.</p>
+                        ) : null}
+                        {media.some((item) => item.kind === "staging" && item.public_url) ? (
+                          <div className={styles.warehousePhotos}>
+                            {media
+                              .filter((item) => item.kind === "staging" && item.public_url)
+                              .map((item) => (
+                                <a key={item.id} href={item.public_url ?? "#"} target="_blank" rel="noreferrer">
+                                  <img src={item.public_url ?? ""} alt={item.caption || "Pile"} />
+                                </a>
+                              ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className={styles.colLabel}>Warehouse</p>
                     <h3 className={styles.packetSection}>Parts</h3>
                     {workJob.packet_order ? (
@@ -2055,6 +2101,11 @@ export default function FieldApp() {
                             {line.dimensions ? ` · ${line.dimensions}` : ""}
                             {line.finish ? ` · ${line.finish}` : ""}
                             {` · qty ${line.qty}`}
+                            {line.gather_status === "in_pile" ? " · in the pile" : ""}
+                            {line.gather_status === "on_truck" ? " · still on the truck" : ""}
+                            {line.gather_status === "problem"
+                              ? ` · problem${line.problem_note ? ` (${line.problem_note})` : ""}`
+                              : ""}
                           </li>
                         ))}
                       </ul>

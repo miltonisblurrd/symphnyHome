@@ -234,13 +234,26 @@ export async function GET() {
     });
   }
   const summaryIds = [...new Set(summaryRows.map((row) => String(row.id)))];
-  const { data: summaryLines, error: summaryLinesError } = summaryIds.length
+  const summaryLineSelect =
+    "id, summary_id, item_code, description, product_type, dimensions, finish, qty, gather_status, problem_note";
+  const summaryLinesResult = summaryIds.length
     ? await supabase
         .from("ic_job_summary_lines")
-        .select("id, summary_id, item_code, description, product_type, dimensions, finish, qty")
+        .select(summaryLineSelect)
         .in("summary_id", summaryIds)
         .order("line_no", { ascending: true })
     : { data: [] as Array<Record<string, unknown>>, error: null };
+  const summaryLines =
+    summaryLinesResult.error && /gather_status|problem_note|column|schema cache/i.test(summaryLinesResult.error.message)
+      ? (
+          await supabase
+            .from("ic_job_summary_lines")
+            .select("id, summary_id, item_code, description, product_type, dimensions, finish, qty")
+            .in("summary_id", summaryIds)
+            .order("line_no", { ascending: true })
+        ).data
+      : summaryLinesResult.data;
+  const summaryLinesError = summaryLinesResult.error && !summaryLines ? summaryLinesResult.error : null;
   if (!summaryLinesError || !/does not exist|schema cache/i.test(summaryLinesError.message)) {
     const summaryIdToJob = new Map(summaryRows.map((row) => [String(row.id), String(row.job_id)]));
     for (const line of summaryLines ?? []) {
@@ -256,6 +269,8 @@ export async function GET() {
         dimensions: line.dimensions,
         finish: line.finish,
         qty: line.qty,
+        gather_status: "gather_status" in line ? line.gather_status ?? "unset" : "unset",
+        problem_note: "problem_note" in line ? line.problem_note ?? null : null,
       });
     }
   }

@@ -28,6 +28,7 @@ export const icRoleEnum = pgEnum("ic_role", [
   "front_office", // Des
   "finance", // Lulu
   "inventory", // Frank
+  "warehouse", // Bryant
   "designer",
   "installer", // drivers
 ]);
@@ -379,6 +380,12 @@ export const icJobs = pgTable("ic_jobs", {
   orderedAt: timestamp("ordered_at", { withTimezone: true }),
   firstReceivedAt: timestamp("first_received_at", { withTimezone: true }),
   fullyReceivedAt: timestamp("fully_received_at", { withTimezone: true }),
+  /** Bryant's kit: gathering | ready | hold. Null means he has not started the pile. */
+  warehouseStatus: text("warehouse_status"),
+  warehouseReadyAt: timestamp("warehouse_ready_at", { withTimezone: true }),
+  warehouseReadyBy: uuid("warehouse_ready_by").references(() => icStaff.id),
+  /** Where the installer pile is sitting, e.g. north wall. */
+  pileLocation: text("pile_location"),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   riskFlag: boolean("risk_flag").notNull().default(false),
   createdBy: uuid("created_by").references(() => icStaff.id),
@@ -980,6 +987,11 @@ export const icJobSummaryLines = pgTable("ic_job_summary_lines", {
   availableQty: integer("available_qty").notNull().default(0),
   reserveQty: integer("reserve_qty").notNull().default(0),
   orderQty: integer("order_qty").notNull().default(0),
+  /** Bryant's pile mark: unset | in_pile | on_truck | problem. */
+  gatherStatus: text("gather_status").notNull().default("unset"),
+  problemNote: text("problem_note"),
+  gatherMarkedBy: uuid("gather_marked_by").references(() => icStaff.id),
+  gatherMarkedAt: timestamp("gather_marked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -9,6 +9,7 @@ import {
   designerLabel,
 } from "@/lib/inspired-closets-ops-designer-aliases";
 import { CRAIG_SOURCE_LABELS } from "@/lib/inspired-closets-ops-leads";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import { ageTone, currentJobGap, tierLabel } from "@/lib/inspired-closets-ops-tiers";
 import styles from "./ops-craig.module.css";
 
@@ -190,7 +191,7 @@ export default function OpsCraigSalesWorkspace() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const designers = useMemo(() => {
-    const people = staff.filter((s) => s.role === "designer" || s.role === "owner");
+    const people = staff.filter((s) => isDesignDeskRole(s.role) || s.role === "owner");
     return [...people].sort((a, b) => {
       const ai = DESIGNER_SHEET_ORDER.indexOf(designerKey(a.name));
       const bi = DESIGNER_SHEET_ORDER.indexOf(designerKey(b.name));

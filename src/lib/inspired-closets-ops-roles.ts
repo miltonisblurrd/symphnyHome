@@ -4,6 +4,7 @@
  */
 
 export const IC_INVENTORY_HOME = "/inspired-closets/ops/inventory";
+export const IC_WAREHOUSE_HOME = "/inspired-closets/ops/warehouse";
 export const IC_OPS_HOME = "/inspired-closets/ops/projects";
 
 /** Page prefixes the inventory role may open. Receiving lives under inventory. */
@@ -29,12 +30,66 @@ export const INVENTORY_NAV_HREFS = new Set([
   "/inspired-closets/ops/inventory/receiving",
 ]);
 
+/** Bryant: staging queue plus the receiving scanner. Not Frank's inventory ledger. */
+export const WAREHOUSE_PAGE_PREFIXES = [
+  "/inspired-closets/ops/warehouse",
+  "/inspired-closets/ops/inventory/receiving",
+] as const;
+
+/**
+ * Receiving's document panel reads jobs, Stow orders, and uploaded documents.
+ * Parts and stock routes stay off this list.
+ */
+export const WAREHOUSE_API_PREFIXES = [
+  "/api/inspired-closets/ops/warehouse",
+  "/api/inspired-closets/ops/receiving",
+  "/api/inspired-closets/ops/jobs",
+  "/api/inspired-closets/ops/stow-orders",
+  "/api/inspired-closets/ops/inventory/documents",
+  "/api/inspired-closets/ops/session",
+] as const;
+
 export function isInventoryRole(role: string | null | undefined): boolean {
   return role === "inventory";
 }
 
-export function roleHomePath(role: string | null | undefined): string {
+export function isWarehouseRole(role: string | null | undefined): boolean {
+  return role === "warehouse";
+}
+
+export function scopedOpsHome(role: string | null | undefined): string | null {
   if (isInventoryRole(role)) return IC_INVENTORY_HOME;
+  if (isWarehouseRole(role)) return IC_WAREHOUSE_HOME;
+  return null;
+}
+
+/** Designers, plus Craig (operations), who still owns jobs, payroll, and the sheet. */
+export function isDesignDeskRole(role: string | null | undefined): boolean {
+  return role === "designer" || role === "operations";
+}
+
+/**
+ * Craig's sales dashboard is not ready. His office login opens the OS
+ * (Projects), where he can also cover Receiving uploads.
+ */
+export function opensOsHome(staff?: {
+  name?: string | null;
+  workbook_tab?: string | null;
+} | null): boolean {
+  if (!staff) return false;
+  const name = (staff.name ?? "").trim().toLowerCase().split(/\s+/)[0] ?? "";
+  if (name === "craig") return true;
+  const tab = (staff.workbook_tab ?? "").trim().toLowerCase().split(/\s+/)[0] ?? "";
+  return tab === "craig";
+}
+
+export function roleHomePath(
+  role: string | null | undefined,
+  staff?: { name?: string | null; workbook_tab?: string | null } | null,
+): string {
+  if (isInventoryRole(role)) return IC_INVENTORY_HOME;
+  if (isWarehouseRole(role)) return IC_WAREHOUSE_HOME;
+  if (opensOsHome(staff)) return IC_OPS_HOME;
   if (role === "designer") return "/inspired-closets/designers";
   return IC_OPS_HOME;
 }
@@ -43,20 +98,34 @@ export function canAccessOpsPage(
   role: string | null | undefined,
   pathname: string,
 ): boolean {
-  if (!isInventoryRole(role)) return true;
-  return INVENTORY_PAGE_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  if (isInventoryRole(role)) {
+    return INVENTORY_PAGE_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+  }
+  if (isWarehouseRole(role)) {
+    return WAREHOUSE_PAGE_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+  }
+  return true;
 }
 
 export function canAccessOpsApi(
   role: string | null | undefined,
   pathname: string,
 ): boolean {
-  if (!isInventoryRole(role)) return true;
-  return INVENTORY_API_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  if (isInventoryRole(role)) {
+    return INVENTORY_API_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+  }
+  if (isWarehouseRole(role)) {
+    return WAREHOUSE_API_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+  }
+  return true;
 }
 
 export function filterNavHrefForRole(

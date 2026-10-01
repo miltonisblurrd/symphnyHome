@@ -11,8 +11,8 @@ import { IC_STAFF_ROLE_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
   canAccessOpsApi,
   canAccessOpsPage,
-  IC_INVENTORY_HOME,
-  isInventoryRole,
+  isWarehouseRole,
+  scopedOpsHome,
 } from "@/lib/inspired-closets-ops-roles";
 
 export async function middleware(request: NextRequest) {
@@ -23,7 +23,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!isInspiredClosetsAccessEnabled()) {
-    return enforceInventoryScope(request, pathname);
+    return enforceScopedOps(request, pathname);
   }
 
   const expected = await getExpectedInspiredClosetsAccessToken();
@@ -35,33 +35,31 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return enforceInventoryScope(request, pathname);
+  return enforceScopedOps(request, pathname);
 }
 
-function enforceInventoryScope(request: NextRequest, pathname: string) {
+function enforceScopedOps(request: NextRequest, pathname: string) {
   const role = request.cookies.get(IC_STAFF_ROLE_COOKIE)?.value ?? null;
-  if (!isInventoryRole(role)) {
+  const homePath = scopedOpsHome(role);
+  if (!homePath) {
     return NextResponse.next();
   }
 
-  // Page routes outside Inventory/Receiving → redirect home
   if (!pathname.startsWith("/api/")) {
-    // Allow the access page itself (already excluded from protected paths)
     if (!canAccessOpsPage(role, pathname)) {
       const home = request.nextUrl.clone();
-      home.pathname = IC_INVENTORY_HOME;
+      home.pathname = homePath;
       home.search = "";
       return NextResponse.redirect(home);
     }
     return NextResponse.next();
   }
 
-  // API allowlist for inventory role
   if (!canAccessOpsApi(role, pathname)) {
-    return NextResponse.json(
-      { ok: false, error: "Your login is limited to Inventory and Receiving." },
-      { status: 403 },
-    );
+    const error = isWarehouseRole(role)
+      ? "Your login is limited to Staging and Receiving."
+      : "Your login is limited to Inventory and Receiving.";
+    return NextResponse.json({ ok: false, error }, { status: 403 });
   }
 
   return NextResponse.next();

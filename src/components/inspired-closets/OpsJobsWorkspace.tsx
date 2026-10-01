@@ -13,6 +13,7 @@ import {
   JOB_LIST_VIEWS,
   jobMatchesListView,
 } from "@/lib/inspired-closets-ops-jobs";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import { tierLabel, type SuggestedWindow } from "@/lib/inspired-closets-ops-tiers";
 import styles from "./ops-payroll.module.css";
 
@@ -348,7 +349,7 @@ export default function OpsJobsWorkspace() {
   }, [selectedJobId, matTick]);
 
   const designers = useMemo(
-    () => staff.filter((member) => (member.role === "designer" || member.role === "owner") && member.active),
+    () => staff.filter((member) => (isDesignDeskRole(member.role) || member.role === "owner") && member.active),
     [staff],
   );
   const installers = useMemo(

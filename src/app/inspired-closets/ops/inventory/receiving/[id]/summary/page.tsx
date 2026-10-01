@@ -11,11 +11,20 @@ type Item = {
   job_name: string | null;
   cust_ref: string | null;
   container_id: string | null;
+  job_id: string | null;
   qty: number;
   received_qty: number;
   damaged_qty?: number;
   status: string;
 };
+
+function readRole(): string {
+  if (typeof document === "undefined") return "";
+  const row = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith("ic-staff-role="));
+  return row ? decodeURIComponent(row.slice("ic-staff-role=".length)) : "";
+}
 
 export default function ReceivingSummaryPage() {
   const params = useParams<{ id: string }>();
@@ -23,6 +32,7 @@ export default function ReceivingSummaryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [unknown, setUnknown] = useState<Array<{ scanned_value?: string; item_number?: string }>>([]);
   const [error, setError] = useState("");
+  const [canKit, setCanKit] = useState(true);
 
   useEffect(() => {
     void (async () => {
@@ -41,6 +51,10 @@ export default function ReceivingSummaryPage() {
       setUnknown(payload.unknown_scans ?? []);
     })();
   }, [id]);
+
+  useEffect(() => {
+    setCanKit(readRole() !== "inventory");
+  }, []);
 
   const received = items.filter((item) => item.received_qty >= item.qty);
   const damaged = items.filter((item) => item.status === "damaged" || (item.damaged_qty ?? 0) > 0);
@@ -76,11 +90,24 @@ export default function ReceivingSummaryPage() {
         ))}
       </section>
       <h2>By job</h2>
-      {groups((item) => item.cust_ref || item.job_name || "Unassigned").map(([name, rows]) => (
-        <p key={name}>
-          {name}: {rows.reduce((sum, row) => sum + row.received_qty, 0)} / {rows.reduce((sum, row) => sum + row.qty, 0)}
-        </p>
-      ))}
+      <p>Each job on this truck can start a pile.</p>
+      {groups((item) => item.job_id || item.cust_ref || item.job_name || "Unassigned").map(([name, rows]) => {
+        const jobId = rows.find((row) => row.job_id)?.job_id ?? null;
+        const label = rows.find((row) => row.job_name)?.job_name || rows.find((row) => row.cust_ref)?.cust_ref || name;
+        const received = rows.reduce((sum, row) => sum + row.received_qty, 0);
+        const total = rows.reduce((sum, row) => sum + row.qty, 0);
+        return (
+          <p key={name}>
+            {label}: {received} / {total}
+            {canKit && jobId ? (
+              <>
+                {" "}
+                <Link href={`/inspired-closets/ops/warehouse/${jobId}`}>Start the pile</Link>
+              </>
+            ) : null}
+          </p>
+        );
+      })}
       <h2>By pallet</h2>
       {groups((item) => item.container_id || "No pallet").map(([name, rows]) => (
         <p key={name}>

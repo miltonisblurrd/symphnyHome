@@ -27,6 +27,7 @@ import {
 } from "@/lib/inspired-closets-ops-accounts";
 import type { AddressParts } from "@/lib/inspired-closets-google-places";
 import { CONSULT_OUTCOMES, type IcConsultOutcome } from "@/lib/inspired-closets-ops-appointments";
+import { isDesignDeskRole } from "@/lib/inspired-closets-ops-roles";
 import OpsLeadMatchReview from "./OpsLeadMatchReview";
 import styles from "./ops-payroll.module.css";
 
@@ -289,7 +290,7 @@ export default function OpsLeadsWorkspace() {
   }, [leads, listView, query]);
 
   const designers = useMemo(
-    () => staff.filter((s) => s.role === "designer" || s.role === "front_office" || s.role === "owner"),
+    () => staff.filter((s) => isDesignDeskRole(s.role) || s.role === "front_office" || s.role === "owner"),
     [staff],
   );
   const installers = useMemo(

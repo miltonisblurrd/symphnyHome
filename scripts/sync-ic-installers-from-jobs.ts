@@ -5,6 +5,7 @@ import {
   crewTokensFromNotes,
   displayNameForInstaller,
   installerKeyFromStaffName,
+  shouldRenameInstallerToCanonical,
   isFieldTestJob,
   isFieldTestStaff,
   matchInstallerStaff,
@@ -194,7 +195,7 @@ async function main() {
       row.role = "installer";
     }
     const nice = displayNameForInstaller(token);
-    if (row.name !== nice && (row.name === row.name.toUpperCase() || row.name.toUpperCase() === "MANDO")) {
+    if (shouldRenameInstallerToCanonical(row.name, nice)) {
       patch.name = nice;
       row.name = nice;
     }

@@ -13,7 +13,7 @@ import {
   IC_STAFF_ROLE_COOKIE,
 } from "@/lib/inspired-closets-ops-field";
 import { IC_OPS_HOME, roleHomePath, staffMatchesLoginId } from "@/lib/inspired-closets-ops-roles";
-import { applyDesignerSession } from "@/lib/inspired-closets-designer-auth";
+import { applyDesignerSession, clearDesignerSession } from "@/lib/inspired-closets-designer-auth";
 
 export const runtime = "nodejs";
 
@@ -38,6 +38,7 @@ function clearStaffCookies(response: NextResponse) {
   response.cookies.set(IC_STAFF_ID_COOKIE, "", gone);
   response.cookies.set(IC_STAFF_ROLE_COOKIE, "", gone);
   response.cookies.set(IC_STAFF_NAME_COOKIE, "", gone);
+  clearDesignerSession(response);
 }
 
 function setStaffCookies(
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a password." }, { status: 400 });
   }
 
-  // Office staff login (Frank, later Des/Craig/Lulu)
+  // Office staff login (Frank, Craig, later Des/Lulu)
   if (username && isDbConfigured()) {
     const supabase = getSupabaseAdmin();
     const { data: staffRows, error } = await supabase
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Incorrect username or password." }, { status: 401 });
       }
 
-      const home = roleHomePath(match.role);
+      const home = roleHomePath(match.role, match);
       const response = NextResponse.json({
         ok: true,
         mode: "staff",

@@ -3,7 +3,13 @@
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { IC_INVENTORY_HOME, IC_OPS_HOME, isInventoryRole } from "@/lib/inspired-closets-ops-roles";
+import {
+  IC_INVENTORY_HOME,
+  IC_OPS_HOME,
+  IC_WAREHOUSE_HOME,
+  isInventoryRole,
+  isWarehouseRole,
+} from "@/lib/inspired-closets-ops-roles";
 import styles from "./access.module.css";
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
@@ -46,8 +52,9 @@ export default function InspiredClosetsAccessForm() {
 
       let next = payload.redirectTo ?? returnTo;
       if (isInventoryRole(payload.staff?.role)) {
-        // Inventory users always land on their module, even if returnTo was elsewhere.
         next = IC_INVENTORY_HOME;
+      } else if (isWarehouseRole(payload.staff?.role)) {
+        next = IC_WAREHOUSE_HOME;
       } else if (payload.mode === "prototype" && returnTo.startsWith("/inspired-closets")) {
         next = returnTo;
       }

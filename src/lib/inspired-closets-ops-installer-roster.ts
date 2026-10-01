@@ -1,14 +1,14 @@
 import { FIELD_TEST_MARK, isFieldTestInstaller } from "@/lib/inspired-closets-field-test-seed";
 
-/** First names from job tracking / payroll installer tabs. MANDO is Armando. */
+/** Canonical names. Job sheets still match the first-name token. MANDO is Armando. */
 export const INSTALLER_DISPLAY: Record<string, string> = {
   VALU: "Valu",
-  DIEGO: "Diego",
-  ALEX: "Alex",
+  DIEGO: "Diego Sanchez",
+  ALEX: "Alex Sanchez",
   ARMANDO: "Armando",
   MANDO: "Armando",
   JUAN: "Juan",
-  RUBEN: "Ruben",
+  RUBEN: "Ruben Guzman",
   VICTOR: "Victor",
   RANDY: "Randy",
 };
@@ -63,6 +63,14 @@ export function canonicalInstallerToken(raw: string): string | null {
 
 export function displayNameForInstaller(token: string): string {
   return INSTALLER_DISPLAY[token] ?? titleCase(token);
+}
+
+/** Upgrade ALL-CAPS sheet names, and first-name-only rows, to the canonical name. */
+export function shouldRenameInstallerToCanonical(currentName: string, canonical: string): boolean {
+  if (currentName === canonical) return false;
+  if (currentName === currentName.toUpperCase() || currentName.toUpperCase() === "MANDO") return true;
+  const canonicalFirst = canonical.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return canonical.includes(" ") && currentName.trim().toLowerCase() === canonicalFirst;
 }
 
 function titleCase(value: string): string {

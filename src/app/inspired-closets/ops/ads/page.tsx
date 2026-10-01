@@ -1,8 +1,9 @@
 import OpsMetaAdsWorkspace from "@/components/inspired-closets/OpsMetaAdsWorkspace";
 import { reviewDemoAccount, reviewFromSnapshot } from "@/lib/meta-ads/analytics/review";
-import { readLiveSnapshot } from "@/lib/meta-ads/meta/load";
+import { META_ADS_SYNC_MAX_AGE_MS, readLiveSnapshot } from "@/lib/meta-ads/meta/load";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export const metadata = {
   title: "Inspired Closets OS · Meta Ads",
@@ -15,7 +16,7 @@ export default async function InspiredClosetsOpsAdsPage({
 }) {
   const query = await searchParams;
   const range = query.range === "30" || query.range === "60" ? Number(query.range) : 7;
-  const snapshot = readLiveSnapshot();
+  const snapshot = await readLiveSnapshot({ maxAgeMs: META_ADS_SYNC_MAX_AGE_MS });
   return (
     <OpsMetaAdsWorkspace
       review={snapshot ? reviewFromSnapshot(snapshot, range as 7 | 30 | 60) : reviewDemoAccount()}

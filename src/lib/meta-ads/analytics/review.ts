@@ -196,6 +196,7 @@ export function reviewFromSnapshot(snapshot: AccountSnapshot, windowDays?: 7 | 3
     targetCplLabel: targetCpl == null ? "Not set" : formatMoney(targetCpl),
     syncedLabel: view.syncedAt
       ? new Date(view.syncedAt).toLocaleString("en-US", {
+          timeZone: "America/Los_Angeles",
           month: "short",
           day: "numeric",
           hour: "numeric",

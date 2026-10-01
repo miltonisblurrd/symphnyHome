@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import {
   CplTargetBar,
@@ -59,6 +60,12 @@ const ACTION_TONE: Record<CreativeAction, string> = {
 };
 
 export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountReview }) {
+  const router = useRouter();
+  useEffect(() => {
+    const id = window.setInterval(() => router.refresh(), 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [router]);
+
   const sorted = [...review.creatives].sort(
     (a, b) => ACTION_ORDER.indexOf(a.action) - ACTION_ORDER.indexOf(b.action) || b.spend - a.spend,
   );

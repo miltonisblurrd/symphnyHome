@@ -57,6 +57,7 @@ export function isInspiredClosetsProtectedPath(pathname: string): boolean {
   }
 
   if (pathname.startsWith("/api/inspired-closets/")) {
+    if (pathname === "/api/inspired-closets/ops/cron/meta-ads") return false;
     if (pathname.startsWith("/api/inspired-closets/access")) return false;
     if (pathname.startsWith("/api/inspired-closets/site")) return false;
     if (pathname.startsWith("/api/inspired-closets/inbound")) return false;

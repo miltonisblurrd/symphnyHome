@@ -320,6 +320,14 @@ export const icMetaAiConversations = pgTable("ic_meta_ai_conversations", {
   ...timestamps,
 });
 
+/** One row. The hourly sync replaces payload instead of appending history. */
+export const icMetaLiveSnapshot = pgTable("ic_meta_live_snapshot", {
+  id: text("id").primaryKey(),
+  payload: jsonb("payload").notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const icMetaAiMessages = pgTable("ic_meta_ai_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
   conversationId: uuid("conversation_id")

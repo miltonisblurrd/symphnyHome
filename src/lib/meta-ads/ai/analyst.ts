@@ -1,6 +1,6 @@
 import { reviewDemoAccount, reviewFromSnapshot, type DemoAccountReview } from "@/lib/meta-ads/analytics/review";
 import { readOpenAiAnalystConfig } from "@/lib/meta-ads/env";
-import { readLiveSnapshot } from "@/lib/meta-ads/meta/load";
+import { META_ADS_SYNC_MAX_AGE_MS, readLiveSnapshot } from "@/lib/meta-ads/meta/load";
 
 export type AnalystTurn = { role: "user" | "assistant"; content: string };
 
@@ -21,7 +21,7 @@ export async function askAdsAnalyst(input: {
   const config = readOpenAiAnalystConfig();
   if (!config.ok) return { ok: false, error: config.reason };
 
-  const evidence = evidenceForRange(input.range);
+  const evidence = await evidenceForRange(input.range);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -73,8 +73,8 @@ function readReply(body: {
   return parts.join("\n\n");
 }
 
-function evidenceForRange(range: 7 | 30 | 60) {
-  const snapshot = readLiveSnapshot();
+async function evidenceForRange(range: 7 | 30 | 60) {
+  const snapshot = await readLiveSnapshot({ maxAgeMs: META_ADS_SYNC_MAX_AGE_MS });
   const review = snapshot ? reviewFromSnapshot(snapshot, range) : reviewDemoAccount();
   return compactEvidence(review);
 }

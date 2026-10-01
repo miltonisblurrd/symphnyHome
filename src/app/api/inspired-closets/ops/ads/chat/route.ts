@@ -3,6 +3,7 @@ import { z } from "zod";
 import { askAdsAnalyst } from "@/lib/meta-ads/ai/analyst";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const bodySchema = z.object({
   range: z.union([z.literal(7), z.literal(30), z.literal(60)]).optional(),

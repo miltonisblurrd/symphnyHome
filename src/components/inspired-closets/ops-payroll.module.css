@@ -634,6 +634,106 @@ a.buttonGhost {
   min-width: 14rem;
 }
 
+.jobPickBtn {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.8rem;
+  background: var(--ic-white);
+  color: var(--ink);
+  min-width: 9.5rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.jobPickBtn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.jobPickBtn[aria-expanded="true"],
+.jobPickBtn:focus-visible {
+  outline: none;
+  border-color: var(--ic-red);
+  box-shadow: 0 0 0 2px rgba(130, 31, 45, 0.15);
+}
+
+/* Portaled to <body>, outside .page, so it carries its own palette. */
+.jobPickMenu {
+  --ic-white: #ffffff;
+  --ic-red: #821f2d;
+  --ic-bone: #efe9e5;
+  --ink: #000000;
+  --muted: rgba(0, 0, 0, 0.55);
+  --line: rgba(0, 0, 0, 0.12);
+  position: fixed;
+  z-index: 1000;
+  background: var(--ic-white);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  padding: 0.4rem;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.jobPickSearch {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--ic-white);
+  margin-bottom: 0.35rem;
+}
+
+.jobPickSearch:focus {
+  outline: none;
+  border-color: var(--ic-red);
+  box-shadow: 0 0 0 2px rgba(130, 31, 45, 0.15);
+}
+
+.jobPickList {
+  max-height: 13rem;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 0.3rem;
+}
+
+.jobPickOption {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: normal;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.jobPickOption:hover,
+.jobPickOptionActive {
+  background: var(--ic-bone);
+}
+
+.jobPickEmpty {
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .docAttach {
   display: flex;
   flex-wrap: nowrap;

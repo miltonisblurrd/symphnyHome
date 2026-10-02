@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { formatMoney, formatShipDate } from "@/lib/inspired-closets-ops-shipment-display";
 import payroll from "./ops-payroll.module.css";
@@ -91,6 +92,160 @@ function needsJob(doc: Doc): boolean {
   );
 }
 
+function jobLabel(job: JobOption): string {
+  return `${job.client?.name ?? "Job"} · ${job.stage}`;
+}
+
+function JobPicker({
+  jobs,
+  busy,
+  onPick,
+}: {
+  jobs: JobOption[];
+  busy: boolean;
+  onPick: (jobId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [active, setActive] = useState(0);
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return jobs;
+    return jobs.filter((job) => jobLabel(job).toLowerCase().includes(q));
+  }, [jobs, search]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [search, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const width = Math.max(rect.width, 280);
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      const menuHeight = 280;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const top =
+        spaceBelow < menuHeight && rect.top > spaceBelow
+          ? Math.max(8, rect.top - menuHeight - 4)
+          : rect.bottom + 4;
+      setBox({ top, left, width });
+    };
+    place();
+    inputRef.current?.focus();
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (anchorRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
+  }, [active, open, matches]);
+
+  function pick(jobId: string) {
+    setOpen(false);
+    setSearch("");
+    onPick(jobId);
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        className={payroll.jobPickBtn}
+        disabled={busy}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => {
+          setSearch("");
+          setOpen((current) => !current);
+        }}
+      >
+        {busy ? "Saving…" : "Choose job…"}
+      </button>
+      {open && box
+        ? createPortal(
+            <div
+              ref={panelRef}
+              className={payroll.jobPickMenu}
+              style={{ top: box.top, left: box.left, width: box.width }}
+              role="dialog"
+              aria-label="Choose a job"
+            >
+              <input
+                ref={inputRef}
+                className={payroll.jobPickSearch}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActive((index) => Math.min(matches.length - 1, index + 1));
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setActive((index) => Math.max(0, index - 1));
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    const job = matches[active];
+                    if (job) pick(job.id);
+                  }
+                }}
+                placeholder="Type a job name…"
+                aria-label="Find a job"
+              />
+              <div className={payroll.jobPickList} role="listbox" aria-label="Jobs">
+                {matches.length === 0 ? (
+                  <p className={payroll.jobPickEmpty}>No jobs match that.</p>
+                ) : (
+                  matches.map((job, index) => (
+                    <button
+                      key={job.id}
+                      type="button"
+                      role="option"
+                      aria-selected={index === active}
+                      data-active={index === active ? "true" : undefined}
+                      className={`${payroll.jobPickOption} ${index === active ? payroll.jobPickOptionActive : ""}`}
+                      onMouseEnter={() => setActive(index)}
+                      onClick={() => pick(job.id)}
+                    >
+                      {jobLabel(job)}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
 export default function OpsReceivingDocuments({
   refreshToken = 0,
   onCount,
@@ -103,7 +258,6 @@ export default function OpsReceivingDocuments({
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<"all" | DocKind>("all");
   const [query, setQuery] = useState("");
-  const [attach, setAttach] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,8 +330,7 @@ export default function OpsReceivingDocuments({
     });
   }, [documents, kind, query]);
 
-  async function attachSalesOrder(orderId: string, jobId = attach[orderId]) {
-    if (!jobId) return;
+  async function attachSalesOrder(orderId: string, jobId: string) {
     setBusyId(orderId);
     try {
       const response = await fetch("/api/inspired-closets/ops/stow-orders", {
@@ -208,8 +361,7 @@ export default function OpsReceivingDocuments({
     }
   }
 
-  async function attachSummary(summaryId: string, jobId = attach[summaryId]) {
-    if (!jobId) return;
+  async function attachSummary(summaryId: string, jobId: string) {
     setBusyId(summaryId);
     try {
       const response = await fetch("/api/inspired-closets/ops/jobs/summaries", {
@@ -240,8 +392,7 @@ export default function OpsReceivingDocuments({
     }
   }
 
-  async function attachInstallReport(reportId: string, jobId = attach[reportId]) {
-    if (!jobId) return;
+  async function attachInstallReport(reportId: string, jobId: string) {
     setBusyId(reportId);
     try {
       const response = await fetch("/api/inspired-closets/ops/receiving/install-reports", {
@@ -389,30 +540,17 @@ export default function OpsReceivingDocuments({
                     {doc.jobId ? (
                       <Link href={doc.href}>{doc.jobName ?? "Open job"}</Link>
                     ) : needsJob(doc) ? (
-                      <select
-                        className={payroll.input}
-                        value={attach[doc.id] ?? ""}
-                        disabled={busyId === doc.id}
-                        onChange={(event) => {
-                          const jobId = event.target.value;
-                          setAttach((current) => ({ ...current, [doc.id]: jobId }));
-                          if (!jobId) return;
+                      <JobPicker
+                        jobs={jobs}
+                        busy={busyId === doc.id}
+                        onPick={(jobId) => {
                           void (doc.kind === "product_summary"
                             ? attachSummary(doc.id, jobId)
                             : doc.kind === "install_report"
                               ? attachInstallReport(doc.id, jobId)
                               : attachSalesOrder(doc.id, jobId));
                         }}
-                      >
-                        <option value="">
-                          {busyId === doc.id ? "Saving…" : "Choose job…"}
-                        </option>
-                        {jobs.map((job) => (
-                          <option key={job.id} value={job.id}>
-                            {job.client?.name ?? "Job"} · {job.stage}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     ) : (
                       doc.jobName ?? "—"
                     )}

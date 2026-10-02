@@ -118,6 +118,8 @@ function statusLabel(status: string) {
   return "Ready";
 }
 
+const SLIP_PAGE_SIZE = 10;
+
 export default function OpsReceivingWorkspace() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [hint, setHint] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export default function OpsReceivingWorkspace() {
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [uploading, setUploading] = useState<"slip" | "summary" | "install" | false>(false);
   const [docsTick, setDocsTick] = useState(0);
+  const [page, setPage] = useState(1);
   const slipRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
   const installRef = useRef<HTMLInputElement>(null);
@@ -233,6 +236,15 @@ export default function OpsReceivingWorkspace() {
     });
   }, [shipments]);
 
+  const pageCount = Math.max(1, Math.ceil(orderedShipments.length / SLIP_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedShipments = useMemo(() => {
+    const start = (currentPage - 1) * SLIP_PAGE_SIZE;
+    return orderedShipments.slice(start, start + SLIP_PAGE_SIZE);
+  }, [orderedShipments, currentPage]);
+  const rangeStart = orderedShipments.length === 0 ? 0 : (currentPage - 1) * SLIP_PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * SLIP_PAGE_SIZE, orderedShipments.length);
+
   return (
     <OpsShell
       title="Receiving"
@@ -315,6 +327,32 @@ export default function OpsReceivingWorkspace() {
               No trucks yet. Upload a packaging slip for Bryant to scan.
             </p>
           ) : (
+            <>
+            <div className={payroll.pager}>
+              <div className={payroll.pagerLeft}>
+                <p className={payroll.pagerMeta}>
+                  {rangeStart}–{rangeEnd} of {orderedShipments.length} · page {currentPage} of {pageCount}
+                </p>
+              </div>
+              <div className={payroll.pagerButtons}>
+                <button
+                  type="button"
+                  className={payroll.pagerBtn}
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  className={payroll.pagerBtn}
+                  disabled={currentPage >= pageCount}
+                  onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
             <table className={`${payroll.table} ${styles.shipTable}`}>
               <thead>
                 <tr>
@@ -326,7 +364,7 @@ export default function OpsReceivingWorkspace() {
                 </tr>
               </thead>
               <tbody>
-                {orderedShipments.map((ship) => {
+                {pagedShipments.map((ship) => {
                   const pct = ship.pct ?? 0;
                   const overlap = overlapSummary(existingRowFlags(ship.parse_quality));
                   return (
@@ -378,6 +416,7 @@ export default function OpsReceivingWorkspace() {
                 })}
               </tbody>
             </table>
+            </>
           )}
         </section>
 

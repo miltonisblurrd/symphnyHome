@@ -102,13 +102,14 @@ export async function listShowProjects(
 
   if (jobsResult.error && /show_on/i.test(jobsResult.error.message)) {
     toggleHint = SHOW_TOGGLE_SQL_HINT;
-    jobsResult = await supabase
+    const withoutToggle = await supabase
       .from("ic_jobs")
       .select("id, client_id, title, stage, install_date, sold_date, show_label")
       .eq("designer_id", designerId)
       .is("deleted_at", null)
       .order("sold_date", { ascending: false, nullsFirst: false })
       .limit(200);
+    jobsResult = withoutToggle as unknown as typeof jobsResult;
   }
 
   if (jobsResult.error && /show_label|column|schema cache/i.test(jobsResult.error.message)) {

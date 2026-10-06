@@ -1136,6 +1136,14 @@ a.buttonGhost {
   margin-bottom: 1rem;
 }
 
+.leadTabsScroll {
+  overflow-x: auto;
+}
+
+.leadTabsScroll .leadTab {
+  flex: 0 0 auto;
+}
+
 .leadTab {
   border: none;
   background: transparent;

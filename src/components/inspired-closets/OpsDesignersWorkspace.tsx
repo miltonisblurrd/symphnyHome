@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import OpsShell from "@/components/inspired-closets/OpsShell";
+import ShowGallery, { type ShowGalleryProject } from "@/components/inspired-closets/ShowGallery";
 import { mediaKindLabel, isImageMime } from "@/lib/inspired-closets-ops-media";
 import styles from "./ops-payroll.module.css";
 
@@ -68,7 +69,24 @@ type MediaRow = {
   createdAt: string;
 };
 
-type DetailTab = "details" | "schedule" | "leads" | "jobs" | "photos";
+type ShowPhoto = {
+  id: string;
+  url: string | null;
+  caption: string | null;
+  isCover: boolean;
+};
+
+type ShowProject = {
+  id: string;
+  clientName: string;
+  label: string;
+  stageLabel: string;
+  installDate: string | null;
+  visible?: boolean;
+  photos: ShowPhoto[];
+};
+
+type DetailTab = "details" | "schedule" | "leads" | "jobs" | "show" | "photos";
 
 function formatDay(value: string | null): string {
   if (!value) return "—";
@@ -109,6 +127,8 @@ export default function OpsDesignersWorkspace() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
   const [media, setMedia] = useState<MediaRow[]>([]);
+  const [showProjects, setShowProjects] = useState<ShowProject[]>([]);
+  const [showError, setShowError] = useState<string | null>(null);
   const [portalPassword, setPortalPassword] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalNote, setPortalNote] = useState<string | null>(null);
@@ -137,12 +157,16 @@ export default function OpsDesignersWorkspace() {
         jobs?: JobRow[];
         schedule?: ScheduleRow[];
         media?: MediaRow[];
+        show?: ShowProject[];
+        showError?: string | null;
       };
       if (!payload.ok) throw new Error(payload.error ?? "Designer not found.");
       setLeads(payload.leads ?? []);
       setJobs(payload.jobs ?? []);
       setSchedule(payload.schedule ?? []);
       setMedia(payload.media ?? []);
+      setShowProjects(payload.show ?? []);
+      setShowError(payload.showError ?? null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to open designer.");
       setSelectedId(null);
@@ -223,13 +247,14 @@ export default function OpsDesignersWorkspace() {
           </div>
         </div>
 
-        <div className={styles.leadTabs}>
+        <div className={`${styles.leadTabs} ${styles.leadTabsScroll}`}>
           {(
             [
               ["details", "details"],
               ["schedule", "schedule"],
               ["leads", "leads"],
               ["jobs", "jobs"],
+              ["show", "show"],
               ["photos", "photos"],
             ] as const
           ).map(([id, label]) => (
@@ -416,6 +441,53 @@ export default function OpsDesignersWorkspace() {
                 </section>
               ))
             )
+          ) : null}
+
+          {tab === "show" ? (
+            <>
+              <section className={styles.panel}>
+                <p className={styles.railTitle}>Ready to show</p>
+                <p className={styles.leadContact}>
+                  Projects she turned on for a lead. She chooses them in the designer portal.
+                </p>
+                {showError ? <p className={styles.leadContact}>{showError}</p> : null}
+                {showProjects.filter((project) => project.visible).length === 0 ? (
+                  <p className={styles.empty}>Nothing on her show yet.</p>
+                ) : (
+                  <ShowGallery
+                    projects={showProjects
+                      .filter((project) => project.visible)
+                      .map(
+                        (project): ShowGalleryProject => ({
+                          id: project.id,
+                          label: project.label,
+                          detail: project.clientName,
+                          photos: project.photos.map((photo) => ({
+                            id: photo.id,
+                            url: photo.url,
+                            caption: photo.caption,
+                          })),
+                        }),
+                      )}
+                  />
+                )}
+              </section>
+              {showProjects.filter((project) => !project.visible).length > 0 ? (
+                <section className={styles.panel}>
+                  <p className={styles.railTitle}>Not on her show</p>
+                  {showProjects
+                    .filter((project) => !project.visible)
+                    .map((project) => (
+                      <p key={project.id} className={styles.leadContact}>
+                        <strong>{project.clientName}</strong>
+                        {" · "}
+                        {project.stageLabel}
+                        {project.installDate ? ` · Install ${formatDay(project.installDate)}` : ""}
+                      </p>
+                    ))}
+                </section>
+              ) : null}
+            </>
           ) : null}
 
           {tab === "photos" ? (

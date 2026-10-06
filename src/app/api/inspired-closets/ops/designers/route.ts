@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isDbConfigured } from "@/db/client";
 import { stageLabel as jobStageLabel } from "@/lib/inspired-closets-ops-jobs";
 import { sourceLabel, stageLabel as leadStageLabel } from "@/lib/inspired-closets-ops-leads";
+import { listShowProjects } from "@/lib/inspired-closets-show";
 
 export const runtime = "nodejs";
 
@@ -285,10 +286,14 @@ export async function GET(request: Request) {
     }),
   );
 
+  const show = await listShowProjects(designerId);
+
   payload.designer = person;
   payload.leads = theirLeads;
   payload.jobs = jobsForFile;
   payload.schedule = schedule;
   payload.media = media;
+  payload.show = show.ok ? show.projects : [];
+  payload.showError = show.ok ? (show.error ?? null) : show.error;
   return NextResponse.json(payload);
 }

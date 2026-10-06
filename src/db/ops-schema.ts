@@ -357,6 +357,10 @@ export const icJobs = pgTable("ic_jobs", {
   fieldNotes: text("field_notes"),
   /** Notes the designer writes on the job, before the installer is assigned. */
   designerNotes: text("designer_notes"),
+  /** Name on the show-mode card. Leads see this instead of the client file. */
+  showLabel: text("show_label"),
+  /** Designer chose to put this job on the Show grid. */
+  showOn: boolean("show_on").notNull().default(false),
   /** When she told Frank the design is done, and which handoff she chose. */
   designReadyAt: timestamp("design_ready_at", { withTimezone: true }),
   designReadyChoice: text("design_ready_choice"),
@@ -709,6 +713,24 @@ export const icJobMedia = pgTable("ic_job_media", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Photos a designer chose to show a lead. Separate from installer job photos and the proposal. */
+export const icShowPhotos = pgTable("ic_show_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => icJobs.id, { onDelete: "cascade" }),
+  designerId: uuid("designer_id")
+    .notNull()
+    .references(() => icStaff.id),
+  storagePath: text("storage_path").notNull(),
+  caption: text("caption"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isCover: boolean("is_cover").notNull().default(false),
+  mimeType: text("mime_type"),
+  bytes: integer("bytes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** Field issues → feeds service wall later. */
 export const icFieldIssues = pgTable("ic_field_issues", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -741,6 +763,7 @@ export type IcStockMovement = typeof icStockMovements.$inferSelect;
 export type IcJobMaterial = typeof icJobMaterials.$inferSelect;
 export type IcTimeEntry = typeof icTimeEntries.$inferSelect;
 export type IcJobMedia = typeof icJobMedia.$inferSelect;
+export type IcShowPhoto = typeof icShowPhotos.$inferSelect;
 
 export const icStaffPay = pgTable("ic_staff_pay", {
   staffId: uuid("staff_id")

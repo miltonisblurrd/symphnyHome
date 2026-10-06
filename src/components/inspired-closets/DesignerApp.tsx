@@ -4,19 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
 import InstallerHomeCalendar from "@/components/inspired-closets/InstallerHomeCalendar";
+import DesignerShow from "@/components/inspired-closets/DesignerShow";
 import InstallerMonthPage from "@/components/inspired-closets/InstallerMonthPage";
 import access from "@/app/inspired-closets/access/access.module.css";
 import styles from "./field.module.css";
 
 const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 
-type DesignerTab = "today" | "schedule" | "leads" | "jobs";
+type DesignerTab = "today" | "schedule" | "leads" | "jobs" | "show";
 
 const NAV: { id: DesignerTab; label: string }[] = [
   { id: "today", label: "Home" },
   { id: "schedule", label: "Schedule" },
   { id: "leads", label: "Leads" },
   { id: "jobs", label: "Jobs" },
+  { id: "show", label: "Show" },
 ];
 
 type DesignerPlace = { tab: DesignerTab; jobId: string | null };
@@ -42,7 +44,7 @@ function parseDesignerHash(hash: string): DesignerPlace | null {
     return jobId ? { tab: "jobs", jobId } : null;
   }
   if (raw === "home" || raw === "today") return { tab: "today", jobId: null };
-  if (raw === "schedule" || raw === "leads" || raw === "jobs") return { tab: raw, jobId: null };
+  if (raw === "schedule" || raw === "leads" || raw === "jobs" || raw === "show") return { tab: raw, jobId: null };
   return null;
 }
 
@@ -246,6 +248,15 @@ function TabIcon({ id }: { id: DesignerTab }) {
           strokeWidth="1.8"
           strokeLinecap="round"
         />
+      </svg>
+    );
+  }
+  if (id === "show") {
+    return (
+      <svg className={styles.tabBarIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+        <circle cx="9" cy="10" r="1.4" fill="currentColor" />
+        <path d="m4 16 4.2-3.4 2.8 2.2L14.5 11 20 16" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
     );
   }
@@ -1202,6 +1213,8 @@ export default function DesignerApp() {
               </section>
             </div>
           ) : null}
+
+          {tab === "show" && !job ? <DesignerShow /> : null}
 
           {tab === "jobs" && !job ? (
             <div className={styles.jobsBoard}>

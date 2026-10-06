@@ -2513,7 +2513,7 @@
 
   .tabBar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
@@ -2531,9 +2531,9 @@
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.52);
-    font-size: 0.72rem;
+    font-size: 0.64rem;
     font-weight: 800;
-    padding: 0.42rem 0.2rem 0.3rem;
+    padding: 0.42rem 0.1rem 0.3rem;
     min-height: 3.35rem;
     cursor: pointer;
     touch-action: manipulation;

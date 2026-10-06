@@ -123,7 +123,7 @@ export default function OpsPayrollWorkspace() {
   }, [load]);
 
   const designers = useMemo(
-    () => staff.filter((member) => isDesignDeskRole(member.role) && member.active),
+    () => staff.filter((member) => (isDesignDeskRole(member.role) || member.role === "owner") && member.active),
     [staff],
   );
 

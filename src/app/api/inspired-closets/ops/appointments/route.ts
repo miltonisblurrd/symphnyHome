@@ -147,7 +147,9 @@ export async function GET(request: Request) {
   });
 
   // Closing ratio strip: assigned leads vs converted for designers.
-  const designers = (staffResult.data ?? []).filter((s) => isDesignDeskRole(s.role));
+  const designers = (staffResult.data ?? []).filter(
+    (s) => isDesignDeskRole(s.role) || s.role === "owner",
+  );
   const closing = designers.map((designer) => {
     const assigned = (leadsResult.data ?? []).filter((l) => l.designer_id === designer.id);
     const converted = assigned.filter((l) => Boolean(l.converted_job_id));

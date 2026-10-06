@@ -10,9 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "opennextjs-cloudflare build && wrangler deploy",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "deploy": "vercel --prod",
+    "preview": "vercel",
     "mcp:stdio": "tsx src/mcp/stdio-server.ts",
     "content:dry-run": "tsx scripts/content-engine-run.ts --dry-run",
     "content:next": "tsx scripts/content-engine-run.ts",
@@ -40,10 +39,8 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250415.0",
     "@cursor/sdk": "^1.0.17",
     "@eslint/eslintrc": "^3",
-    "@opennextjs/cloudflare": "^1.6.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -55,6 +52,6 @@
     "tailwindcss": "^4",
     "tsx": "^4.19.3",
     "typescript": "^5",
-    "wrangler": "^4.11.1"
+    "vercel": "^48.2.9"
   }
 }

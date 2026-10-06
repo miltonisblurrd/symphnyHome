@@ -3,8 +3,8 @@
 ## Your action items
 
 ### Domain & email
-1. Add custom domain in Cloudflare → attach to Worker from `wrangler.json`.
-2. Set `NEXT_PUBLIC_SITE_URL=https://symphonystudio.io` (or your apex) in Cloudflare env.
+1. Add the custom domain in the Vercel project.
+2. Set `NEXT_PUBLIC_SITE_URL=https://symphonystudio.io` (or your apex) in Vercel env.
 3. Configure DNS (apex + `www` redirect to canonical host).
 4. Set up `hello@`, `privacy@`, and `legal@` on your domain (Google Workspace, Fastmail, etc.).
 
@@ -13,7 +13,7 @@
 2. Set `NEXT_PUBLIC_BOOKING_URL` to that link.
 3. Optional: set `CONTACT_WEBHOOK_URL` to Slack, Zapier, or Formspree endpoint so contact form submissions notify you (otherwise logged server-side).
 
-### Secrets (Cloudflare)
+### Secrets (Vercel)
 - `ANTHROPIC_API_KEY` — homepage chat
 - `NEXT_PUBLIC_SITE_URL`
 - `NEXT_PUBLIC_BOOKING_URL`
@@ -52,14 +52,14 @@ Drop client-approved testimonial at `public/media/about-testimonial.mp4` or upda
 
 **Practical order for Symphony Studio today:**
 1. Ship site + contracts + privacy (done in repo).
-2. Use reputable vendors (Cloudflare, Anthropic) with their SOC 2 reports available under NDA.
+2. Use reputable vendors (Vercel, Anthropic) with their SOC 2 reports available under NDA.
 3. Document your own security story on `/security` (orchestration layer, access, audit)—already on site.
 4. When revenue from enterprise clients justifies cost (~$15k–$50k+/year with tooling), start **SOC 2 Type I** via compliance automation (Vanta, Secureframe, Drata).
 5. Consider **ISO 27001** only if customers explicitly require it or you expand internationally.
 
 **What helps before certification:**
 - Written security & incident response policy (internal doc)
-- Subprocessor list (Cloudflare, Anthropic, email provider)
+- Subprocessor list (Vercel, Anthropic, email provider)
 - DPAs with clients who share customer data
 - Business insurance (E&O, cyber liability)
 

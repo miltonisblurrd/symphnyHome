@@ -26,21 +26,23 @@ Brand / Style Guide page is intentionally omitted until the full site design is 
 - **Stdio (local):** `npm run mcp:stdio`
 - **Discovery JSON:** `/api/mcp`
 
-## Deploy (Cloudflare Workers via OpenNext)
+## Deploy (Vercel)
 
-1. Set secrets/env in Cloudflare (at minimum `**ANTHROPIC_API_KEY`** for `/api/chat`).
-2. Build and deploy:
+1. Set environment variables in the Vercel project (at minimum `ANTHROPIC_API_KEY` for `/api/chat`).
+2. Deploy:
 
 ```bash
 npm run deploy
 ```
+
+Production deploys also run when `main` is pushed, if the GitHub repo is connected to Vercel.
 
 1. **Smoke test after deploy:**
   - `/` — homepage loads; chat streams a reply
   - `/faq`, `/pricing`, `/solutions` — footer links resolve
   - `/api/mcp/http` — MCP Inspector or compatible client connects
   - `npm run mcp:stdio` — stdio server starts locally
-2. Attach your custom domain in the Cloudflare dashboard to the worker defined in `[wrangler.json](wrangler.json)`.
+2. Attach the custom domain in the Vercel project settings.
 3. Set environment variables (see `[docs/LAUNCH.md](docs/LAUNCH.md)`):
   - `NEXT_PUBLIC_SITE_URL`
   - `NEXT_PUBLIC_BOOKING_URL`
@@ -67,7 +69,7 @@ Blog, guide, FAQ, and YouTube scripts from a 30-day calendar. Skill: `.cursor/sk
 | `npm run dev`       | Local Next.js dev server         |
 | `npm run dev:clean` | Clear `.next` and start dev      |
 | `npm run build`     | Production build                 |
-| `npm run deploy`    | OpenNext build + Wrangler deploy |
+| `npm run deploy`    | Production deploy on Vercel      |
 | `npm run mcp:stdio` | Symphony MCP server (stdio)      |
 
 

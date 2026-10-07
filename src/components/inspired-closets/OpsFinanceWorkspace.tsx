@@ -292,7 +292,7 @@ export default function OpsFinanceWorkspace() {
                           Marked in QB
                         </button>
                       ) : item.kind === "who_owes" || item.kind === "final_unpaid" ? (
-                        <Link className={styles.buttonGhost} href="/inspired-closets/ops/billing">
+                        <Link className={styles.buttonGhost} href="/ops/billing">
                           Open billing
                         </Link>
                       ) : item.jobId ? (

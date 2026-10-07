@@ -548,7 +548,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
   return (
     <div className={`${styles.scanPage} ${hit ? styles.scanHit : ""}`}>
       <header className={styles.scanChrome}>
-        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}`} className={styles.scanNav}>
+        <Link href={`/ops/inventory/receiving/${shipmentId}`} className={styles.scanNav}>
           Back
         </Link>
         <div className={styles.scanCounts}>
@@ -566,7 +566,7 @@ export default function OpsReceiveScan({ shipmentId }: { shipmentId: string }) {
           </p>
           <p className={styles.scanBrand}>Inspired Closets{notice ? ` · ${notice}` : ""}</p>
         </div>
-        <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/summary`} className={styles.scanNav}>
+        <Link href={`/ops/inventory/receiving/${shipmentId}/summary`} className={styles.scanNav}>
           Summary
         </Link>
       </header>

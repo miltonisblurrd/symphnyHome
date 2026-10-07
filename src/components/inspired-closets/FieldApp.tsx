@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 import {
   ISSUE_TYPES,
   MEDIA_KINDS,
@@ -14,10 +13,8 @@ import FieldVehicleTab, {
   type FieldVehicleSnapshot,
 } from "@/components/inspired-closets/FieldVehicleTab";
 import { installDateSpan } from "@/lib/inspired-closets-field-dates";
-import access from "@/app/inspired-closets/access/access.module.css";
+import access from "@/components/inspired-closets/access.module.css";
 import styles from "./field.module.css";
-
-const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 
 type FieldTab = "today" | "schedule" | "jobs" | "vehicle" | "me";
 
@@ -567,11 +564,9 @@ export default function FieldApp() {
   const [jobsShowPacketFirst, setJobsShowPacketFirst] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [phone, setPhone] = useState("");
   const bellRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const [password, setPassword] = useState("");
   const [ptoKind, setPtoKind] = useState<"pto" | "sick">("pto");
   const [ptoStart, setPtoStart] = useState("");
   const [ptoEnd, setPtoEnd] = useState("");
@@ -906,56 +901,14 @@ export default function FieldApp() {
     return () => window.clearInterval(id);
   }, [hasOpenClock]);
 
-  async function finishSignIn(response: Response) {
-    const payload = (await response.json()) as { ok?: boolean; error?: string; installer?: Installer };
-    if (!payload.ok || !payload.installer) throw new Error(payload.error ?? "Sign-in failed.");
-    setInstaller(payload.installer);
-    setPassword("");
-    setTab("today");
-    await Promise.all([
-      loadHome(),
-      loadJobs(),
-      loadPto(),
-      loadProfiles(payload.installer.id),
-    ]);
-  }
-
-  async function signIn() {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/field/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login: phone, password }),
-      });
-      await finishSignIn(response);
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Sign-in failed." });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function signInTest() {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/field/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ test: true }),
-      });
-      await finishSignIn(response);
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Test login failed." });
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => {
+    if (!loading && !installer) window.location.replace("/");
+  }, [loading, installer]);
 
   async function signOut() {
     await fetch("/api/inspired-closets/field/auth", { method: "DELETE" });
+    await fetch("/api/inspired-closets/access", { method: "DELETE" });
+    window.location.replace("/");
     setInstaller(null);
     setMyProfile(null);
     setJobs([]);
@@ -1428,74 +1381,7 @@ export default function FieldApp() {
   }
 
   if (!installer) {
-    return (
-      <main className={access.page}>
-        <div className={access.card}>
-          <div className={access.header}>
-            <div className={access.brandBlock}>
-              <Image
-                src={LOGO_SRC}
-                alt="Inspired Closets"
-                width={88}
-                height={81}
-                className={access.logo}
-                priority
-                unoptimized
-              />
-              <p className={access.eyebrow}>Inspired Closets · private preview</p>
-            </div>
-            <h1 className={access.title}>Installer Login</h1>
-            <p className={access.lead}>
-              Sign in with your name and password. A saved phone number works too.
-            </p>
-          </div>
-          <form
-            className={access.form}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void signIn();
-            }}
-          >
-            <input
-              className={access.input}
-              type="text"
-              autoComplete="username"
-              aria-label="Name or phone"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="Name or phone"
-              required
-            />
-            <input
-              className={access.input}
-              type="password"
-              autoComplete="current-password"
-              aria-label="Password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
-              required
-            />
-            {notice?.kind === "error" ? <p className={access.error}>{notice.text}</p> : null}
-            <button
-              className={access.button}
-              type="submit"
-              disabled={busy || !phone.trim() || !password.trim()}
-            >
-              {busy ? "Checking…" : "Sign in"}
-            </button>
-            <button
-              className={access.buttonGhost}
-              type="button"
-              disabled={busy}
-              onClick={() => void signInTest()}
-            >
-              Continue as test installer
-            </button>
-          </form>
-        </div>
-      </main>
-    );
+    return <main className={access.page} />;
   }
 
   const profile = meProfile;

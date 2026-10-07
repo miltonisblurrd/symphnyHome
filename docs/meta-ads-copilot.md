@@ -8,7 +8,7 @@ Keep the current OS. Do not start a second Next.js app.
 
 | Concern | Use |
 | --- | --- |
-| App | Existing Next.js 15 app, `OpsShell`, `/inspired-closets/ops/ads` |
+| App | Existing Next.js 15 app, `OpsShell`, `/ops/ads` |
 | Auth | Existing staff cookie and role gate. Inventory logins cannot open this tab. |
 | Database | Supabase. Schema in `src/db/meta-ads-schema.ts`. Apply `drizzle/0032_ic_meta_ads.sql`. |
 | Jobs | Existing cron-route style when scheduling starts. Trigger.dev is not in this repo. |

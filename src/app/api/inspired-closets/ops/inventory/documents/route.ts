@@ -194,8 +194,8 @@ export async function GET() {
         createdAt: row.created_at,
         publicUrl: row.public_url ?? null,
         href: row.job_id
-          ? `/inspired-closets/ops/projects?id=${row.job_id}`
-          : "/inspired-closets/ops/inventory",
+          ? `/ops/projects?id=${row.job_id}`
+          : "/ops/inventory",
       });
     }
   }
@@ -222,8 +222,8 @@ export async function GET() {
         createdAt: row.created_at,
         publicUrl: row.public_url ?? null,
         href: row.job_id
-          ? `/inspired-closets/ops/projects?id=${row.job_id}`
-          : row.public_url || "/inspired-closets/ops/inventory",
+          ? `/ops/projects?id=${row.job_id}`
+          : row.public_url || "/ops/inventory",
       });
     }
   }
@@ -248,8 +248,8 @@ export async function GET() {
         createdAt: row.created_at,
         publicUrl: row.public_url ?? null,
         href: row.job_id
-          ? `/inspired-closets/ops/projects?id=${row.job_id}`
-          : row.public_url || "/inspired-closets/ops/inventory",
+          ? `/ops/projects?id=${row.job_id}`
+          : row.public_url || "/ops/inventory",
       });
     }
   }
@@ -288,7 +288,7 @@ export async function GET() {
       vendor: shipmentVendorLabel({ vendor: row.vendor, source_filename: row.source_filename }),
       createdAt: row.created_at,
       publicUrl: row.public_url ?? null,
-      href: `/inspired-closets/ops/inventory/receiving/${row.id}`,
+      href: `/ops/inventory/receiving/${row.id}`,
     });
   }
 

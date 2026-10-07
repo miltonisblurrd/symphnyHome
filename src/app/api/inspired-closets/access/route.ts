@@ -6,7 +6,14 @@ import {
   getExpectedInspiredClosetsAccessToken,
   isInspiredClosetsAccessEnabled,
 } from "@/lib/inspired-closets-access";
-import { verifyPassword } from "@/lib/inspired-closets-field-auth";
+import {
+  applyFieldSession,
+  clearFieldSession,
+  normalizePhone,
+  phonesMatch,
+  verifyPassword,
+} from "@/lib/inspired-closets-field-auth";
+import { isFieldTestInstaller } from "@/lib/inspired-closets-field-test-seed";
 import {
   IC_STAFF_ID_COOKIE,
   IC_STAFF_NAME_COOKIE,
@@ -39,6 +46,42 @@ function clearStaffCookies(response: NextResponse) {
   response.cookies.set(IC_STAFF_ROLE_COOKIE, "", gone);
   response.cookies.set(IC_STAFF_NAME_COOKIE, "", gone);
   clearDesignerSession(response);
+  clearFieldSession(response);
+}
+
+type StaffLoginRow = {
+  id: string;
+  name: string;
+  role: string;
+  email: string | null;
+  workbook_tab: string | null;
+  phone: string | null;
+  title: string | null;
+  password_hash: string | null;
+};
+
+function matchInstaller(rows: StaffLoginRow[], login: string): { match: StaffLoginRow | null; error?: string } {
+  const phone = normalizePhone(login);
+  const phoneOnly = phone.length >= 10 && !/[a-z]/i.test(login);
+  const installers = rows.filter((row) => row.role === "installer" && !isFieldTestInstaller(row));
+  if (phoneOnly) {
+    const hits = installers.filter((row) => phonesMatch(row.phone, phone));
+    if (hits.length > 1) {
+      return { match: null, error: "More than one installer matches. Sign in with your full name." };
+    }
+    return { match: hits[0] ?? null };
+  }
+  const nameHits = installers.filter((row) => {
+    const full = row.name.trim().toLowerCase();
+    const id = login.toLowerCase();
+    if (full === id) return true;
+    return (full.split(/\s+/)[0] ?? "") === id;
+  });
+  const exact = nameHits.filter((row) => row.name.trim().toLowerCase() === login.toLowerCase());
+  if (nameHits.length > 1 && exact.length !== 1) {
+    return { match: null, error: "More than one installer matches. Sign in with your full name." };
+  }
+  return { match: exact[0] ?? nameHits[0] ?? null };
 }
 
 function setStaffCookies(
@@ -81,20 +124,25 @@ export async function POST(request: Request) {
     const supabase = getSupabaseAdmin();
     const { data: staffRows, error } = await supabase
       .from("ic_staff")
-      .select("id, name, role, email, workbook_tab, active, password_hash")
+      .select("id, name, role, email, workbook_tab, phone, title, active, password_hash")
       .eq("active", true)
-      .is("deleted_at", null)
-      .neq("role", "installer");
+      .is("deleted_at", null);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const match = (staffRows ?? []).find((row) => staffMatchesLoginId(row, username));
+    const rows = (staffRows ?? []) as StaffLoginRow[];
+    const officeMatch = rows.find((row) => row.role !== "installer" && staffMatchesLoginId(row, username));
+    const installerHit = officeMatch ? null : matchInstaller(rows, username);
+    if (installerHit?.error) {
+      return NextResponse.json({ error: installerHit.error }, { status: 401 });
+    }
+    const match = officeMatch ?? installerHit?.match ?? null;
     if (match) {
       if (!match.password_hash) {
         return NextResponse.json(
-          { error: "Ask Milton to set your office password first." },
+          { error: "Ask the office to set your password first." },
           { status: 403 },
         );
       }
@@ -110,8 +158,20 @@ export async function POST(request: Request) {
         staff: { id: match.id, name: match.name, role: match.role },
         redirectTo: home,
       });
+      if (match.role === "installer") {
+        clearStaffCookies(response);
+        applyFieldSession(response, {
+          id: match.id,
+          name: match.name,
+          role: match.role,
+          phone: match.phone,
+          title: match.title,
+        });
+        return response;
+      }
       await applyAccessCookie(response);
       setStaffCookies(response, match);
+      clearFieldSession(response);
       if (match.role === "designer") applyDesignerSession(response, match);
       return response;
     }

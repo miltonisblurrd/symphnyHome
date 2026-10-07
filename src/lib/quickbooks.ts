@@ -278,7 +278,7 @@ export function renderQuickBooksConnectedPage(input: {
     message:
       "Sandbox OAuth succeeded. Paste the values below into your <code>.env</code> (local) or Vercel environment variables, then restart/redeploy.",
     preContent: `QUICKBOOKS_REALM_ID=${input.realmId}\nQUICKBOOKS_REFRESH_TOKEN=${input.refreshToken}\nQUICKBOOKS_ENVIRONMENT=${input.environment}`,
-    linkHref: "/inspired-closets/gavin",
+    linkHref: "/gavin",
     linkLabel: "Back to Gavin dashboard",
   });
 }

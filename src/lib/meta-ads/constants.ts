@@ -7,7 +7,7 @@
 
 export const META_ADS_ACCESS = "read-only" as const;
 
-export const META_ADS_ROUTE = "/inspired-closets/ops/ads";
+export const META_ADS_ROUTE = "/ops/ads";
 
 /**
  * Current cheap OpenAI model for this analyst (checked Sep 29, 2026).

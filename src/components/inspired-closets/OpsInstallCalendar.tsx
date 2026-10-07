@@ -286,7 +286,7 @@ export default function OpsInstallCalendar({
           <span className={styles.sideHint}>Sold → deposit → ready → install</span>
         </div>
         <div className={styles.todayStats}>
-          <a className={styles.todayStat} href="/inspired-closets/ops/billing">
+          <a className={styles.todayStat} href="/ops/billing">
             <strong>{awaitingDeposit.length}</strong>
             <span>Awaiting deposit</span>
           </a>
@@ -752,7 +752,7 @@ export default function OpsInstallCalendar({
                         {(job.deposit_intake_status ?? "pending").replace(/_/g, " ")}
                       </span>
                     </div>
-                    <a className={styles.stripLink} href="/inspired-closets/ops/billing">
+                    <a className={styles.stripLink} href="/ops/billing">
                       Open Billing
                     </a>
                   </li>

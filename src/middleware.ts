@@ -6,6 +6,7 @@ import {
   getExpectedInspiredClosetsAccessToken,
   isInspiredClosetsAccessEnabled,
   isInspiredClosetsProtectedPath,
+  isInstallerAppPath,
 } from "@/lib/inspired-closets-access";
 import { IC_STAFF_ROLE_COOKIE } from "@/lib/inspired-closets-ops-field";
 import {
@@ -17,6 +18,17 @@ import {
 
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+
+  if (isInstallerAppPath(pathname)) {
+    const field = request.cookies.get("ic-field-session")?.value;
+    if (!field) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/";
+      loginUrl.searchParams.set("returnTo", `${pathname}${search}`);
+      return NextResponse.redirect(loginUrl);
+    }
+    return NextResponse.next();
+  }
 
   if (!isInspiredClosetsProtectedPath(pathname)) {
     return NextResponse.next();

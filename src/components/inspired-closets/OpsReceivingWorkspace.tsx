@@ -397,14 +397,14 @@ export default function OpsReceivingWorkspace() {
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         <Link
-                          href={`/inspired-closets/ops/inventory/receiving/${ship.id}/scan`}
+                          href={`/ops/inventory/receiving/${ship.id}/scan`}
                           className={payroll.buttonPrimary}
                           style={{ marginRight: "0.35rem", display: "inline-block" }}
                         >
                           Scan
                         </Link>
                         <Link
-                          href={`/inspired-closets/ops/inventory/receiving/${ship.id}`}
+                          href={`/ops/inventory/receiving/${ship.id}`}
                           className={payroll.buttonGhost}
                           style={{ display: "inline-block" }}
                         >

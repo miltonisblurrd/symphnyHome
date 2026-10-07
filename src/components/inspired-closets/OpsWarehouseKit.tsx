@@ -306,7 +306,7 @@ export default function OpsWarehouseKit({ jobId }: { jobId: string }) {
   return (
     <OpsShell title={job?.client_name ?? "Kit"} subtitle={job ? undefined : loading ? "Loading the pile" : "This kit could not be opened"}>
       <div className={styles.stack}>
-        <Link href="/inspired-closets/ops/warehouse" className={styles.back}>
+        <Link href="/ops/warehouse" className={styles.back}>
           ← All kitting jobs
         </Link>
         {error ? <p className={styles.notice}>{error}</p> : null}

@@ -1,15 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
 import InstallerHomeCalendar from "@/components/inspired-closets/InstallerHomeCalendar";
 import DesignerShow from "@/components/inspired-closets/DesignerShow";
 import InstallerMonthPage from "@/components/inspired-closets/InstallerMonthPage";
-import access from "@/app/inspired-closets/access/access.module.css";
+import access from "@/components/inspired-closets/access.module.css";
 import styles from "./field.module.css";
-
-const LOGO_SRC = "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png";
 
 type DesignerTab = "today" | "schedule" | "leads" | "jobs" | "show";
 
@@ -307,8 +304,6 @@ function ContactActions({
 export default function DesignerApp() {
   const [designer, setDesigner] = useState<Designer | null>(null);
   const [ready, setReady] = useState(false);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [tab, setTab] = useState<DesignerTab>("today");
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [jobs, setJobs] = useState<JobRow[]>([]);
@@ -567,38 +562,14 @@ export default function DesignerApp() {
     goToTab("leads");
   }
 
-  async function signIn() {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/inspired-closets/designers/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string; designer?: Designer };
-      if (!response.ok || !payload.ok || !payload.designer) {
-        throw new Error(payload.error ?? "Could not sign in.");
-      }
-      setDesigner(payload.designer);
-      setPassword("");
-      await loadHome();
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not sign in." });
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => {
+    if (ready && !designer) window.location.replace("/");
+  }, [ready, designer]);
 
   async function signOut() {
     await fetch("/api/inspired-closets/designers/auth", { method: "DELETE" });
-    setDesigner(null);
-    openJobIdRef.current = null;
-    setJob(null);
-    setLeads([]);
-    setJobs([]);
-    setAppointments([]);
-    setMenuOpen(false);
+    await fetch("/api/inspired-closets/access", { method: "DELETE" });
+    window.location.replace("/");
   }
 
   async function openJob(id: string, opts?: { recordHistory?: boolean }) {
@@ -820,63 +791,7 @@ export default function DesignerApp() {
   }
 
   if (!designer) {
-    return (
-      <main className={access.page}>
-        <div className={access.card}>
-          <div className={access.header}>
-            <div className={access.brandBlock}>
-              <Image
-                src={LOGO_SRC}
-                alt="Inspired Closets"
-                width={88}
-                height={81}
-                className={access.logo}
-                priority
-                unoptimized
-              />
-              <p className={access.eyebrow}>Inspired Closets · private preview</p>
-            </div>
-            <h1 className={access.title}>Designer Login</h1>
-            <p className={access.lead}>Sign in with your name and password</p>
-          </div>
-          <form
-            className={access.form}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void signIn();
-            }}
-          >
-            <input
-              className={access.input}
-              autoComplete="username"
-              aria-label="Name"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="Name"
-              required
-            />
-            <input
-              className={access.input}
-              type="password"
-              autoComplete="current-password"
-              aria-label="Password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
-              required
-            />
-            {notice?.kind === "error" ? <p className={access.error}>{notice.text}</p> : null}
-            <button
-              className={access.button}
-              type="submit"
-              disabled={busy || !username.trim() || !password.trim()}
-            >
-              {busy ? "Checking…" : "Sign in"}
-            </button>
-          </form>
-        </div>
-      </main>
-    );
+    return <main className={access.page} />;
   }
 
   const jobTile = (row: JobRow, past = false) => (

@@ -1,14 +1,15 @@
 export const INSPIRED_CLOSETS_ACCESS_COOKIE = "ic-prototype-access";
-export const INSPIRED_CLOSETS_PROTECTED_PREFIX = "/inspired-closets";
-export const INSPIRED_CLOSETS_ACCESS_PATH = "/inspired-closets/access";
+export const INSPIRED_CLOSETS_ACCESS_PATH = "/";
+
+const PROTECTED_PAGE_PREFIXES = ["/ops", "/designers", "/gavin"] as const;
 
 /** Installer app pages. These use phone + password, not the office access page. */
 export function isInstallerAppPath(pathname: string): boolean {
   return (
-    pathname === "/inspired-closets/installers" ||
-    pathname.startsWith("/inspired-closets/installers/") ||
-    pathname === "/inspired-closets/field" ||
-    pathname.startsWith("/inspired-closets/field/")
+    pathname === "/installers" ||
+    pathname.startsWith("/installers/") ||
+    pathname === "/field" ||
+    pathname.startsWith("/field/")
   );
 }
 
@@ -36,23 +37,21 @@ export function installerAppReturnPath(returnTo: string | null | undefined): str
 }
 
 export function isInspiredClosetsProtectedPath(pathname: string): boolean {
-  if (pathname.startsWith(INSPIRED_CLOSETS_PROTECTED_PREFIX)) {
-    if (pathname === INSPIRED_CLOSETS_ACCESS_PATH) return false;
-    // Customer-site form replicas — public so the walkthrough can start like a real lead.
-    if (pathname === "/inspired-closets/site" || pathname.startsWith("/inspired-closets/site/")) {
-      return false;
-    }
-    // Installers sign in on their own screen. The office gate was bouncing that URL.
-    if (isInstallerAppPath(pathname)) return false;
-    // Link previews fetch these. The office gate was serving the Symphony image instead.
-    if (
-      pathname === "/inspired-closets/opengraph-image" ||
-      pathname.startsWith("/inspired-closets/opengraph-image") ||
-      pathname === "/inspired-closets/twitter-image" ||
-      pathname.startsWith("/inspired-closets/twitter-image")
-    ) {
-      return false;
-    }
+  if (pathname === "/" || pathname === "/access") return false;
+  if (pathname === "/site" || pathname.startsWith("/site/")) return false;
+  if (
+    pathname === "/opengraph-image" ||
+    pathname.startsWith("/opengraph-image") ||
+    pathname === "/twitter-image" ||
+    pathname.startsWith("/twitter-image")
+  ) {
+    return false;
+  }
+  if (
+    PROTECTED_PAGE_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
     return true;
   }
 

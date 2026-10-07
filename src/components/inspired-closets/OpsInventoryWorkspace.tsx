@@ -719,7 +719,7 @@ export default function OpsInventoryWorkspace() {
                   <tr
                     key={job.id}
                     style={{ cursor: "pointer" }}
-                    onClick={() => router.push(`/inspired-closets/ops/projects?id=${job.id}`)}
+                    onClick={() => router.push(`/ops/projects?id=${job.id}`)}
                   >
                     <td>
                       <strong>{job.client?.name ?? "Job"}</strong>

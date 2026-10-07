@@ -11,13 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "deploy": "vercel --prod",
-    "preview": "vercel",
-    "mcp:stdio": "tsx src/mcp/stdio-server.ts",
-    "content:dry-run": "tsx scripts/content-engine-run.ts --dry-run",
-    "content:next": "tsx scripts/content-engine-run.ts",
-    "content:next:cloud": "tsx scripts/content-engine-run.ts --cloud",
-    "content:publish-check": "tsx scripts/content-publish-check.ts",
-    "content:sync-heroes": "tsx scripts/content-sync-heroes.ts"
+    "preview": "vercel"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

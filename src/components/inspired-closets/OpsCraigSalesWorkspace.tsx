@@ -708,7 +708,7 @@ export default function OpsCraigSalesWorkspace() {
                   {jobBuckets.waiting.slice(0, 8).map((job) => (
                     <li key={job.id} className={styles.todoItem}>
                       <span>
-                        <Link href={`/inspired-closets/ops/projects?id=${job.id}`} className={styles.rowLink}>
+                        <Link href={`/ops/projects?id=${job.id}`} className={styles.rowLink}>
                           {job.client?.name ?? "Job"}
                         </Link>
                         {job.designer ? <span className={styles.todoWho}>{designerLabel(job.designer.name)}</span> : null}
@@ -1128,7 +1128,7 @@ function SheetRow({
       </td>
       <td className={styles.cellCenter}>
         {lead.converted_job_id ? (
-          <Link href={`/inspired-closets/ops/projects?id=${lead.converted_job_id}`} className={styles.onSheet}>
+          <Link href={`/ops/projects?id=${lead.converted_job_id}`} className={styles.onSheet}>
             ✓ Sheet
           </Link>
         ) : (
@@ -1251,7 +1251,7 @@ function JobSection({
                 return (
                   <tr key={job.id} className={job.ready_to_order && !job.summary_confirmed ? styles.rtoRow : undefined}>
                     <td className={styles.cellText}>
-                      <Link href={`/inspired-closets/ops/projects?id=${job.id}`} className={styles.rowLink}>
+                      <Link href={`/ops/projects?id=${job.id}`} className={styles.rowLink}>
                         {job.client?.name ?? "Job"}
                       </Link>
                     </td>

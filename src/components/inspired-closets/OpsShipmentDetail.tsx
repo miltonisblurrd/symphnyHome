@@ -243,7 +243,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
       };
       if (!payload.ok) throw new Error(payload.error ?? "Could not update this slip.");
       if (payload.merged?.pruned) {
-        router.push("/inspired-closets/ops/inventory/receiving");
+        router.push("/ops/inventory/receiving");
         return;
       }
       await load();
@@ -342,7 +342,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
       actions={
         <div className={`${payroll.actions} ${styles.noPrint}`}>
           <Link
-            href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/scan`}
+            href={`/ops/inventory/receiving/${shipmentId}/scan`}
             className={payroll.buttonPrimary}
           >
             Start receiving
@@ -352,13 +352,13 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
               Print labels
             </button>
           ) : null}
-          <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/check`} className={payroll.buttonGhost}>
+          <Link href={`/ops/inventory/receiving/${shipmentId}/check`} className={payroll.buttonGhost}>
             Check the read
           </Link>
-          <Link href={`/inspired-closets/ops/inventory/receiving/${shipmentId}/summary`} className={payroll.buttonGhost}>
+          <Link href={`/ops/inventory/receiving/${shipmentId}/summary`} className={payroll.buttonGhost}>
             Summary
           </Link>
-          <Link href="/inspired-closets/ops/inventory/receiving" className={payroll.buttonGhost}>
+          <Link href="/ops/inventory/receiving" className={payroll.buttonGhost}>
             All trucks
           </Link>
         </div>
@@ -437,7 +437,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                 {pdfs.map((pdf) => {
                   const qs = pdf.path ? `?path=${encodeURIComponent(pdf.path)}` : "";
                   const file = `/api/inspired-closets/ops/receiving/shipments/${shipmentId}/file${qs}`;
-                  const view = `/inspired-closets/ops/inventory/receiving/${shipmentId}/slip${qs}`;
+                  const view = `/ops/inventory/receiving/${shipmentId}/slip${qs}`;
                   return (
                     <div key={pdf.path || pdf.url || pdf.label}>
                       <Link className={styles.pdfPreview} href={view}>
@@ -576,7 +576,7 @@ export default function OpsShipmentDetail({ shipmentId }: { shipmentId: string }
                 </li>
               ))}
             </ul>
-            <Link href="/inspired-closets/ops/inventory/receiving/claims">All claims →</Link>
+            <Link href="/ops/inventory/receiving/claims">All claims →</Link>
           </section>
         ) : null}
 

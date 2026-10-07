@@ -26,8 +26,8 @@ const WAREHOUSE_NAV: NavGroup[] = [
   {
     label: "Warehouse",
     items: [
-      { href: "/inspired-closets/ops/warehouse", label: "Kitting", icon: "▣" },
-      { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▤" },
+      { href: "/ops/warehouse", label: "Kitting", icon: "▣" },
+      { href: "/ops/inventory/receiving", label: "Receiving", icon: "▤" },
     ],
   },
 ];
@@ -35,35 +35,35 @@ const WAREHOUSE_NAV: NavGroup[] = [
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Projects",
-    items: [{ href: "/inspired-closets/ops/projects", label: "Projects", icon: "▤" }],
+    items: [{ href: "/ops/projects", label: "Projects", icon: "▤" }],
   },
   {
     label: "Process",
     items: [
-      { href: "/inspired-closets/ops/leads", label: "Leads", icon: "◉" },
-      { href: "/inspired-closets/ops/appointments", label: "Calendar", icon: "◷" },
-      { href: "/inspired-closets/ops/billing", label: "Payments", icon: "◈" },
+      { href: "/ops/leads", label: "Leads", icon: "◉" },
+      { href: "/ops/appointments", label: "Calendar", icon: "◷" },
+      { href: "/ops/billing", label: "Payments", icon: "◈" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/inspired-closets/ops/inventory", label: "Inventory", icon: "▦" },
-      { href: "/inspired-closets/ops/inventory/receiving", label: "Receiving", icon: "▣" },
-      { href: "/inspired-closets/ops/installers", label: "Install Workers", icon: "◎" },
-      { href: "/inspired-closets/ops/designers", label: "Designer portal", icon: "✎" },
+      { href: "/ops/inventory", label: "Inventory", icon: "▦" },
+      { href: "/ops/inventory/receiving", label: "Receiving", icon: "▣" },
+      { href: "/ops/installers", label: "Install Workers", icon: "◎" },
+      { href: "/ops/designers", label: "Designer portal", icon: "✎" },
     ],
   },
   {
     label: "Finance",
     items: [
-      { href: "/inspired-closets/ops", label: "Payroll", icon: "▦" },
-      { href: "/inspired-closets/ops/finance", label: "Billing", icon: "◆" },
+      { href: "/ops", label: "Payroll", icon: "▦" },
+      { href: "/ops/finance", label: "Billing", icon: "◆" },
     ],
   },
   {
     label: "Growth",
-    items: [{ href: "/inspired-closets/ops/ads", label: "Meta Ads", icon: "◐" }],
+    items: [{ href: "/ops/ads", label: "Meta Ads", icon: "◐" }],
   },
 ];
 
@@ -78,27 +78,27 @@ function readCookie(name: string): string | null {
 }
 
 function isActive(pathname: string, href: string): boolean {
-  if (href === "/inspired-closets/ops") return pathname === href;
-  if (href === "/inspired-closets/ops/appointments") {
+  if (href === "/ops") return pathname === href;
+  if (href === "/ops/appointments") {
     return (
-      pathname.startsWith("/inspired-closets/ops/appointments") ||
-      pathname.startsWith("/inspired-closets/ops/installs") ||
-      pathname.startsWith("/inspired-closets/ops/schedule")
+      pathname.startsWith("/ops/appointments") ||
+      pathname.startsWith("/ops/installs") ||
+      pathname.startsWith("/ops/schedule")
     );
   }
-  if (href === "/inspired-closets/ops/projects") {
+  if (href === "/ops/projects") {
     return (
-      pathname.startsWith("/inspired-closets/ops/projects") ||
-      pathname.startsWith("/inspired-closets/ops/jobs")
+      pathname.startsWith("/ops/projects") ||
+      pathname.startsWith("/ops/jobs")
     );
   }
-  if (href === "/inspired-closets/ops/installers") {
+  if (href === "/ops/installers") {
     return (
-      pathname.startsWith("/inspired-closets/ops/installers") ||
-      pathname.startsWith("/inspired-closets/ops/crew")
+      pathname.startsWith("/ops/installers") ||
+      pathname.startsWith("/ops/crew")
     );
   }
-  if (href === "/inspired-closets/ops/inventory") {
+  if (href === "/ops/inventory") {
     return (
       pathname === href ||
       (pathname.startsWith(`${href}/`) && !pathname.includes("/receiving"))
@@ -166,7 +166,7 @@ export default function OpsShell({
     setSigningOut(true);
     try {
       await fetch("/api/inspired-closets/access", { method: "DELETE" });
-      window.location.href = "/inspired-closets/access";
+      window.location.href = "/";
     } catch {
       setSigningOut(false);
     }
@@ -222,15 +222,15 @@ export default function OpsShell({
             {scopedOnly ? null : (
               <>
                 <Link
-                  href="/inspired-closets/ops/designer-sales"
-                  className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/ops/designer-sales") ? styles.sidebarLinkActive : ""}`}
+                  href="/ops/designer-sales"
+                  className={`${styles.sidebarLink} ${pathname.startsWith("/ops/designer-sales") ? styles.sidebarLinkActive : ""}`}
                   onClick={() => setSidebarOpen(false)}
                 >
                   Craig’s dashboard
                 </Link>
                 <Link
-                  href="/inspired-closets/gavin"
-                  className={`${styles.sidebarLink} ${pathname.startsWith("/inspired-closets/gavin") ? styles.sidebarLinkActive : ""}`}
+                  href="/gavin"
+                  className={`${styles.sidebarLink} ${pathname.startsWith("/gavin") ? styles.sidebarLinkActive : ""}`}
                   onClick={() => setSidebarOpen(false)}
                 >
                   Gavin dashboard

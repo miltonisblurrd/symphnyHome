@@ -3,13 +3,13 @@
  * Inventory (Frank) is scoped to Inventory + Receiving; other roles keep full access.
  */
 
-export const IC_INVENTORY_HOME = "/inspired-closets/ops/inventory";
-export const IC_WAREHOUSE_HOME = "/inspired-closets/ops/warehouse";
-export const IC_OPS_HOME = "/inspired-closets/ops/projects";
+export const IC_INVENTORY_HOME = "/ops/inventory";
+export const IC_WAREHOUSE_HOME = "/ops/warehouse";
+export const IC_OPS_HOME = "/ops/projects";
 
 /** Page prefixes the inventory role may open. Receiving lives under inventory. */
 export const INVENTORY_PAGE_PREFIXES = [
-  "/inspired-closets/ops/inventory",
+  "/ops/inventory",
 ] as const;
 
 /**
@@ -26,14 +26,14 @@ export const INVENTORY_API_PREFIXES = [
 
 /** Nav hrefs visible to inventory (exact match against OpsShell items). */
 export const INVENTORY_NAV_HREFS = new Set([
-  "/inspired-closets/ops/inventory",
-  "/inspired-closets/ops/inventory/receiving",
+  "/ops/inventory",
+  "/ops/inventory/receiving",
 ]);
 
 /** Bryant: staging queue plus the receiving scanner. Not Frank's inventory ledger. */
 export const WAREHOUSE_PAGE_PREFIXES = [
-  "/inspired-closets/ops/warehouse",
-  "/inspired-closets/ops/inventory/receiving",
+  "/ops/warehouse",
+  "/ops/inventory/receiving",
 ] as const;
 
 /**
@@ -89,8 +89,9 @@ export function roleHomePath(
 ): string {
   if (isInventoryRole(role)) return IC_INVENTORY_HOME;
   if (isWarehouseRole(role)) return IC_WAREHOUSE_HOME;
+  if (role === "installer") return "/installers";
   if (opensOsHome(staff)) return IC_OPS_HOME;
-  if (role === "designer") return "/inspired-closets/designers";
+  if (role === "designer") return "/designers";
   return IC_OPS_HOME;
 }
 

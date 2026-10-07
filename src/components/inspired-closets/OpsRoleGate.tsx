@@ -80,7 +80,7 @@ export default function OpsRoleGate({ children }: { children: ReactNode }) {
             Use office tools
           </button>
           <Link
-            href="/inspired-closets/installers"
+            href="/installers"
             style={{
               background: "#fff",
               color: "#111",

@@ -100,7 +100,7 @@ export default function OpsWarehouseQueue() {
           </p>
         ) : null}
         {visible.map((job) => (
-          <Link key={job.id} href={`/inspired-closets/ops/warehouse/${job.id}`} className={styles.card}>
+          <Link key={job.id} href={`/ops/warehouse/${job.id}`} className={styles.card}>
             <div className={styles.cardTop}>
               <div>
                 <p className={styles.client}>{job.client_name}</p>

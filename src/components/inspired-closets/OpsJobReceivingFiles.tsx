@@ -122,7 +122,7 @@ export default function OpsJobReceivingFiles({ jobId }: { jobId: string }) {
                 </td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   <Link
-                    href={`/inspired-closets/ops/inventory/receiving/${ship.id}/scan`}
+                    href={`/ops/inventory/receiving/${ship.id}/scan`}
                     className={styles.buttonGhost}
                     style={{ display: "inline-block" }}
                   >

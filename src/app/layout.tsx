@@ -1,48 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, IBM_Plex_Mono, Inter } from "next/font/google";
-import { brand } from "@/data/studio-data";
-import { siteConfig } from "@/lib/site-config";
+import { Lato } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const lato = Lato({
   subsets: ["latin"],
-  variable: "--font-inter",
-});
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["300", "500"],
-  style: ["italic", "normal"],
-  variable: "--font-ibm-plex-mono",
+  variable: "--font-gavin-sans",
+  weight: ["300", "400", "700", "900"],
 });
 
 export const metadata: Metadata = {
   title: {
-    default: siteConfig.name,
-    template: `%s | ${siteConfig.name}`,
+    default: "Inspired Closets",
+    template: "%s",
   },
-  description: brand.tagline,
-  metadataBase: new URL(siteConfig.url),
-  icons: { icon: "/favicooon.png" },
-  openGraph: {
-    title: siteConfig.name,
-    description: brand.tagline,
-    url: siteConfig.url,
-    siteName: siteConfig.name,
-    images: [{ url: siteConfig.ogImage, width: 1200, height: 630 }],
-    locale: "en_US",
-    type: "website",
-  },
+  description: "Sign in to Inspired Closets.",
+  robots: { index: false, follow: false },
+  icons: { icon: "/inspired-closets/InspiredClosets_Logo_RGB-300x277.png" },
 };
 
 export default function RootLayout({
@@ -52,11 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${ibmPlexMono.variable} ${inter.variable} antialiased`}
-      >
-        {children}
-      </body>
+      <body className={`${lato.variable} antialiased`}>{children}</body>
     </html>
   );
 }

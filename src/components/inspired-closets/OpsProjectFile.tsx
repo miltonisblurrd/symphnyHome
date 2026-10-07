@@ -367,10 +367,10 @@ export default function OpsProjectFile({
           </p>
         </div>
         <div className={styles.formActions} style={{ margin: 0 }}>
-          <a className={styles.buttonGhost} href="/inspired-closets/ops/billing">
+          <a className={styles.buttonGhost} href="/ops/billing">
             Open Payments
           </a>
-          <a className={styles.buttonGhost} href="/inspired-closets/ops/appointments?tab=installs">
+          <a className={styles.buttonGhost} href="/ops/appointments?tab=installs">
             Open Calendar
           </a>
           <button type="button" className={`${styles.buttonGhost} ${styles.fileClose}`} onClick={onClose}>
@@ -493,7 +493,7 @@ export default function OpsProjectFile({
                   ? `Install ${daysOut != null && daysOut >= 0 ? `in ${daysOut} day${daysOut === 1 ? "" : "s"}` : job.install_date} · ${job.receiving_received_qty ?? 0}/${job.receiving_total_qty ?? 0} received.${missing} Confirm this date or push it.`
                   : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
                 {" "}
-                <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
+                <Link href="/ops/inventory/receiving">Open Receiving</Link>
               </p>
             ) : (job.receiving_total_qty ?? 0) > 0 ? (
               <p
@@ -504,7 +504,7 @@ export default function OpsProjectFile({
                   ? `${job.receiving_received_qty ?? 0}/${job.receiving_total_qty} pieces received. Date can still be booked.`
                   : `Truck is in — ${job.receiving_received_qty}/${job.receiving_total_qty} pieces received.`}
                 {" "}
-                <Link href="/inspired-closets/ops/inventory/receiving">Open Receiving</Link>
+                <Link href="/ops/inventory/receiving">Open Receiving</Link>
               </p>
             ) : null}
             <div className={styles.badgeRow} style={{ marginBottom: "0.75rem" }}>
@@ -666,7 +666,7 @@ export default function OpsProjectFile({
         <div className={styles.fileSectionHead}>
           <p className={styles.detailSectionTitle}>Lead</p>
           {lead ? (
-            <a className={styles.buttonGhost} href="/inspired-closets/ops/leads">
+            <a className={styles.buttonGhost} href="/ops/leads">
               Open in Leads
             </a>
           ) : null}
@@ -883,7 +883,7 @@ export default function OpsProjectFile({
         <p className={`${styles.fieldLabel} ${styles.fileSubhead}`}>
           Materials on this project ·{" "}
           <span className={styles.summaryStrong}>{cents(materialsTotal)}</span>
-          <a href="/inspired-closets/ops/inventory" style={{ marginLeft: "0.75rem", fontSize: "0.8rem" }}>
+          <a href="/ops/inventory" style={{ marginLeft: "0.75rem", fontSize: "0.8rem" }}>
             Open Inventory
           </a>
         </p>

@@ -94,7 +94,7 @@ export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountRev
             {([7, 30, 60] as const).map((days) => (
               <Link
                 key={days}
-                href={`/inspired-closets/ops/ads?range=${days}`}
+                href={`/ops/ads?range=${days}`}
                 className={`${styles.range} ${review.rangeDays === days ? styles.rangeActive : ""}`}
               >
                 Last {days} days

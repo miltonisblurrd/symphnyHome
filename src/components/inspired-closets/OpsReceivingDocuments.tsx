@@ -349,7 +349,7 @@ export default function OpsReceivingDocuments({
                 status: "attached",
                 jobId,
                 jobName,
-                href: `/inspired-closets/ops/projects?id=${jobId}`,
+                href: `/ops/projects?id=${jobId}`,
               }
             : row,
         ),
@@ -380,7 +380,7 @@ export default function OpsReceivingDocuments({
                 status: "review",
                 jobId,
                 jobName,
-                href: `/inspired-closets/ops/projects?id=${jobId}`,
+                href: `/ops/projects?id=${jobId}`,
               }
             : row,
         ),
@@ -411,7 +411,7 @@ export default function OpsReceivingDocuments({
                 status: "attached",
                 jobId,
                 jobName,
-                href: `/inspired-closets/ops/projects?id=${jobId}`,
+                href: `/ops/projects?id=${jobId}`,
               }
             : row,
         ),

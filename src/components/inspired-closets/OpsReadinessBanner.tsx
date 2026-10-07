@@ -64,7 +64,7 @@ export default function OpsReadinessBanner() {
             <strong>{row.title}</strong>
             {row.body ? ` — ${row.body}` : ""}{" "}
             {row.job_id ? (
-              <Link href={`/inspired-closets/ops/projects?id=${row.job_id}`}>Open project</Link>
+              <Link href={`/ops/projects?id=${row.job_id}`}>Open project</Link>
             ) : null}
             {" · "}
             <button

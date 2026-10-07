@@ -102,7 +102,7 @@ Billing: prices, checkout, portal, change-plan, addon. Misc: storage, app-config
 
 ## Mapping into Inspired Closets OS
 
-New page under Inventory: `/inspired-closets/ops/inventory/receive` (mobile-first, dark like
+New page under Inventory: `/ops/inventory/receive` (mobile-first, dark like
 the field app), button on the Inventory workspace.
 
 | ModulusScan | IC OS |

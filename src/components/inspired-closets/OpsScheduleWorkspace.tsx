@@ -828,8 +828,8 @@ export default function OpsScheduleWorkspace({
               className={`${styles.tab} ${TAB_CLASS[tab]} ${mainTab === tab ? styles.tabActive : ""}`}
               href={
                 tab === "all"
-                  ? "/inspired-closets/ops/appointments"
-                  : `/inspired-closets/ops/appointments?tab=${tab}`
+                  ? "/ops/appointments"
+                  : `/ops/appointments?tab=${tab}`
               }
               style={{ textDecoration: "none" }}
             >

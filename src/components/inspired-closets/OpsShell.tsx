@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import OpsRoleGate from "@/components/inspired-closets/OpsRoleGate";
 import InspiredClosetsLogo from "@/components/inspired-closets/InspiredClosetsLogo";
+import HelpRequestButton from "@/components/inspired-closets/HelpRequestButton";
 import {
   IC_STAFF_NAME_COOKIE,
   IC_STAFF_ROLE_COOKIE,
@@ -26,6 +27,7 @@ const WAREHOUSE_NAV: NavGroup[] = [
   {
     label: "Warehouse",
     items: [
+      { href: "/ops/warehouse/todo", label: "To do", icon: "☰" },
       { href: "/ops/warehouse", label: "Kitting", icon: "▣" },
       { href: "/ops/inventory/receiving", label: "Receiving", icon: "▤" },
     ],
@@ -103,6 +105,9 @@ function isActive(pathname: string, href: string): boolean {
       pathname === href ||
       (pathname.startsWith(`${href}/`) && !pathname.includes("/receiving"))
     );
+  }
+  if (href === "/ops/warehouse") {
+    return pathname.startsWith(href) && !pathname.startsWith(`${href}/todo`);
   }
   return pathname.startsWith(href);
 }
@@ -219,6 +224,16 @@ export default function OpsShell({
           </nav>
 
           <div className={styles.sidebarBottom}>
+            <ul className={styles.navList}>
+              <li>
+                <HelpRequestButton
+                  portal="ops"
+                  className={styles.navItem}
+                  icon="?"
+                  onOpen={() => setSidebarOpen(false)}
+                />
+              </li>
+            </ul>
             {scopedOnly ? null : (
               <>
                 <Link

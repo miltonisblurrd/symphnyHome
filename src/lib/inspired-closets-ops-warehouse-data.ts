@@ -21,7 +21,7 @@ type Failure = { ok: false; status: number; error: string; hint?: string };
 const JOB_SELECT =
   "id, client_id, installer_id, title, install_date, stage, deleted_at, duplicate_of_job_id, warehouse_status, pile_location, warehouse_ready_at";
 
-type JobRow = {
+export type JobRow = {
   id: string;
   client_id: string | null;
   installer_id: string | null;
@@ -49,6 +49,7 @@ export type WarehouseQueueJob = {
   line_count: number;
   marked_count: number;
   just_scanned: boolean;
+  warehouse_status: string | null;
 };
 
 export type WarehouseKitLine = {
@@ -174,7 +175,42 @@ export async function loadWarehouseQueue(): Promise<{ ok: true; jobs: WarehouseQ
     }
   }
 
-  const jobs = [...jobsById.values()];
+  const built = await queueRowsFor([...jobsById.values()], scannedIds);
+  if (!built.ok) return built;
+  const queue = built.rows;
+
+  queue.sort((a, b) => {
+    const aDate = a.install_date ?? "9999-99-99";
+    const bDate = b.install_date ?? "9999-99-99";
+    if (aDate !== bDate) return aDate.localeCompare(bDate);
+    return a.client_name.localeCompare(b.client_name);
+  });
+
+  return { ok: true, jobs: queue };
+}
+
+/** Load jobs by id with the same filter the queue uses. */
+export async function loadQueueJobRows(jobIds: string[]): Promise<{ ok: true; jobs: JobRow[] } | Failure> {
+  if (jobIds.length === 0) return { ok: true, jobs: [] };
+  const supabase = getSupabaseAdmin();
+  const out: JobRow[] = [];
+  for (let i = 0; i < jobIds.length; i += 200) {
+    const { data, error } = await supabase
+      .from("ic_jobs")
+      .select(JOB_SELECT)
+      .in("id", jobIds.slice(i, i + 200))
+      .is("deleted_at", null);
+    if (error) return schemaFail(error.message) ?? fail(500, error.message);
+    out.push(...((data ?? []) as JobRow[]).filter(keepJob));
+  }
+  return { ok: true, jobs: out };
+}
+
+export async function queueRowsFor(
+  jobs: JobRow[],
+  scannedIds: Set<string> = new Set(),
+): Promise<{ ok: true; rows: WarehouseQueueJob[] } | Failure> {
+  const supabase = getSupabaseAdmin();
   const jobIds = jobs.map((job) => job.id);
   const clientIds = [...new Set(jobs.map((job) => job.client_id).filter(Boolean))] as string[];
   const installerIds = [...new Set(jobs.map((job) => job.installer_id).filter(Boolean))] as string[];
@@ -223,7 +259,7 @@ export async function loadWarehouseQueue(): Promise<{ ok: true; jobs: WarehouseQ
     lineStats.set(summaryId, current);
   }
 
-  const queue: WarehouseQueueJob[] = jobs.map((job) => {
+  const rows: WarehouseQueueJob[] = jobs.map((job) => {
     const summaryId = summaryByJob.get(job.id) ?? null;
     const stats = summaryId ? lineStats.get(summaryId) : undefined;
     const lineCount = stats?.total ?? 0;
@@ -249,17 +285,11 @@ export async function loadWarehouseQueue(): Promise<{ ok: true; jobs: WarehouseQ
       line_count: lineCount,
       marked_count: markedCount,
       just_scanned: scannedIds.has(job.id),
+      warehouse_status: job.warehouse_status,
     };
   });
 
-  queue.sort((a, b) => {
-    const aDate = a.install_date ?? "9999-99-99";
-    const bDate = b.install_date ?? "9999-99-99";
-    if (aDate !== bDate) return aDate.localeCompare(bDate);
-    return a.client_name.localeCompare(b.client_name);
-  });
-
-  return { ok: true, jobs: queue };
+  return { ok: true, rows };
 }
 
 async function loadJobRow(jobId: string): Promise<{ job: JobRow } | Failure> {

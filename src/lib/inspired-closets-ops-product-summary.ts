@@ -14,6 +14,8 @@ import {
   parseStowProductSummaryText,
   summaryParseIsUsable,
 } from "@/lib/inspired-closets-ops-product-summary-text";
+import { looksLikeStowCartSummary, parseStowCartSummary } from "@/lib/inspired-closets-ops-stow-cart-summary";
+import { looksLikeStudioDesignReport, parseStudioPartsList } from "@/lib/inspired-closets-ops-studio-parts-list";
 
 export const SUMMARY_CLASS = ["stock", "short", "order_stow", "unmatched"] as const;
 export type SummaryClass = (typeof SUMMARY_CLASS)[number];
@@ -178,6 +180,17 @@ const FRANK_SUMMARY_ERROR =
 const PACKING_SLIP_ON_JOB_ERROR =
   "This is a Stow packing list (shipment notice / palettes). Upload it under Receiving, not on the job.";
 
+/** Studio design reports and Stow cart exports have their own readers; the model glues their cells together. */
+export function readKnownSummaryLayout(text: string, filename: string): ParsedProductSummary | null {
+  if (looksLikeProductSummary(text)) return null;
+  const parsed = looksLikeStowCartSummary(text)
+    ? parseStowCartSummary(text, filename)
+    : looksLikeStudioDesignReport(text)
+      ? parseStudioPartsList(text, filename)
+      : null;
+  return parsed && parsed.lines.length > 0 ? parsed : null;
+}
+
 export async function parseProductSummary(input: {
   filename: string;
   mimeType: string;
@@ -204,6 +217,11 @@ export async function parseProductSummary(input: {
         !allowPartial
       ) {
         throw new Error(PACKING_SLIP_ON_JOB_ERROR);
+      }
+      const layout = readKnownSummaryLayout(extracted.text, input.filename);
+      if (layout) {
+        layout.parse_quality = { ...layout.parse_quality, pages: extracted.pages };
+        return layout;
       }
       const local = parseStowProductSummaryText(extracted.text, input.filename);
       if (local && (summaryParseIsUsable(local) || (allowPartial && local.lines.length > 0))) {
@@ -394,7 +412,7 @@ export function missingSummaryTable(message: string): boolean {
   return /ic_job_summar|ready_to_order|archived_at|schema cache|does not exist/i.test(message);
 }
 
-function lineRow(summaryId: string, line: MatchedSummaryLine) {
+export function lineRow(summaryId: string, line: MatchedSummaryLine) {
   return {
     summary_id: summaryId,
     line_no: line.line_no,

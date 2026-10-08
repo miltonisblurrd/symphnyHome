@@ -575,3 +575,76 @@
   font-size: 0.88rem;
   color: #821f2d;
 }
+
+/* To do */
+
+.todoFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.todoFilter {
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #111;
+  cursor: pointer;
+}
+
+.todoFilter span {
+  margin-left: 0.25rem;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.todoFilterOn {
+  background: #111;
+  border-color: #111;
+  color: #fff;
+}
+
+.todoFilterOn span {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.todoActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.todoAction {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0 0.95rem;
+  border-radius: 0.65rem;
+  font-weight: 800;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.todoScan {
+  background: #821f2d;
+  color: #fff;
+}
+
+.todoKit {
+  background: #fff4d6;
+  color: #6a4b00;
+}
+
+.todoDelivery {
+  background: #e7eefb;
+  color: #1d3f7a;
+}
+
+.todoSoon {
+  background: #efe9e5;
+  color: #111;
+}

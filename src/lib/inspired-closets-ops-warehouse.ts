@@ -49,7 +49,7 @@ export function kitProgress(input: {
   if (input.warehouseStatus === "ready") return "ready";
   if (input.warehouseStatus === "hold") return "hold";
   if (!input.hasSummary) return "no_summary";
-  if (input.warehouseStatus === "gathering" || input.markedCount > 0) return "gathering";
+  if (input.markedCount > 0) return "gathering";
   return "not_started";
 }
 

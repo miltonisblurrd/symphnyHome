@@ -4,7 +4,7 @@
  */
 
 export const IC_INVENTORY_HOME = "/ops/inventory";
-export const IC_WAREHOUSE_HOME = "/ops/warehouse";
+export const IC_WAREHOUSE_HOME = "/ops/warehouse/todo";
 export const IC_OPS_HOME = "/ops/projects";
 
 /** Page prefixes the inventory role may open. Receiving lives under inventory. */
@@ -22,6 +22,7 @@ export const INVENTORY_API_PREFIXES = [
   "/api/inspired-closets/ops/jobs",
   "/api/inspired-closets/ops/stow-orders",
   "/api/inspired-closets/ops/session",
+  "/api/inspired-closets/help",
 ] as const;
 
 /** Nav hrefs visible to inventory (exact match against OpsShell items). */
@@ -47,6 +48,7 @@ export const WAREHOUSE_API_PREFIXES = [
   "/api/inspired-closets/ops/stow-orders",
   "/api/inspired-closets/ops/inventory/documents",
   "/api/inspired-closets/ops/session",
+  "/api/inspired-closets/help",
 ] as const;
 
 export function isInventoryRole(role: string | null | undefined): boolean {

@@ -62,6 +62,24 @@ test("daily series agrees with the weekly totals", () => {
   assert.equal(review.kpis[2]?.direction, "flat");
 });
 
+test("small samples stay below the decision minimum", () => {
+  const review = reviewDemoAccount();
+  const garage = review.creatives.find((creative) => creative.key === "garage-reel");
+  assert.equal(garage?.decision, "watch");
+  assert.match(garage?.sampleNote ?? "", /below the 5-lead decision minimum/);
+  assert.equal(review.creatives.find((creative) => creative.key === "closet-reveal")?.decision, "keep");
+  assert.equal(review.creatives.find((creative) => creative.key === "designer-walkthrough-3")?.decision, "replace");
+});
+
+test("the change explanation separates observation from proof", () => {
+  const review = reviewDemoAccount();
+  assert.ok(review.explanation.observed.length > 0);
+  assert.ok(review.explanation.possible.length > 0);
+  assert.ok(review.explanation.notProven.some((line) => /fatigue|prove/i.test(line)));
+  assert.ok(review.explanation.nextCheck.length > 0);
+  assert.equal(review.attribution.comparison.includes("same attribution"), true);
+});
+
 test("insufficient samples do not emit optimization signals", () => {
   const result = detectLeadSignals({
     spend: 63,

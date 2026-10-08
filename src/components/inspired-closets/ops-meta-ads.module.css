@@ -28,6 +28,11 @@
   --tone-soft: var(--neutral-soft);
 }
 
+.toneWatch {
+  --tone: #8a5a12;
+  --tone-soft: #f8f1e3;
+}
+
 .ranges {
   display: flex;
   gap: 0.4rem;
@@ -114,7 +119,7 @@
 
 .planGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -777,10 +782,121 @@
   vertical-align: top;
 }
 
+.tableScroll {
+  overflow-x: auto;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.whyGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.whyList {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.sampleNote {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #8a5a12;
+}
+
+.copyList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem 0.8rem;
+  margin: 0;
+}
+
+.copyList div {
+  min-width: 0;
+}
+
+.copyList dt {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.copyList dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.trendStack {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.breakdownBlock {
+  margin-top: 0.9rem;
+}
+
+.targetForm {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.targetForm label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.targetForm input,
+.targetForm button {
+  font: inherit;
+}
+
+.targetForm input {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+}
+
+.targetForm button {
+  justify-self: start;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.targetForm button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 @media (max-width: 960px) {
   .planGrid,
   .kpiGrid,
-  .vizGrid {
+  .vizGrid,
+  .whyGrid,
+  .copyList {
     grid-template-columns: 1fr;
   }
 

@@ -10,6 +10,119 @@ function money(value: number): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
+type TrendBucket = { label: string; spend: number; leads: number; cpl: number | null };
+
+function trendBuckets(points: DailyPoint[]): TrendBucket[] {
+  const weekly = points.length > 16;
+  const groups: DailyPoint[][] = [];
+  if (weekly) {
+    for (let index = 0; index < points.length; index += 7) groups.push(points.slice(index, index + 7));
+  } else {
+    for (const point of points) groups.push([point]);
+  }
+  return groups.map((group) => {
+    const spend = group.reduce((total, point) => total + point.spend, 0);
+    const leads = group.reduce((total, point) => total + point.leads, 0);
+    const label = weekly ? (group[0]?.label ?? "") : (group[0]?.label ?? "").replace(/^[A-Za-z]+ /, "");
+    return {
+      label,
+      spend: Math.round(spend * 100) / 100,
+      leads,
+      cpl: leads > 0 ? spend / leads : null,
+    };
+  });
+}
+
+/** Spend, leads, and cost per lead, with the previous period as a comparison line. */
+export function PerformanceTrend({ points }: { points: DailyPoint[] }) {
+  const current = trendBuckets(points.filter((point) => point.period === "current"));
+  const previous = trendBuckets(points.filter((point) => point.period === "previous"));
+  const weekly = points.filter((point) => point.period === "current").length > 16;
+  return (
+    <div className={styles.trendStack}>
+      <p className={styles.vizNote}>{weekly ? "Weekly totals. The line is the previous period, aligned from the start of each window." : "Daily totals. The line is the previous period, aligned day by day."}</p>
+      <TrendRow title="Spend" current={current} previous={previous} pick={(bucket) => bucket.spend} format={(value) => money(value)} />
+      <TrendRow title="Leads" current={current} previous={previous} pick={(bucket) => bucket.leads} format={(value) => String(Math.round(value))} />
+      <TrendRow title="Cost per lead" current={current} previous={previous} pick={(bucket) => bucket.cpl} format={(value) => money(value)} lines />
+    </div>
+  );
+}
+
+function TrendRow({
+  title,
+  current,
+  previous,
+  pick,
+  format,
+  lines = false,
+}: {
+  title: string;
+  current: TrendBucket[];
+  previous: TrendBucket[];
+  pick: (bucket: TrendBucket) => number | null;
+  format: (value: number) => string;
+  lines?: boolean;
+}) {
+  const width = 720;
+  const height = 132;
+  const top = 16;
+  const bottom = 28;
+  const left = 36;
+  const count = Math.max(current.length, previous.length, 1);
+  const slot = (width - left) / count;
+  const values = [...current, ...previous].map(pick).filter((value): value is number => value != null);
+  const max = Math.max(1, ...values);
+  const yOf = (value: number) => top + (height - top - bottom) * (1 - value / max);
+  const xOf = (index: number) => left + slot * index + slot / 2;
+  const line = (series: TrendBucket[]) =>
+    series
+      .map((bucket, index) => {
+        const value = pick(bucket);
+        return value == null ? null : `${xOf(index).toFixed(1)},${yOf(value).toFixed(1)}`;
+      })
+      .filter(Boolean)
+      .join(" L ");
+  const previousLine = line(previous);
+  const currentLine = line(current);
+  const labelEvery = count > 20 ? 4 : count > 12 ? 2 : 1;
+
+  return (
+    <div>
+      <p className={styles.vizLabel}>{title}</p>
+      <svg viewBox={`0 0 ${width} ${height}`} className={styles.chartSvg} role="img" aria-label={`${title}, current period compared with the previous period`}>
+        <line x1={left} x2={width} y1={height - bottom} y2={height - bottom} stroke={LINE} />
+        {lines
+          ? null
+          : current.map((bucket, index) => {
+              const value = pick(bucket) ?? 0;
+              const barWidth = slot * 0.55;
+              const barHeight = (value / max) * (height - top - bottom);
+              const x = left + slot * index + (slot - barWidth) / 2;
+              const y = height - bottom - barHeight;
+              return (
+                <rect key={bucket.label + index} x={x} y={y} width={barWidth} height={Math.max(barHeight, 0)} rx={3} fill={INK}>
+                  <title>{`${bucket.label}: ${format(value)}`}</title>
+                </rect>
+              );
+            })}
+        {previousLine ? (
+          <path d={`M ${previousLine}`} fill="none" stroke={MUTED} strokeWidth={2} strokeDasharray="5 4" />
+        ) : null}
+        {lines && currentLine ? (
+          <path d={`M ${currentLine}`} fill="none" stroke={INK} strokeWidth={2.2} />
+        ) : null}
+        {current.map((bucket, index) =>
+          index % labelEvery === 0 ? (
+            <text key={bucket.label + index} x={xOf(index)} y={height - 8} textAnchor="middle" className={styles.axisText}>
+              {bucket.label}
+            </text>
+          ) : null,
+        )}
+      </svg>
+    </div>
+  );
+}
+
 /** Leads per day for both comparison weeks. Previous week is muted, current week is solid. */
 export function DailyLeadsChart({ points }: { points: DailyPoint[] }) {
   const width = 720;

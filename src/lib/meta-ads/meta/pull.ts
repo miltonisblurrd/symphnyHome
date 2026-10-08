@@ -1,7 +1,9 @@
 import { calculateCpl } from "@/lib/meta-ads/analytics/metrics";
 import { readMetaAdsCredentials } from "@/lib/meta-ads/env";
+import { countActions } from "@/lib/meta-ads/meta/actions";
+import { loadDeliveryContext } from "@/lib/meta-ads/meta/enrich";
 import { graphGet, graphGetAll } from "@/lib/meta-ads/meta/graph";
-import type { AccountSnapshot, SnapshotAd, SnapshotCampaign } from "@/lib/meta-ads/meta/snapshot";
+import type { AccountSnapshot, PostSource, SnapshotAd, SnapshotCampaign } from "@/lib/meta-ads/meta/snapshot";
 import type { MetricValue } from "@/lib/meta-ads/types";
 
 /**
@@ -12,9 +14,10 @@ import type { MetricValue } from "@/lib/meta-ads/types";
  * from the ad image library. Videos come from the story video, which is the
  * file that actually ran.
  */
-const LEAD_ACTION = "lead";
 const HISTORY_DAYS = 120;
 const WINDOWS = [7, 30, 60] as const;
+const BASIC_INSIGHT_FIELDS = "ad_id,ad_name,campaign_id,campaign_name,spend,impressions,reach,clicks,actions";
+const EXTENDED_INSIGHT_FIELDS = `${BASIC_INSIGHT_FIELDS},inline_link_clicks`;
 
 type InsightRow = {
   date_start?: string;
@@ -26,20 +29,41 @@ type InsightRow = {
   impressions?: string;
   reach?: string;
   clicks?: string;
+  inline_link_clicks?: string;
   actions?: Array<{ action_type: string; value: string }>;
 };
 
 type CreativeNode = {
   object_type?: string;
   title?: string;
+  body?: string;
+  call_to_action_type?: string;
   thumbnail_url?: string;
   image_url?: string;
   video_id?: string;
+  object_story_id?: string;
+  effective_object_story_id?: string;
   object_story_spec?: {
-    video_data?: { video_id?: string; image_url?: string; image_hash?: string };
-    link_data?: { image_hash?: string; picture?: string };
+    video_data?: {
+      video_id?: string;
+      image_url?: string;
+      image_hash?: string;
+      title?: string;
+      message?: string;
+      call_to_action?: { type?: string };
+    };
+    link_data?: {
+      image_hash?: string;
+      picture?: string;
+      message?: string;
+      name?: string;
+      call_to_action?: { type?: string };
+    };
   };
   asset_feed_spec?: {
+    bodies?: Array<{ text?: string }>;
+    titles?: Array<{ text?: string }>;
+    call_to_action_types?: string[];
     images?: Array<{ hash?: string }>;
     videos?: Array<{ video_id?: string; thumbnail_url?: string }>;
   };
@@ -48,10 +72,13 @@ type CreativeNode = {
 type AdNode = {
   id: string;
   name?: string;
+  status?: string;
   effective_status?: string;
   created_time?: string;
   campaign_id?: string;
   creative?: CreativeNode;
+  issues_info?: Array<{ error_summary?: string; error_message?: string }>;
+  ad_review_feedback?: { global?: Record<string, string> };
 };
 
 type DayMetrics = {
@@ -59,9 +86,28 @@ type DayMetrics = {
   leads: number;
   impressions: number;
   clicks: number;
+  linkClicks: number | null;
+  landingPageViews: number | null;
+  formStarts: number | null;
+  instantFormLeads: number | null;
+  websiteLeads: number | null;
+  callLeads: number | null;
+  sawFormStart: boolean;
 };
 
-const EMPTY: DayMetrics = { spend: 0, leads: 0, impressions: 0, clicks: 0 };
+const EMPTY: DayMetrics = {
+  spend: 0,
+  leads: 0,
+  impressions: 0,
+  clicks: 0,
+  linkClicks: null,
+  landingPageViews: null,
+  formStarts: null,
+  instantFormLeads: null,
+  websiteLeads: null,
+  callLeads: null,
+  sawFormStart: false,
+};
 
 export async function pullLiveSnapshot(): Promise<AccountSnapshot> {
   const creds = readMetaAdsCredentials();
@@ -78,8 +124,8 @@ export async function pullLiveSnapshot(): Promise<AccountSnapshot> {
   const [dailyRows, activeAds, campaignRows, ...windowRows] = await Promise.all([
     insights(creds.accountId, since, until, "1"),
     activeAdNodes(creds.accountId),
-    graphGetAll<{ id: string; name?: string }>(`${creds.accountId}/campaigns`, {
-      fields: "id,name",
+    graphGetAll<{ id: string; name?: string; effective_status?: string }>(`${creds.accountId}/campaigns`, {
+      fields: "id,name,effective_status",
       limit: "200",
     }),
     ...WINDOWS.flatMap((days) => {
@@ -104,12 +150,19 @@ export async function pullLiveSnapshot(): Promise<AccountSnapshot> {
       // Keep the id when the campaign name is not readable.
     }
   }
+  const context = await loadDeliveryContext(creds.accountId, dates).catch((error) => {
+    console.error("Meta ads delivery context skipped", error instanceof Error ? error.message : error);
+    return null;
+  });
   const dailyByAd = groupDaily(dailyRows);
   const media = await resolveMedia(activeAds);
-  const frequency = frequencyMaps(windowRows);
+  const windows = windowMaps(windowRows);
+  const formStartsReported = [...dailyByAd.values()].some((days) => [...days.values()].some((day) => day.sawFormStart));
 
   const ads: SnapshotAd[] = activeAds
-    .map((node) => toAd(node, dates, until, dailyByAd.get(node.id) ?? new Map(), media.get(node.id), frequency.get(node.id), campaignNames))
+    .map((node) =>
+      toAd(node, dates, until, dailyByAd.get(node.id) ?? new Map(), media.get(node.id), windows.get(node.id), campaignNames),
+    )
     .sort((a, b) => b.spend - a.spend || a.name.localeCompare(b.name));
 
   const accountDaily = dates.map((date) => {
@@ -124,44 +177,84 @@ export async function pullLiveSnapshot(): Promise<AccountSnapshot> {
     return { spend: roundMoney(spend), leads };
   });
 
-  const campaigns = toCampaigns(dates, dailyByAd, dailyRows, campaignNames);
+  const campaignStatus = new Map(campaignRows.map((campaign) => [campaign.id, campaign.effective_status]));
+  const campaigns = toCampaigns(dates, dailyRows, campaignNames, campaignStatus, context?.campaignWindows);
 
   return {
     isDemo: false,
     company: account.name || "Meta ad account",
     targetCpl: null,
+    targetQualifiedCpl: null,
     currency: account.currency || "USD",
     dates,
     currentLabel: "Last 7 days",
     previousLabel: "Previous 7 days",
     syncedAt: new Date().toISOString(),
     accountDaily,
+    formStartsReported,
+    attributionSetting: context?.attributionSetting ?? null,
+    accountWindows: context?.accountWindows,
+    breakdownDaily: context?.breakdownDaily,
     campaigns,
     ads,
   };
 }
 
 async function insights(accountId: string, since: string, until: string, increment: string): Promise<InsightRow[]> {
-  return graphGetAll<InsightRow>(`${accountId}/insights`, {
+  const params = {
     level: "ad",
     time_increment: increment,
     time_range: JSON.stringify({ since, until }),
-    fields: "ad_id,ad_name,campaign_id,campaign_name,spend,impressions,reach,clicks,actions",
     filtering: JSON.stringify([{ field: "spend", operator: "GREATER_THAN", value: 0 }]),
     limit: "500",
-  });
+  };
+  try {
+    return await graphGetAll<InsightRow>(`${accountId}/insights`, { ...params, fields: EXTENDED_INSIGHT_FIELDS });
+  } catch (error) {
+    console.error("Meta insights fell back to the base fields", error instanceof Error ? error.message : error);
+    return graphGetAll<InsightRow>(`${accountId}/insights`, { ...params, fields: BASIC_INSIGHT_FIELDS });
+  }
 }
+
+const AD_STATUSES = [
+  "ACTIVE",
+  "PAUSED",
+  "PENDING_REVIEW",
+  "DISAPPROVED",
+  "WITH_ISSUES",
+  "CAMPAIGN_PAUSED",
+  "ADSET_PAUSED",
+  "IN_PROCESS",
+  "PREAPPROVED",
+  "PENDING_BILLING_INFO",
+];
+
+const AD_FIELDS_BASIC =
+  "id,name,status,effective_status,created_time,campaign_id,creative{object_type,title,thumbnail_url,image_url,video_id,object_story_spec{video_data{video_id,image_url,image_hash},link_data{image_hash,picture}},asset_feed_spec{images{hash},videos{video_id,thumbnail_url}}}";
+
+const AD_FIELDS_EXTENDED =
+  "id,name,status,effective_status,created_time,campaign_id,issues_info,ad_review_feedback,creative{object_type,title,body,call_to_action_type,thumbnail_url,image_url,video_id,object_story_id,effective_object_story_id,object_story_spec{video_data{video_id,image_url,image_hash,title,message,call_to_action},link_data{image_hash,picture,message,name,call_to_action}},asset_feed_spec{bodies{text},titles{text},call_to_action_types,images{hash},videos{video_id,thumbnail_url}}}";
 
 async function activeAdNodes(accountId: string): Promise<AdNode[]> {
-  return graphGetAll<AdNode>(`${accountId}/ads`, {
-    fields:
-      "id,name,effective_status,created_time,campaign_id,creative{object_type,title,thumbnail_url,image_url,video_id,object_story_spec{video_data{video_id,image_url,image_hash},link_data{image_hash,picture}},asset_feed_spec{images{hash},videos{video_id,thumbnail_url}}}",
-    filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]),
-    limit: "100",
-  });
+  const filtering = JSON.stringify([{ field: "effective_status", operator: "IN", value: AD_STATUSES }]);
+  try {
+    return await graphGetAll<AdNode>(`${accountId}/ads`, { fields: AD_FIELDS_EXTENDED, filtering, limit: "200" });
+  } catch (error) {
+    console.error("Meta ad details fell back to the base fields", error instanceof Error ? error.message : error);
+    return graphGetAll<AdNode>(`${accountId}/ads`, { fields: AD_FIELDS_BASIC, filtering, limit: "200" });
+  }
 }
 
-type ResolvedMedia = { image: string; videoUrl: string | null; format: string; title: string };
+type ResolvedMedia = {
+  image: string;
+  videoUrl: string | null;
+  format: string;
+  title: string;
+  primaryText: string | null;
+  creativeHeadline: string | null;
+  callToAction: string | null;
+  postSource: PostSource;
+};
 
 async function resolveMedia(ads: AdNode[]): Promise<Map<string, ResolvedMedia>> {
   const hashes = new Set<string>();
@@ -190,11 +283,13 @@ async function resolveMedia(ads: AdNode[]): Promise<Map<string, ResolvedMedia>> 
       creative?.image_url ||
       creative?.thumbnail_url ||
       "";
+    const copy = creativeCopy(creative);
     media.set(ad.id, {
       image,
       videoUrl: video?.source ?? null,
       format: formatLabel(creative?.object_type, Boolean(video?.source)),
-      title: creative?.title?.trim() || ad.name || "Live ad",
+      title: copy.creativeHeadline || creative?.title?.trim() || ad.name || "Live ad",
+      ...copy,
     });
   }
   return media;
@@ -248,17 +343,55 @@ async function videoFiles(ids: string[]): Promise<Map<string, { picture?: string
   return videos;
 }
 
-function frequencyMaps(windowRows: InsightRow[][]): Map<string, SnapshotAd["windowFrequency"]> {
-  const maps = new Map<string, SnapshotAd["windowFrequency"]>();
+function creativeCopy(creative: CreativeNode | undefined): Pick<ResolvedMedia, "primaryText" | "creativeHeadline" | "callToAction" | "postSource"> {
+  const video = creative?.object_story_spec?.video_data;
+  const link = creative?.object_story_spec?.link_data;
+  const feed = creative?.asset_feed_spec;
+  const primaryText = firstText(video?.message, link?.message, feed?.bodies?.[0]?.text, creative?.body);
+  const creativeHeadline = firstText(video?.title, link?.name, feed?.titles?.[0]?.text, creative?.title);
+  const callToAction = humanizeToken(
+    video?.call_to_action?.type || link?.call_to_action?.type || feed?.call_to_action_types?.[0] || creative?.call_to_action_type,
+  );
+  const postSource: PostSource = creative?.object_story_spec
+    ? "new_creative"
+    : creative?.object_story_id || creative?.effective_object_story_id
+      ? "existing_post"
+      : "unknown";
+  return { primaryText, creativeHeadline, callToAction, postSource };
+}
+
+function firstText(...values: Array<string | undefined>): string | null {
+  const value = values.find((item) => item?.trim());
+  return value?.trim() ?? null;
+}
+
+function humanizeToken(value: string | undefined): string | null {
+  if (!value) return null;
+  const words = value.toLowerCase().split("_").filter(Boolean);
+  if (words.length === 0) return null;
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+type AdWindows = { frequency: SnapshotAd["windowFrequency"]; reach: SnapshotAd["windowReach"] };
+
+function windowMaps(windowRows: InsightRow[][]): Map<string, AdWindows> {
+  const maps = new Map<string, AdWindows>();
   WINDOWS.forEach((days, index) => {
     const current = indexPeriod(windowRows[index * 2] ?? []);
     const previous = indexPeriod(windowRows[index * 2 + 1] ?? []);
     const ids = new Set([...current.keys(), ...previous.keys()]);
     for (const id of ids) {
-      const entry = maps.get(id) ?? {};
-      entry[String(days) as "7" | "30" | "60"] = {
+      const entry = maps.get(id) ?? { frequency: {}, reach: {} };
+      const key = String(days) as "7" | "30" | "60";
+      entry.frequency = entry.frequency ?? {};
+      entry.reach = entry.reach ?? {};
+      entry.frequency[key] = {
         current: frequencyOf(current.get(id)),
         previous: frequencyOf(previous.get(id)),
+      };
+      entry.reach[key] = {
+        current: reachOf(current.get(id)),
+        previous: reachOf(previous.get(id)),
       };
       maps.set(id, entry);
     }
@@ -272,7 +405,7 @@ function toAd(
   until: string,
   daily: Map<string, DayMetrics>,
   media: ResolvedMedia | undefined,
-  frequency: SnapshotAd["windowFrequency"],
+  windows: AdWindows | undefined,
   campaignNames: Map<string, string>,
 ): SnapshotAd {
   const series = dates.map((date) => daily.get(date) ?? EMPTY);
@@ -281,7 +414,7 @@ function toAd(
   const recentTotals = recent.reduce(add, EMPTY);
   const priorTotals = prior.reduce(add, EMPTY);
   const created = node.created_time?.slice(0, 10);
-  const weekFrequency = frequency?.["7"];
+  const weekFrequency = windows?.frequency?.["7"];
 
   return {
     key: node.id,
@@ -292,7 +425,14 @@ function toAd(
     angle: media?.title || node.name || "Live ad",
     image: media?.image || "",
     videoUrl: media?.videoUrl ?? null,
-    statusLabel: "Active",
+    statusLabel: statusText(node.effective_status),
+    effectiveStatus: node.effective_status,
+    launchedOn: created ?? null,
+    primaryText: media?.primaryText ?? null,
+    creativeHeadline: media?.creativeHeadline ?? null,
+    callToAction: media?.callToAction ?? null,
+    postSource: media?.postSource ?? "unknown",
+    deliveryReason: deliveryReason(node, recentTotals.impressions),
     runningDays: created ? daysBetween(created, until) : recent.filter((day) => day.impressions > 0).length,
     days: recent.filter((day) => day.impressions > 0).length,
     spend: recentTotals.spend,
@@ -307,15 +447,23 @@ function toAd(
     dailyLeads: series.map((day) => day.leads),
     dailyImpressions: series.map((day) => day.impressions),
     dailyClicks: series.map((day) => day.clicks),
-    windowFrequency: frequency,
+    dailyLinkClicks: series.map((day) => day.linkClicks),
+    dailyLandingPageViews: series.map((day) => day.landingPageViews),
+    dailyFormStarts: series.map((day) => day.formStarts),
+    dailyInstantFormLeads: series.map((day) => day.instantFormLeads),
+    dailyWebsiteLeads: series.map((day) => day.websiteLeads),
+    dailyCallLeads: series.map((day) => day.callLeads),
+    windowFrequency: windows?.frequency,
+    windowReach: windows?.reach,
   };
 }
 
 function toCampaigns(
   dates: string[],
-  dailyByAd: Map<string, Map<string, DayMetrics>>,
   dailyRows: InsightRow[],
   campaignNames: Map<string, string>,
+  campaignStatus: Map<string, string | undefined>,
+  campaignWindows: Awaited<ReturnType<typeof loadDeliveryContext>>["campaignWindows"] | undefined,
 ): SnapshotCampaign[] {
   const names = new Map(campaignNames);
   const byCampaign = new Map<string, Map<string, DayMetrics>>();
@@ -332,13 +480,14 @@ function toCampaigns(
       const series = dates.map((date) => days.get(date) ?? EMPTY);
       const recent = series.slice(-7).reduce(add, EMPTY);
       const prior = series.slice(-14, -7).reduce(add, EMPTY);
+      const stats = campaignWindows?.get(id);
       return {
         key: id,
         name: names.get(id) || id,
         spend: recent.spend,
         leads: recent.leads,
         ctr: ctr(recent),
-        frequency: null,
+        frequency: stats?.frequency?.["7"]?.current ?? null,
         previousCpl: calculateCpl(prior.spend, prior.leads),
         previousCtr: ctr(prior),
         days: series.slice(-7).filter((day) => day.impressions > 0).length,
@@ -346,6 +495,12 @@ function toCampaigns(
         dailyLeads: series.map((day) => day.leads),
         dailyImpressions: series.map((day) => day.impressions),
         dailyClicks: series.map((day) => day.clicks),
+        dailyLinkClicks: series.map((day) => day.linkClicks),
+        dailyLandingPageViews: series.map((day) => day.landingPageViews),
+        dailyFormStarts: series.map((day) => day.formStarts),
+        statusLabel: statusText(campaignStatus.get(id)),
+        windowFrequency: stats?.frequency,
+        windowReach: stats?.reach,
       } satisfies SnapshotCampaign;
     })
     .filter((campaign) => campaign.dailySpend.some((spend) => (spend ?? 0) > 0));
@@ -367,17 +522,25 @@ function indexPeriod(rows: InsightRow[]): Map<string, InsightRow> {
 }
 
 function metricsOf(row: InsightRow): DayMetrics {
+  const actions = countActions(row.actions);
   return {
     spend: Number(row.spend ?? 0),
-    leads: leadCount(row.actions),
+    leads: actions.leads,
     impressions: Number(row.impressions ?? 0),
     clicks: Number(row.clicks ?? 0),
+    linkClicks: row.inline_link_clicks == null ? null : Number(row.inline_link_clicks),
+    landingPageViews: actions.landingPageViews,
+    formStarts: actions.formStarts,
+    instantFormLeads: actions.instantFormLeads,
+    websiteLeads: actions.websiteLeads,
+    callLeads: actions.callLeads,
+    sawFormStart: actions.sawFormStart,
   };
 }
 
-function leadCount(actions: InsightRow["actions"]): number {
-  const lead = actions?.find((action) => action.action_type === LEAD_ACTION);
-  return lead ? Number(lead.value) : 0;
+function addNullable(left: number | null, right: number | null): number | null {
+  if (left == null && right == null) return null;
+  return (left ?? 0) + (right ?? 0);
 }
 
 function add(left: DayMetrics, right: DayMetrics): DayMetrics {
@@ -386,6 +549,13 @@ function add(left: DayMetrics, right: DayMetrics): DayMetrics {
     leads: left.leads + right.leads,
     impressions: left.impressions + right.impressions,
     clicks: left.clicks + right.clicks,
+    linkClicks: addNullable(left.linkClicks, right.linkClicks),
+    landingPageViews: addNullable(left.landingPageViews, right.landingPageViews),
+    formStarts: addNullable(left.formStarts, right.formStarts),
+    instantFormLeads: addNullable(left.instantFormLeads, right.instantFormLeads),
+    websiteLeads: addNullable(left.websiteLeads, right.websiteLeads),
+    callLeads: addNullable(left.callLeads, right.callLeads),
+    sawFormStart: left.sawFormStart || right.sawFormStart,
   };
 }
 
@@ -399,6 +569,49 @@ function frequencyOf(row: InsightRow | undefined): MetricValue {
   const reach = Number(row?.reach ?? 0);
   if (impressions <= 0 || reach <= 0) return null;
   return impressions / reach;
+}
+
+function reachOf(row: InsightRow | undefined): MetricValue {
+  const reach = Number(row?.reach ?? 0);
+  return reach > 0 ? reach : null;
+}
+
+function statusText(status: string | undefined): string {
+  const labels: Record<string, string> = {
+    ACTIVE: "Active",
+    PAUSED: "Paused",
+    CAMPAIGN_PAUSED: "Campaign paused",
+    ADSET_PAUSED: "Ad set paused",
+    PENDING_REVIEW: "In review",
+    DISAPPROVED: "Rejected",
+    WITH_ISSUES: "Has issues",
+    IN_PROCESS: "Processing",
+    PREAPPROVED: "Preapproved",
+    PENDING_BILLING_INFO: "Billing issue",
+    ARCHIVED: "Archived",
+  };
+  if (!status) return "Status unknown";
+  return labels[status] ?? status.replace(/_/g, " ").toLowerCase();
+}
+
+function deliveryReason(node: AdNode, impressions: number): string | null {
+  const status = node.effective_status;
+  const issue = node.issues_info?.find((item) => item.error_summary || item.error_message);
+  const issueText = issue?.error_summary || issue?.error_message || null;
+  const review = node.ad_review_feedback?.global;
+  const reviewText = review ? Object.values(review).filter(Boolean).join(", ") || Object.keys(review).join(", ") : null;
+  if (status === "DISAPPROVED") return reviewText || issueText || "Rejected in review. Meta did not include a reason.";
+  if (status === "PENDING_REVIEW" || status === "IN_PROCESS") return "Still in review, so it is not delivering yet.";
+  if (status === "WITH_ISSUES") return issueText || "Meta marked this ad as having issues.";
+  if (status === "PAUSED") return "The ad is paused.";
+  if (status === "CAMPAIGN_PAUSED") return "The campaign is paused.";
+  if (status === "ADSET_PAUSED") return "The ad set is paused.";
+  if (status === "PENDING_BILLING_INFO") return "The account has a billing issue, so delivery is stopped.";
+  if (status === "PREAPPROVED") return "Preapproved and waiting to deliver.";
+  if ((status === "ACTIVE" || !status) && impressions <= 0) {
+    return "Active, with no impressions in this period. Meta did not return a delivery error. The usual causes are losing the auction, a narrow audience, or the budget going to other ads.";
+  }
+  return issueText;
 }
 
 function formatLabel(objectType: string | undefined, hasVideo: boolean): string {

@@ -19,7 +19,7 @@ export async function readLiveSnapshot(options?: {
   if (options?.maxAgeMs == null) return stored;
   if (snapshotAgeMs(stored) < options.maxAgeMs) return stored;
   try {
-    const snapshot = await pullLiveSnapshot();
+    const snapshot = keepSavedTargets(await pullLiveSnapshot(), stored);
     const saveError = await persistLiveSnapshot(snapshot);
     if (saveError) console.error("Meta ads snapshot was not saved", saveError);
     return snapshot;
@@ -29,8 +29,26 @@ export async function readLiveSnapshot(options?: {
   }
 }
 
+export async function saveMetaAdsTargets(targets: {
+  targetCpl: number | null;
+  targetQualifiedCpl: number | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const snapshot = newerSnapshot(await readDbSnapshot(), newerSnapshot(await readStorageSnapshot(), readFileSnapshot()));
+  if (!snapshot || snapshot.isDemo) {
+    return { ok: false, error: "No live Meta snapshot is saved yet." };
+  }
+  const error = await persistLiveSnapshot({
+    ...snapshot,
+    targetCpl: targets.targetCpl,
+    targetQualifiedCpl: targets.targetQualifiedCpl,
+  });
+  if (error) return { ok: false, error };
+  return { ok: true };
+}
+
 export async function syncLiveSnapshot(): Promise<AccountSnapshot> {
-  const snapshot = await pullLiveSnapshot();
+  const previous = newerSnapshot(await readDbSnapshot(), newerSnapshot(await readStorageSnapshot(), readFileSnapshot()));
+  const snapshot = keepSavedTargets(await pullLiveSnapshot(), previous);
   const saveError = await persistLiveSnapshot(snapshot);
   if (saveError) throw new Error(saveError);
   return snapshot;
@@ -168,6 +186,15 @@ async function readStorageSnapshot(): Promise<AccountSnapshot | null> {
   } catch {
     return null;
   }
+}
+
+function keepSavedTargets(next: AccountSnapshot, previous: AccountSnapshot | null): AccountSnapshot {
+  if (!previous) return next;
+  return {
+    ...next,
+    targetCpl: previous.targetCpl,
+    targetQualifiedCpl: previous.targetQualifiedCpl ?? null,
+  };
 }
 
 function newerSnapshot(a: AccountSnapshot | null, b: AccountSnapshot | null): AccountSnapshot | null {

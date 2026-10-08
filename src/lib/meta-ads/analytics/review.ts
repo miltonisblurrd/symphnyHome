@@ -1,3 +1,13 @@
+import {
+  aggregateBreakdown,
+  decisionFor,
+  DECISION_LABELS,
+  explainPerformance,
+  sampleNote,
+  type AdDecision,
+  type BreakdownTableRow,
+  type ChangeExplanation,
+} from "@/lib/meta-ads/analytics/decision";
 import { detectLeadSignals, LEAD_GEN_GATES } from "@/lib/meta-ads/analytics/signals";
 import {
   calculateCpl,
@@ -16,6 +26,37 @@ export type ReviewBucket = "attention" | "opportunity" | "wait";
 /** What the person making content should do with a creative. */
 export type CreativeAction = "make_more" | "refresh" | "keep" | "wait";
 
+export type DeliveryMetrics = {
+  impressions: number | null;
+  reach: number | null;
+  clicks: number | null;
+  linkClicks: number | null;
+  landingPageViews: number | null;
+  formStarts: number | null;
+  conversionRate: number | null;
+  cpc: number | null;
+  costPerLandingPageView: number | null;
+  instantFormLeads: number | null;
+  websiteLeads: number | null;
+  callLeads: number | null;
+};
+
+export type BreakdownReview = {
+  id: string;
+  title: string;
+  rows: BreakdownTableRow[];
+  previousRows: BreakdownTableRow[];
+};
+
+export type AttributionReview = {
+  window: string;
+  leadSource: string;
+  reportingDelay: string;
+  comparison: string;
+};
+
+export type ChangeInput = Parameters<typeof explainPerformance>[0];
+
 export type CampaignReview = {
   key: string;
   name: string;
@@ -30,6 +71,8 @@ export type CampaignReview = {
   previousCtrLabel: string;
   ctrChangeLabel: string;
   frequencyLabel: string;
+  statusLabel: string;
+  delivery: DeliveryMetrics;
   signals: SignalCode[];
   confidence: ConfidenceLevel;
   title: string;
@@ -70,6 +113,16 @@ export type CreativeReview = {
   frequency: MetricValue;
   previousFrequency: MetricValue;
   dailyCtr: MetricValue[];
+  decision: AdDecision;
+  decisionLabel: string;
+  sampleNote: string | null;
+  primaryText: string | null;
+  creativeHeadline: string | null;
+  callToAction: string | null;
+  launchedOn: string | null;
+  postSourceLabel: string;
+  deliveryReason: string | null;
+  delivery: DeliveryMetrics;
 };
 
 export type DailyPoint = {
@@ -78,6 +131,9 @@ export type DailyPoint = {
   period: "previous" | "current";
   spend: number;
   leads: number;
+  impressions: number;
+  clicks: number;
+  cpl: number | null;
 };
 
 export type KpiReview = {
@@ -107,6 +163,17 @@ export type DemoAccountReview = {
   cplLabel: string;
   targetCpl: number | null;
   targetCplLabel: string;
+  targetQualifiedCpl: number | null;
+  targetQualifiedCplLabel: string;
+  currentStart: string;
+  currentEnd: string;
+  previousStart: string;
+  previousEnd: string;
+  delivery: { current: DeliveryMetrics; previous: DeliveryMetrics };
+  breakdowns: BreakdownReview[];
+  attribution: AttributionReview;
+  explanation: ChangeExplanation;
+  changeInput: ChangeInput;
   syncedLabel: string | null;
   rangeDays: number;
   summary: string;
@@ -165,7 +232,7 @@ export function reviewFromSnapshot(snapshot: AccountSnapshot, windowDays?: 7 | 3
   const currentRange = formatRange(view.dates.slice(split));
   const previousRange = formatRange(view.dates.slice(0, split));
   const period = `${currentRange} compared with ${previousRange}`;
-  const campaigns = view.campaigns.map((campaign) => reviewCampaign(campaign, targetCpl, period));
+  const campaigns = view.campaigns.map((campaign) => reviewCampaign(campaign, targetCpl, period, split, windowDays));
   const daily = dailySeries(view, split);
 
   const current = daily.filter((point) => point.period === "current");
@@ -179,8 +246,49 @@ export function reviewFromSnapshot(snapshot: AccountSnapshot, windowDays?: 7 | 3
 
   const campaignNames = new Map(view.campaigns.map((campaign) => [campaign.key, campaign.name]));
   const creatives = view.ads.map((ad) =>
-    reviewCreative(ad, campaignNames.get(ad.campaignKey) ?? ad.campaignName ?? ad.campaignKey, targetCpl, period),
+    reviewCreative(
+      ad,
+      campaignNames.get(ad.campaignKey) ?? ad.campaignName ?? ad.campaignKey,
+      targetCpl,
+      period,
+      split,
+      windowDays,
+    ),
   );
+  const delivery = accountDelivery(view, split, windowDays);
+  const breakdowns = breakdownReviews(view, split);
+  const currentDates = view.dates.slice(split);
+  const previousDates = view.dates.slice(0, split);
+  const targetQualifiedCpl = view.targetQualifiedCpl ?? null;
+  const changeInput: ChangeInput = {
+    currentLabel: windowDays ? `Last ${windowDays} days` : view.currentLabel,
+    previousLabel: windowDays ? `Previous ${windowDays} days` : view.previousLabel,
+    spend,
+    previousSpend,
+    leads,
+    previousLeads,
+    cpl: blendedCpl,
+    previousCpl,
+    impressions: delivery.current.impressions,
+    previousImpressions: delivery.previous.impressions,
+    ctr: delivery.current.impressions && delivery.current.clicks != null && delivery.current.impressions > 0
+      ? delivery.current.clicks / delivery.current.impressions
+      : null,
+    previousCtr:
+      delivery.previous.impressions && delivery.previous.clicks != null && delivery.previous.impressions > 0
+        ? delivery.previous.clicks / delivery.previous.impressions
+        : null,
+    hasBreakdowns: breakdowns.some((section) => section.rows.length > 0),
+    hasFormStarts: delivery.current.formStarts != null || view.formStartsReported === true,
+    ads: creatives.map((creative) => ({
+      name: creative.name,
+      spend: creative.spend,
+      leads: creative.leads,
+      frequency: creative.frequency,
+      signals: creative.signals,
+      sampleNote: creative.sampleNote,
+    })),
+  };
 
   return {
     isDemo: view.isDemo,
@@ -194,6 +302,17 @@ export function reviewFromSnapshot(snapshot: AccountSnapshot, windowDays?: 7 | 3
     cplLabel: formatMoney(blendedCpl),
     targetCpl,
     targetCplLabel: targetCpl == null ? "Not set" : formatMoney(targetCpl),
+    targetQualifiedCpl,
+    targetQualifiedCplLabel: targetQualifiedCpl == null ? "Not set" : formatMoney(targetQualifiedCpl),
+    currentStart: currentDates[0] ?? "",
+    currentEnd: currentDates[currentDates.length - 1] ?? "",
+    previousStart: previousDates[0] ?? "",
+    previousEnd: previousDates[previousDates.length - 1] ?? "",
+    delivery,
+    breakdowns,
+    attribution: attributionReview(view, delivery.current),
+    explanation: explainPerformance(changeInput, null),
+    changeInput,
     syncedLabel: view.syncedAt
       ? new Date(view.syncedAt).toLocaleString("en-US", {
           timeZone: "America/Los_Angeles",
@@ -249,12 +368,20 @@ function applyWindow(snapshot: AccountSnapshot, windowDays: number): AccountSnap
     const current = totals(dailySpend.slice(split), dailyLeads.slice(split), dailyImpressions.slice(split), dailyClicks.slice(split));
     const previous = totals(dailySpend.slice(0, split), dailyLeads.slice(0, split), dailyImpressions.slice(0, split), dailyClicks.slice(0, split));
     const freq = ad.windowFrequency?.[String(windowDays) as "7" | "30" | "60"];
+    const sliceOptional = <T,>(values: T[] | undefined) =>
+      values && values.length === snapshot.dates.length ? values.slice(start) : values;
     return {
       ...ad,
       dailySpend,
       dailyLeads,
       dailyImpressions,
       dailyClicks,
+      dailyLinkClicks: sliceOptional(ad.dailyLinkClicks),
+      dailyLandingPageViews: sliceOptional(ad.dailyLandingPageViews),
+      dailyFormStarts: sliceOptional(ad.dailyFormStarts),
+      dailyInstantFormLeads: sliceOptional(ad.dailyInstantFormLeads),
+      dailyWebsiteLeads: sliceOptional(ad.dailyWebsiteLeads),
+      dailyCallLeads: sliceOptional(ad.dailyCallLeads),
       dailyCtr: ad.dailyCtr.slice(start),
       spend: current.spend,
       leads: current.leads,
@@ -276,12 +403,19 @@ function applyWindow(snapshot: AccountSnapshot, windowDays: number): AccountSnap
       const dailyClicks = (campaign.dailyClicks ?? []).slice(start);
       const current = totals(dailySpend.slice(split), dailyLeads.slice(split), dailyImpressions.slice(split), dailyClicks.slice(split));
       const previous = totals(dailySpend.slice(0, split), dailyLeads.slice(0, split), dailyImpressions.slice(0, split), dailyClicks.slice(0, split));
+      const freq = campaign.windowFrequency?.[String(windowDays) as "7" | "30" | "60"];
+      const sliceOptional = <T,>(values: T[] | undefined) =>
+        values && values.length === snapshot.dates.length ? values.slice(start) : values;
       return {
         ...campaign,
         dailySpend,
         dailyLeads,
         dailyImpressions,
         dailyClicks,
+        dailyLinkClicks: sliceOptional(campaign.dailyLinkClicks),
+        dailyLandingPageViews: sliceOptional(campaign.dailyLandingPageViews),
+        dailyFormStarts: sliceOptional(campaign.dailyFormStarts),
+        frequency: freq?.current ?? null,
         spend: current.spend,
         leads: current.leads,
         ctr: current.ctr,
@@ -320,6 +454,8 @@ function dailySeries(snapshot: AccountSnapshot, split = PERIOD_SPLIT): DailyPoin
     const leads = fromAccount
       ? fromAccount.leads
       : sum(snapshot.campaigns.map((campaign) => campaign.dailyLeads[index] ?? 0));
+    const impressions = sum(snapshot.campaigns.map((campaign) => campaign.dailyImpressions?.[index] ?? 0));
+    const clicks = sum(snapshot.campaigns.map((campaign) => campaign.dailyClicks?.[index] ?? 0));
     const day = new Date(`${date}T12:00:00`);
     return {
       date,
@@ -327,6 +463,9 @@ function dailySeries(snapshot: AccountSnapshot, split = PERIOD_SPLIT): DailyPoin
       period: index < split ? "previous" : "current",
       spend: Math.round(spend * 100) / 100,
       leads,
+      impressions,
+      clicks,
+      cpl: leads > 0 ? Math.round((spend / leads) * 100) / 100 : null,
     };
   });
 }
@@ -354,6 +493,8 @@ function reviewCreative(
   campaignName: string,
   targetCpl: number | null,
   period: string,
+  split: number,
+  windowDays?: 7 | 30 | 60,
 ): CreativeReview {
   const detected = detectLeadSignals({
     spend: ad.spend,
@@ -367,6 +508,10 @@ function reviewCreative(
   });
 
   const guidance = creativeGuidance(ad, detected, targetCpl, period);
+  const decision = decisionFor({ spend: ad.spend, sufficient: detected.sufficient, signals: detected.signals });
+  const note = ad.spend > 0 ? sampleNote(ad.leads, ad.days, ad.spend) : null;
+  const reachKey = String(windowDays ?? 7) as "7" | "30" | "60";
+  const delivery = deliveryFromSeries(ad, split, ad.frequency, ad.windowReach?.[reachKey]?.current ?? null);
 
   return {
     key: ad.key,
@@ -399,6 +544,16 @@ function reviewCreative(
     frequency: ad.frequency,
     previousFrequency: ad.previousFrequency,
     dailyCtr: ad.dailyCtr,
+    decision,
+    decisionLabel: DECISION_LABELS[decision],
+    sampleNote: note,
+    primaryText: ad.primaryText ?? null,
+    creativeHeadline: ad.creativeHeadline ?? null,
+    callToAction: ad.callToAction ?? null,
+    launchedOn: ad.launchedOn ?? null,
+    postSourceLabel: postSourceLabel(ad.postSource),
+    deliveryReason: ad.deliveryReason ?? (ad.spend <= 0 ? "No delivery reason was saved with this sync." : null),
+    delivery,
   };
 }
 
@@ -471,6 +626,8 @@ function reviewCampaign(
   campaign: SnapshotCampaign,
   targetCpl: number | null,
   period: string,
+  split: number,
+  windowDays?: 7 | 30 | 60,
 ): CampaignReview {
   const detected = detectLeadSignals({
     spend: campaign.spend,
@@ -484,6 +641,13 @@ function reviewCampaign(
   });
 
   const copy = campaignCopy(campaign.name, campaign, detected, targetCpl, period);
+  const reachKey = String(windowDays ?? 7) as "7" | "30" | "60";
+  const delivery = deliveryFromSeries(
+    campaign,
+    split,
+    campaign.frequency,
+    campaign.windowReach?.[reachKey]?.current ?? null,
+  );
 
   return {
     key: campaign.key,
@@ -499,6 +663,8 @@ function reviewCampaign(
     previousCtrLabel: formatRate(campaign.previousCtr),
     ctrChangeLabel: formatChange(detected.ctrChange),
     frequencyLabel: campaign.frequency == null ? "—" : campaign.frequency.toFixed(1),
+    statusLabel: campaign.statusLabel ?? "Status not in this sync",
+    delivery,
     signals: detected.signals,
     confidence: detected.confidence,
     title: copy.title,
@@ -624,7 +790,7 @@ function summaryPoints(
     points.push({
       tone: "neutral",
       label: `${idle} switched on, no spend`,
-      detail: "Turned on in Meta but not delivering in this period.",
+      detail: "Status, launch date, and the delivery reason are in the list below.",
     });
   }
   return points;
@@ -650,4 +816,191 @@ function accountSummary(
   if (wait.length === 1) parts.push(`${wait[0]} does not have enough leads to justify a change.`);
   else if (wait.length) parts.push(`${nameList(wait)} do not have enough leads to justify a change.`);
   return parts.join(" ");
+}
+
+type SeriesEntity = {
+  spend: number;
+  leads: number;
+  dailyImpressions?: number[];
+  dailyClicks?: number[];
+  dailyLinkClicks?: Array<number | null>;
+  dailyLandingPageViews?: Array<number | null>;
+  dailyFormStarts?: Array<number | null>;
+  dailyInstantFormLeads?: Array<number | null>;
+  dailyWebsiteLeads?: Array<number | null>;
+  dailyCallLeads?: Array<number | null>;
+};
+
+function deliveryFromSeries(
+  entity: SeriesEntity,
+  split: number,
+  frequency: MetricValue,
+  reach: MetricValue,
+): DeliveryMetrics {
+  const impressions = sumDense(entity.dailyImpressions, split);
+  const clicks = sumDense(entity.dailyClicks, split);
+  const landingPageViews = sumOptional(entity.dailyLandingPageViews, split);
+  const estimatedReach =
+    reach ?? (impressions != null && frequency != null && frequency > 0 ? impressions / frequency : null);
+  return {
+    impressions,
+    reach: estimatedReach,
+    clicks,
+    linkClicks: sumOptional(entity.dailyLinkClicks, split),
+    landingPageViews,
+    formStarts: sumOptional(entity.dailyFormStarts, split),
+    conversionRate: clicks != null && clicks > 0 ? entity.leads / clicks : null,
+    cpc: clicks != null && clicks > 0 ? entity.spend / clicks : null,
+    costPerLandingPageView:
+      landingPageViews != null && landingPageViews > 0 ? entity.spend / landingPageViews : null,
+    instantFormLeads: sumOptional(entity.dailyInstantFormLeads, split),
+    websiteLeads: sumOptional(entity.dailyWebsiteLeads, split),
+    callLeads: sumOptional(entity.dailyCallLeads, split),
+  };
+}
+
+function accountDelivery(
+  view: AccountSnapshot,
+  split: number,
+  windowDays?: 7 | 30 | 60,
+): { current: DeliveryMetrics; previous: DeliveryMetrics } {
+  const stored = view.accountWindows?.[windowDays ?? 7];
+  if (stored && (stored.current.impressions > 0 || stored.current.spend > 0 || stored.previous.spend > 0)) {
+    return { current: fromAccountPeriod(stored.current), previous: fromAccountPeriod(stored.previous) };
+  }
+  return {
+    current: sumCampaignDelivery(view.campaigns, split),
+    previous: sumCampaignDelivery(view.campaigns, 0, split),
+  };
+}
+
+function fromAccountPeriod(period: {
+  spend: number;
+  impressions: number;
+  reach: number | null;
+  clicks: number;
+  linkClicks: number | null;
+  leads: number;
+  landingPageViews: number | null;
+  formStarts: number | null;
+  instantFormLeads: number | null;
+  websiteLeads: number | null;
+  callLeads: number | null;
+}): DeliveryMetrics {
+  return {
+    impressions: period.impressions,
+    reach: period.reach,
+    clicks: period.clicks,
+    linkClicks: period.linkClicks,
+    landingPageViews: period.landingPageViews,
+    formStarts: period.formStarts,
+    conversionRate: period.clicks > 0 ? period.leads / period.clicks : null,
+    cpc: period.clicks > 0 ? period.spend / period.clicks : null,
+    costPerLandingPageView:
+      period.landingPageViews != null && period.landingPageViews > 0 ? period.spend / period.landingPageViews : null,
+    instantFormLeads: period.instantFormLeads,
+    websiteLeads: period.websiteLeads,
+    callLeads: period.callLeads,
+  };
+}
+
+function sumCampaignDelivery(campaigns: SnapshotCampaign[], start: number, end?: number): DeliveryMetrics {
+  let spend = 0;
+  let leads = 0;
+  let impressions: number | null = null;
+  let clicks: number | null = null;
+  let linkClicks: number | null = null;
+  let landingPageViews: number | null = null;
+  let formStarts: number | null = null;
+  for (const campaign of campaigns) {
+    spend += sumDense(campaign.dailySpend, start, end) ?? 0;
+    leads += sumDense(campaign.dailyLeads, start, end) ?? 0;
+    impressions = addMetric(impressions, sumDense(campaign.dailyImpressions, start, end));
+    clicks = addMetric(clicks, sumDense(campaign.dailyClicks, start, end));
+    linkClicks = addMetric(linkClicks, sumOptional(campaign.dailyLinkClicks, start, end));
+    landingPageViews = addMetric(landingPageViews, sumOptional(campaign.dailyLandingPageViews, start, end));
+    formStarts = addMetric(formStarts, sumOptional(campaign.dailyFormStarts, start, end));
+  }
+  return {
+    impressions,
+    reach: null,
+    clicks,
+    linkClicks,
+    landingPageViews,
+    formStarts,
+    conversionRate: clicks != null && clicks > 0 ? leads / clicks : null,
+    cpc: clicks != null && clicks > 0 ? spend / clicks : null,
+    costPerLandingPageView:
+      landingPageViews != null && landingPageViews > 0 ? spend / landingPageViews : null,
+    instantFormLeads: null,
+    websiteLeads: null,
+    callLeads: null,
+  };
+}
+
+function addMetric(left: number | null, right: number | null): number | null {
+  if (left == null && right == null) return null;
+  return (left ?? 0) + (right ?? 0);
+}
+
+function sumDense(values: Array<number | null> | undefined, start: number, end?: number): number | null {
+  if (!values) return null;
+  return values.slice(start, end).reduce<number>((total, value) => total + (value ?? 0), 0);
+}
+
+function sumOptional(values: Array<number | null> | undefined, start: number, end?: number): number | null {
+  if (!values || values.length === 0) return null;
+  const slice = values.slice(start, end);
+  if (slice.length === 0 || slice.every((value) => value == null)) return null;
+  return slice.reduce<number>((total, value) => total + (value ?? 0), 0);
+}
+
+const BREAKDOWN_TITLES = [
+  ["platform", "Facebook vs Instagram"],
+  ["placement", "Feed, Stories, Reels, and other placements"],
+  ["device", "Device"],
+  ["ageGender", "Age and gender"],
+  ["location", "Location"],
+  ["audience", "Audience"],
+] as const;
+
+function breakdownReviews(view: AccountSnapshot, split: number): BreakdownReview[] {
+  if (!view.breakdownDaily) return [];
+  const current = new Set(view.dates.slice(split));
+  const previous = new Set(view.dates.slice(0, split));
+  return BREAKDOWN_TITLES.map(([id, title]) => ({
+    id,
+    title,
+    rows: aggregateBreakdown(view.breakdownDaily?.[id] ?? [], current),
+    previousRows: aggregateBreakdown(view.breakdownDaily?.[id] ?? [], previous),
+  }));
+}
+
+function attributionReview(view: AccountSnapshot, current: DeliveryMetrics): AttributionReview {
+  return {
+    window: view.attributionSetting
+      ? `Attribution window: ${view.attributionSetting.replaceAll("_", " ")}.`
+      : "Meta did not return an attribution window on this sync. Both periods use the account default. For lead ads that is usually 7-day click and 1-day view.",
+    leadSource: leadSourceCopy(current),
+    reportingDelay:
+      "The latest day is yesterday in the ad account timezone. Meta can keep revising conversions for about 72 hours, so the last few days can still move.",
+    comparison: "Both periods were requested with the same attribution settings, so the comparison uses one definition.",
+  };
+}
+
+function leadSourceCopy(current: DeliveryMetrics): string {
+  const parts: string[] = [];
+  if (current.instantFormLeads) parts.push(`${formatCount(current.instantFormLeads)} from Meta instant forms`);
+  if (current.websiteLeads) parts.push(`${formatCount(current.websiteLeads)} from website forms`);
+  if (current.callLeads) parts.push(`${formatCount(current.callLeads)} from calls`);
+  if (parts.length === 0) {
+    return "Leads are Meta's combined lead result. That total already includes instant-form leads and website leads when Meta reports them. A source split was not in this sync.";
+  }
+  return `The lead total is Meta's combined lead action. Meta also returned ${parts.join(", ")}. Those parts can overlap or fall short of the combined total.`;
+}
+
+function postSourceLabel(source: SnapshotAd["postSource"]): string {
+  if (source === "new_creative") return "New ad creative";
+  if (source === "existing_post") return "Existing post";
+  return "Creative source not returned";
 }

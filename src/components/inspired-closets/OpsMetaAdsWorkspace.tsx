@@ -1,19 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import OpsShell from "@/components/inspired-closets/OpsShell";
 import {
   CplTargetBar,
   CtrSparkline,
-  DailyLeadsChart,
   FrequencyMeter,
+  PerformanceTrend,
 } from "@/components/inspired-closets/MetaAdsCharts";
+import { explainPerformance, type AdDecision } from "@/lib/meta-ads/analytics/decision";
+import type { LeadQualityReport } from "@/lib/meta-ads/analytics/lead-quality";
+import { formatChange, formatMoney, percentChange } from "@/lib/meta-ads/analytics/metrics";
 import { LEAD_GEN_GATES } from "@/lib/meta-ads/analytics/signals";
 import type {
-  CreativeAction,
+  BreakdownReview,
   CreativeReview,
+  DeliveryMetrics,
   DemoAccountReview,
   KpiReview,
 } from "@/lib/meta-ads/analytics/review";
@@ -44,30 +48,38 @@ const SIGNAL_LABELS: Record<SignalCode, string> = {
   NO_ACTION_NEEDED: "No action",
 };
 
-const ACTION_ORDER: CreativeAction[] = ["make_more", "refresh", "keep", "wait"];
-
-const PLAN_COLUMNS: Array<{ id: string; label: string; hint: string; actions: CreativeAction[]; tone: string }> = [
-  { id: "make", label: "Make more like this", hint: "Working. New versions in the same style.", actions: ["make_more"], tone: styles.toneGood },
-  { id: "refresh", label: "Refresh", hint: "Wearing out. Needs a new version.", actions: ["refresh"], tone: styles.toneBad },
-  { id: "leave", label: "Leave alone", hint: "Steady, or not enough leads to change yet.", actions: ["keep", "wait"], tone: styles.toneNeutral },
+const DECISION_COLUMNS: Array<{ id: AdDecision; label: string; hint: string; tone: string }> = [
+  { id: "keep", label: "Keep running", hint: "Working, or steady enough to leave on.", tone: styles.toneGood },
+  { id: "watch", label: "Watch", hint: "Below the 5-lead, 7-day, or $100 minimum.", tone: styles.toneNeutral },
+  { id: "test", label: "Test a variation", hint: "Something moved. Try a new opening before replacing it.", tone: styles.toneWatch },
+  { id: "replace", label: "Consider replacing", hint: "Weak enough to plan a different ad.", tone: styles.toneBad },
 ];
 
-const ACTION_TONE: Record<CreativeAction, string> = {
-  make_more: styles.toneGood,
-  refresh: styles.toneBad,
-  keep: styles.toneNeutral,
-  wait: styles.toneNeutral,
+const DECISION_TONE: Record<AdDecision, string> = {
+  keep: styles.toneGood,
+  watch: styles.toneNeutral,
+  test: styles.toneWatch,
+  replace: styles.toneBad,
 };
 
-export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountReview }) {
+export default function OpsMetaAdsWorkspace({
+  review,
+  leadQuality,
+}: {
+  review: DemoAccountReview;
+  leadQuality: LeadQualityReport;
+}) {
   const router = useRouter();
   useEffect(() => {
     const id = window.setInterval(() => router.refresh(), 60 * 60 * 1000);
     return () => window.clearInterval(id);
   }, [router]);
 
+  const explanation = explainPerformance(review.changeInput, leadQuality);
   const sorted = [...review.creatives].sort(
-    (a, b) => ACTION_ORDER.indexOf(a.action) - ACTION_ORDER.indexOf(b.action) || b.spend - a.spend,
+    (a, b) =>
+      DECISION_COLUMNS.findIndex((column) => column.id === a.decision) -
+        DECISION_COLUMNS.findIndex((column) => column.id === b.decision) || b.spend - a.spend,
   );
   const creatives = sorted.filter((creative) => creative.spend > 0);
   const idle = sorted.filter((creative) => creative.spend <= 0);
@@ -117,13 +129,13 @@ export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountRev
             </ul>
           </div>
           <div className={styles.planGrid}>
-            {PLAN_COLUMNS.map((column) => (
+            {DECISION_COLUMNS.map((column) => (
               <PlanColumn
                 key={column.id}
                 label={column.label}
                 hint={column.hint}
                 tone={column.tone}
-                items={creatives.filter((creative) => column.actions.includes(creative.action))}
+                items={sorted.filter((creative) => creative.decision === column.id)}
               />
             ))}
           </div>
@@ -132,24 +144,42 @@ export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountRev
         <AdsAnalystChat rangeDays={review.isDemo ? 7 : (review.rangeDays as 7 | 30 | 60)} />
 
         <div className={styles.kpiGrid}>
-          {review.kpis.map((kpi) => (
+          {summaryKpis(review, leadQuality).map((kpi) => (
             <Kpi key={kpi.label} kpi={kpi} />
           ))}
+          <TargetEditor
+            targetCpl={review.targetCpl}
+            targetQualifiedCpl={review.targetQualifiedCpl}
+            disabled={review.isDemo}
+          />
         </div>
+        <p className={styles.body}>{leadQuality.available ? leadQuality.sourceNote : leadQuality.reason}</p>
+
+        <LeadQualityPanel quality={leadQuality} />
 
         <section className={styles.panel}>
           <div className={styles.chartHead}>
             <div>
-              <p className={styles.kicker}>Leads per day</p>
-              <p className={styles.body}>Every campaign combined. Hover a bar for spend.</p>
+              <p className={styles.kicker}>Trend</p>
+              <p className={styles.body}>Spend, leads, and cost per lead. The comparison line is {review.previousRange}.</p>
             </div>
             <div className={styles.legend}>
               <span><i className={styles.legendMuted} /> {review.previousRange}</span>
               <span><i className={styles.legendInk} /> {review.currentRange}</span>
             </div>
           </div>
-          <DailyLeadsChart points={review.daily} />
+          <PerformanceTrend points={review.daily} />
         </section>
+
+        <WhyChanged explanation={explanation} />
+
+        <DecisionTable creatives={sorted} />
+
+        <FunnelTable title="Delivery and funnel, by ad" rows={funnelRows(sorted)} />
+
+        <Breakdowns sections={review.breakdowns} synced={review.breakdowns.length > 0} />
+
+        <AttributionPanel attribution={review.attribution} />
 
         <section className={styles.section}>
           <div className={styles.sectionHead}>
@@ -172,52 +202,82 @@ export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountRev
         </section>
 
         {idle.length ? (
-          <section className={styles.panel}>
-            <p className={styles.kicker}>Switched on, no spend</p>
+          <section id="no-spend" className={styles.panel}>
+            <p className={styles.kicker}>No spend in this period</p>
             <p className={styles.body}>
-              These {idle.length} ads are turned on in Meta but did not deliver in this period, so there is nothing to judge yet.
+              Status, whether Meta served any impressions, the launch date, and the delivery reason when Meta returned one.
             </p>
-            <ul className={styles.idleList}>
-              {idle.map((creative) => (
-                <li key={creative.key} className={styles.idleItem}>
-                  {creative.image ? <img src={creative.image} alt="" className={styles.planThumb} /> : null}
-                  <span>
-                    <span className={styles.planItemName}>{creative.name}</span>
-                    <span className={styles.planItemMeta}>{creative.campaignName}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className={styles.tableScroll}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Ad</th>
+                    <th>Status</th>
+                    <th>Impressions</th>
+                    <th>Turned on</th>
+                    <th>Why there was no delivery</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {idle.map((creative) => (
+                    <tr key={creative.key}>
+                      <td>
+                        <span className={styles.planItemName}>{creative.name}</span>
+                        <span className={styles.planItemMeta}>{creative.campaignName}</span>
+                      </td>
+                      <td>{creative.statusLabel}</td>
+                      <td className={styles.num}>{formatCount(creative.delivery.impressions)}</td>
+                      <td>{creative.launchedOn ?? "Not in this sync"}</td>
+                      <td>{creative.deliveryReason ?? "Meta did not return a reason."}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         ) : null}
 
         <section className={styles.panel}>
           <p className={styles.kicker}>Campaign budgets</p>
           <p className={styles.body}>For whoever sets spend in Ads Manager. Budget changes are suggestions only.</p>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Campaign</th>
-                <th>Spend</th>
-                <th>Leads</th>
-                <th>Cost per lead</th>
-                <th>Suggestion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {review.campaigns.map((campaign) => (
-                <tr key={campaign.key}>
-                  <td>{campaign.name}</td>
-                  <td>{campaign.spend.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
-                  <td>{campaign.leads}</td>
-                  <td>
-                    {campaign.previousCplLabel} → {campaign.cplLabel}
-                  </td>
-                  <td>{campaign.recommendation}</td>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Campaign</th>
+                  <th>Status</th>
+                  <th>Spend</th>
+                  <th>Impressions</th>
+                  <th>Reach</th>
+                  <th>Clicks</th>
+                  <th>CTR</th>
+                  <th>Leads</th>
+                  <th>Cost per lead</th>
+                  <th>Frequency</th>
+                  <th>Suggestion</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {review.campaigns.map((campaign) => (
+                  <tr key={campaign.key}>
+                    <td>{campaign.name}</td>
+                    <td>{campaign.statusLabel}</td>
+                    <td className={styles.num}>{usd(campaign.spend)}</td>
+                    <td className={styles.num}>{formatCount(campaign.delivery.impressions)}</td>
+                    <td className={styles.num}>{formatCount(campaign.delivery.reach)}</td>
+                    <td className={styles.num}>{formatCount(campaign.delivery.clicks)}</td>
+                    <td className={styles.num}>{campaign.ctrLabel}</td>
+                    <td className={styles.num}>{campaign.leads}</td>
+                    <td>
+                      {campaign.previousCplLabel} → {campaign.cplLabel}
+                    </td>
+                    <td className={styles.num}>{campaign.frequencyLabel}</td>
+                    <td>{campaign.recommendation}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
     </OpsShell>
@@ -225,6 +285,464 @@ export default function OpsMetaAdsWorkspace({ review }: { review: DemoAccountRev
 }
 
 const PLAN_PREVIEW = 4;
+
+function usd(value: number): string {
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+function formatCount(value: number | null): string {
+  if (value == null) return "—";
+  return Number.isInteger(value) ? Math.round(value).toLocaleString("en-US") : value.toFixed(1);
+}
+
+function formatRate(value: number | null): string {
+  if (value == null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 2 }).format(value);
+}
+
+function summaryKpis(review: DemoAccountReview, quality: LeadQualityReport): KpiReview[] {
+  const spend = review.kpis.find((kpi) => kpi.label === "Spend");
+  const leads = review.kpis.find((kpi) => kpi.label === "Leads");
+  const cpl = review.kpis.find((kpi) => kpi.label === "Cost per lead");
+  const currentSpend = review.changeInput.spend;
+  const previousSpend = review.changeInput.previousSpend;
+  return [
+    leads ?? metricCard("Leads", review.changeInput.leads, review.changeInput.previousLeads, (value) => String(value), "higher"),
+    countCard("Qualified leads", quality.current.qualified, quality.previous.qualified, "higher"),
+    countCard("Appointments", quality.current.appointments, quality.previous.appointments, "higher"),
+    countCard("Customers", quality.current.customers, quality.previous.customers, "higher"),
+    spend ?? metricCard("Spend", currentSpend, previousSpend, (value) => formatMoney(value), "neutral"),
+    cpl ?? metricCard("Cost per lead", review.changeInput.cpl, review.changeInput.previousCpl, (value) => formatMoney(value), "lower"),
+    rateCard("Cost per qualified lead", currentSpend, previousSpend, quality.current.qualified, quality.previous.qualified),
+    rateCard("Cost per appointment", currentSpend, previousSpend, quality.current.appointments, quality.previous.appointments),
+  ];
+}
+
+function countCard(
+  label: string,
+  current: number | null,
+  previous: number | null,
+  goal: "higher" | "lower" | "neutral",
+): KpiReview {
+  if (current == null || previous == null) {
+    return { label, value: "—", previous: "—", changeLabel: "CRM not linked", direction: "unknown" };
+  }
+  return metricCard(label, current, previous, (value) => String(value), goal);
+}
+
+function rateCard(
+  label: string,
+  spend: number,
+  previousSpend: number,
+  count: number | null,
+  previousCount: number | null,
+): KpiReview {
+  if (count == null || previousCount == null) {
+    return { label, value: "—", previous: "—", changeLabel: "Needs CRM counts", direction: "unknown" };
+  }
+  const current = count > 0 ? spend / count : null;
+  const previous = previousCount > 0 ? previousSpend / previousCount : null;
+  return metricCard(label, current, previous, (value) => formatMoney(value), "lower");
+}
+
+function metricCard(
+  label: string,
+  current: number | null,
+  previous: number | null,
+  format: (value: number) => string,
+  goal: "higher" | "lower" | "neutral",
+): KpiReview {
+  const change = percentChange(current, previous);
+  let direction: KpiReview["direction"] = "unknown";
+  if (change != null) {
+    if (Math.abs(change) < 0.02 || goal === "neutral") direction = "flat";
+    else if (goal === "higher") direction = change > 0 ? "better" : "worse";
+    else direction = change < 0 ? "better" : "worse";
+  }
+  return {
+    label,
+    value: current == null ? "—" : format(current),
+    previous: previous == null ? "—" : format(previous),
+    changeLabel: formatChange(change),
+    direction,
+  };
+}
+
+function LeadQualityPanel({ quality }: { quality: LeadQualityReport }) {
+  const rows = [
+    ["Duplicates", quality.current.duplicates],
+    ["Spam", quality.current.spam],
+    ["Unreachable", quality.current.unreachable],
+    ["Still new", quality.current.unresolved],
+    ["Not qualified", quality.current.notQualified],
+    [
+      "Revenue",
+      quality.current.revenueCents == null ? null : quality.current.revenueCents / 100,
+    ],
+  ] as const;
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>Lead quality</p>
+      <p className={styles.body}>
+        Qualified means the office kept the lead: it is not junk, not a duplicate, and not still unanswered. Appointments are scheduled, rescheduled, or booked and then canceled. Customers are sold, signed, or converted to a job. Revenue is the sold amount on those leads, for the whole account.
+      </p>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>This period</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, value]) => (
+              <tr key={label}>
+                <td>{label}</td>
+                <td className={styles.num}>
+                  {value == null ? "—" : label === "Revenue" ? formatMoney(value) : String(value)}
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td>Revenue by ad</td>
+              <td>Not available. No Meta ad id is stored on the lead.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function WhyChanged({ explanation }: { explanation: ReturnType<typeof explainPerformance> }) {
+  const blocks = [
+    ["Observed", explanation.observed],
+    ["Likely possibilities", explanation.possible],
+    ["Not proven", explanation.notProven],
+    ["Next check", explanation.nextCheck],
+  ] as const;
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>Why performance changed</p>
+      <div className={styles.whyGrid}>
+        {blocks.map(([title, lines]) => (
+          <div key={title}>
+            <p className={styles.planLabel}>{title}</p>
+            <ul className={styles.whyList}>
+              {lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DecisionTable({ creatives }: { creatives: CreativeReview[] }) {
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>Ad decisions</p>
+      <p className={styles.body}>
+        A recommendation waits for {LEAD_GEN_GATES.minimumDays} days, {LEAD_GEN_GATES.minimumLeads} leads, and {formatMoney(LEAD_GEN_GATES.minimumSpend)} of spend.
+      </p>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Ad</th>
+              <th>Spend</th>
+              <th>Leads</th>
+              <th>CPL</th>
+              <th>CTR</th>
+              <th>Frequency</th>
+              <th>Qualified leads</th>
+              <th>Status</th>
+              <th>Confidence</th>
+              <th>Recommendation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {creatives.map((creative) => (
+              <tr key={creative.key}>
+                <td>
+                  {creative.spend > 0 ? (
+                    <a href={`#creative-${creative.key}`} className={styles.planItemName}>
+                      {creative.name}
+                    </a>
+                  ) : (
+                    <span className={styles.planItemName}>{creative.name}</span>
+                  )}
+                  {creative.sampleNote ? <span className={styles.sampleNote}>{creative.sampleNote}</span> : null}
+                </td>
+                <td className={styles.num}>{usd(creative.spend)}</td>
+                <td className={styles.num}>{creative.leads}</td>
+                <td className={styles.num}>{creative.cplLabel}</td>
+                <td className={styles.num}>{creative.ctrLabel}</td>
+                <td className={styles.num}>{creative.frequency == null ? "—" : creative.frequency.toFixed(1)}</td>
+                <td title="The CRM does not store which ad a lead came from.">—</td>
+                <td>{creative.statusLabel}</td>
+                <td>{creative.confidence.toLowerCase()}</td>
+                <td>
+                  {creative.decisionLabel}
+                  <span className={styles.planItemMeta}>{creative.contentDirection}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function funnelRows(creatives: CreativeReview[]) {
+  return creatives.map((creative) => ({
+    key: creative.key,
+    name: creative.name,
+    delivery: creative.delivery,
+    ctr: creative.ctrLabel,
+    frequency: creative.frequency,
+    leads: creative.leads,
+  }));
+}
+
+function FunnelTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ key: string; name: string; delivery: DeliveryMetrics; ctr: string; frequency: number | null; leads: number }>;
+}) {
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>{title}</p>
+      <p className={styles.body}>
+        Clicks are all clicks until a sync includes link clicks. Form starts stay blank when Meta does not report that action. Conversion rate is leads divided by clicks.
+      </p>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Ad</th>
+              <th>Impressions</th>
+              <th>Reach</th>
+              <th>Frequency</th>
+              <th>Clicks</th>
+              <th>Link clicks</th>
+              <th>CTR</th>
+              <th>Landing page views</th>
+              <th>Form starts</th>
+              <th>Leads</th>
+              <th>Conv. rate</th>
+              <th>CPC</th>
+              <th>Cost / landing page view</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td>{row.name}</td>
+                <td className={styles.num}>{formatCount(row.delivery.impressions)}</td>
+                <td className={styles.num}>{formatCount(row.delivery.reach)}</td>
+                <td className={styles.num}>{row.frequency == null ? "—" : row.frequency.toFixed(1)}</td>
+                <td className={styles.num}>{formatCount(row.delivery.clicks)}</td>
+                <td className={styles.num}>{formatCount(row.delivery.linkClicks)}</td>
+                <td className={styles.num}>{row.ctr}</td>
+                <td className={styles.num}>{formatCount(row.delivery.landingPageViews)}</td>
+                <td className={styles.num}>{formatCount(row.delivery.formStarts)}</td>
+                <td className={styles.num}>{row.leads}</td>
+                <td className={styles.num}>{formatRate(row.delivery.conversionRate)}</td>
+                <td className={styles.num}>{row.delivery.cpc == null ? "—" : formatMoney(row.delivery.cpc)}</td>
+                <td className={styles.num}>
+                  {row.delivery.costPerLandingPageView == null ? "—" : formatMoney(row.delivery.costPerLandingPageView)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function funnelSentence(delivery: DeliveryMetrics): string {
+  return [
+    `${formatCount(delivery.impressions)} impressions`,
+    `${formatCount(delivery.reach)} reach`,
+    `${formatCount(delivery.clicks)} clicks`,
+    `${formatCount(delivery.linkClicks)} link clicks`,
+    `${formatCount(delivery.landingPageViews)} landing-page views`,
+    `${formatCount(delivery.formStarts)} form starts`,
+    `${formatRate(delivery.conversionRate)} click-to-lead`,
+    delivery.cpc == null ? "—" : `${formatMoney(delivery.cpc)} CPC`,
+  ].join(" · ");
+}
+
+function breakdownLines(section: BreakdownReview) {
+  const current = new Map(section.rows.map((row) => [row.label, row]));
+  const previous = new Map(section.previousRows.map((row) => [row.label, row]));
+  const labels = [...new Set([...current.keys(), ...previous.keys()])];
+  return labels
+    .map((label) => {
+      const row = current.get(label);
+      return {
+        label,
+        spend: row?.spend ?? 0,
+        previousSpend: previous.get(label)?.spend ?? 0,
+        impressions: row?.impressions ?? 0,
+        clicks: row?.clicks ?? 0,
+        ctr: row?.ctr ?? null,
+        leads: row?.leads ?? 0,
+        cpl: row?.cpl ?? null,
+      };
+    })
+    .sort((a, b) => b.spend - a.spend || b.previousSpend - a.previousSpend);
+}
+
+function Breakdowns({ sections, synced }: { sections: BreakdownReview[]; synced: boolean }) {
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>Audience and placement</p>
+      <p className={styles.body}>
+        {synced
+          ? "Audience is the ad set name. Reach is left off these tables because daily reach would count the same person more than once."
+          : "Placement, device, age, gender, and location are not in this snapshot yet. They are requested on the next Meta sync. Until then, a drop cannot be separated into creative versus where the ads ran."}
+      </p>
+      {sections.map((section) => (
+        <div key={section.id} className={styles.breakdownBlock}>
+          <p className={styles.planLabel}>{section.title}</p>
+          {section.rows.length === 0 && section.previousRows.length === 0 ? (
+            <p className={styles.emptyNote}>No rows for this period.</p>
+          ) : (
+            <div className={styles.tableScroll}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>{section.title}</th>
+                    <th>Spend</th>
+                    <th>Previous spend</th>
+                    <th>Impressions</th>
+                    <th>Clicks</th>
+                    <th>CTR</th>
+                    <th>Leads</th>
+                    <th>CPL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {breakdownLines(section).map((row) => (
+                    <tr key={row.label}>
+                      <td>{row.label}</td>
+                      <td className={styles.num}>{formatMoney(row.spend)}</td>
+                      <td className={styles.num}>{formatMoney(row.previousSpend)}</td>
+                      <td className={styles.num}>{formatCount(row.impressions)}</td>
+                      <td className={styles.num}>{formatCount(row.clicks)}</td>
+                      <td className={styles.num}>{formatRate(row.ctr)}</td>
+                      <td className={styles.num}>{formatCount(row.leads)}</td>
+                      <td className={styles.num}>{row.cpl == null ? "—" : formatMoney(row.cpl)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function AttributionPanel({ attribution }: { attribution: DemoAccountReview["attribution"] }) {
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>Attribution and what a lead means</p>
+      <ul className={styles.whyList}>
+        <li>{attribution.window}</li>
+        <li>{attribution.leadSource}</li>
+        <li>{attribution.reportingDelay}</li>
+        <li>{attribution.comparison}</li>
+      </ul>
+    </section>
+  );
+}
+
+function TargetEditor({
+  targetCpl,
+  targetQualifiedCpl,
+  disabled,
+}: {
+  targetCpl: number | null;
+  targetQualifiedCpl: number | null;
+  disabled: boolean;
+}) {
+  const router = useRouter();
+  const [cpl, setCpl] = useState(targetCpl == null ? "" : String(targetCpl));
+  const [qualified, setQualified] = useState(targetQualifiedCpl == null ? "" : String(targetQualifiedCpl));
+  const [status, setStatus] = useState<string | null>(targetCpl == null ? "No target is saved." : null);
+  const [pending, setPending] = useState(false);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (disabled || pending) return;
+    const parsed = {
+      targetCpl: parseTarget(cpl),
+      targetQualifiedCpl: parseTarget(qualified),
+    };
+    if (parsed.targetCpl === "invalid" || parsed.targetQualifiedCpl === "invalid") {
+      setStatus("Enter a dollar amount, or leave a field blank to clear it.");
+      return;
+    }
+    setPending(true);
+    setStatus(null);
+    try {
+      const response = await fetch("/api/inspired-closets/ops/ads/target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const body = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !body.ok) {
+        setStatus(body.error ?? "The target could not be saved.");
+        return;
+      }
+      setStatus("Saved.");
+      router.refresh();
+    } catch {
+      setStatus("The target could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className={styles.panel}>
+      <p className={styles.kicker}>CPL target</p>
+      <form className={styles.targetForm} onSubmit={(event) => void save(event)}>
+        <label>
+          Cost per lead
+          <input value={cpl} onChange={(event) => setCpl(event.target.value)} inputMode="decimal" disabled={disabled || pending} placeholder="Not set" />
+        </label>
+        <label>
+          Cost per qualified lead
+          <input value={qualified} onChange={(event) => setQualified(event.target.value)} inputMode="decimal" disabled={disabled || pending} placeholder="Not set" />
+        </label>
+        <button type="submit" disabled={disabled || pending}>
+          {disabled ? "Demo" : pending ? "Saving" : "Save"}
+        </button>
+      </form>
+      {status ? <p className={styles.vizNote}>{status}</p> : null}
+    </section>
+  );
+}
+
+function parseTarget(value: string): number | null | "invalid" {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const amount = Number(trimmed.replace(/[$,]/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 10000) return "invalid";
+  return Math.round(amount * 100) / 100;
+}
 
 function PlanColumn({
   label,
@@ -255,12 +773,12 @@ function PlanColumn({
         <ul className={styles.planList}>
           {shown.map((creative) => (
             <li key={creative.key}>
-              <a href={`#creative-${creative.key}`} className={styles.planItem}>
+              <a href={creative.spend > 0 ? `#creative-${creative.key}` : "#no-spend"} className={styles.planItem}>
                 {creative.image ? <img src={creative.image} alt="" className={styles.planThumb} /> : null}
                 <span>
                   <span className={styles.planItemName}>{creative.name}</span>
                   <span className={styles.planItemMeta}>
-                    {creative.cpl == null ? `${creative.leads} leads` : `${creative.cplLabel} per lead`}
+                    {creative.sampleNote ?? creative.contentDirection}
                   </span>
                 </span>
               </a>
@@ -371,14 +889,20 @@ function Kpi({ kpi }: { kpi: KpiReview }) {
       <p className={styles.kicker}>{kpi.label}</p>
       <p className={styles.metric}>{kpi.value}</p>
       <p className={styles.body}>
-        <span className={`${styles.change} ${tone}`}>{kpi.changeLabel}</span> vs {kpi.previous} in the previous period
+        {kpi.value === "—" && kpi.direction === "unknown" ? (
+          kpi.changeLabel
+        ) : (
+          <>
+            <span className={`${styles.change} ${tone}`}>{kpi.changeLabel}</span> vs {kpi.previous} in the previous period
+          </>
+        )}
       </p>
     </section>
   );
 }
 
 function CreativeCard({ creative, targetCpl }: { creative: CreativeReview; targetCpl: number | null }) {
-  const tone = ACTION_TONE[creative.action];
+  const tone = DECISION_TONE[creative.decision];
   return (
     <article id={`creative-${creative.key}`} className={`${styles.creative} ${tone}`}>
       <div className={styles.creativeMedia}>
@@ -401,7 +925,7 @@ function CreativeCard({ creative, targetCpl }: { creative: CreativeReview; targe
 
       <div className={styles.creativeBody}>
         <div className={styles.creativeTop}>
-          <span className={styles.actionChip}>{creative.actionLabel}</span>
+          <span className={styles.actionChip}>{creative.decisionLabel}</span>
           <span className={styles.confidence}>{creative.confidence.toLowerCase()} confidence</span>
         </div>
         <h3 className={styles.cardTitle}>{creative.name}</h3>
@@ -409,6 +933,36 @@ function CreativeCard({ creative, targetCpl }: { creative: CreativeReview; targe
           {creative.statusLabel} · {creative.angle} · running {creative.runningDays} days · {creative.campaignName}
         </p>
         <p className={styles.creativeHeadline}>{creative.headline}</p>
+        {creative.sampleNote ? <p className={styles.sampleNote}>{creative.sampleNote}</p> : null}
+        <dl className={styles.copyList}>
+          <div>
+            <dt>Primary text</dt>
+            <dd>{creative.primaryText ?? "Not in this sync"}</dd>
+          </div>
+          <div>
+            <dt>Headline</dt>
+            <dd>{creative.creativeHeadline ?? "Not in this sync"}</dd>
+          </div>
+          <div>
+            <dt>Call to action</dt>
+            <dd>{creative.callToAction ?? "Not in this sync"}</dd>
+          </div>
+          <div>
+            <dt>Type</dt>
+            <dd>{creative.format}</dd>
+          </div>
+          <div>
+            <dt>Launched</dt>
+            <dd>{creative.launchedOn ?? "Not in this sync"}</dd>
+          </div>
+          <div>
+            <dt>Post</dt>
+            <dd>{creative.postSourceLabel}</dd>
+          </div>
+        </dl>
+        <p className={styles.vizNote}>
+          {funnelSentence(creative.delivery)} Qualified leads for this ad are not available. The CRM does not store a Meta ad id.
+        </p>
 
         <div className={styles.vizGrid}>
           <div>
